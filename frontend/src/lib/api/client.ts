@@ -117,27 +117,91 @@ export interface ReportSummary {
 }
 
 export interface ReportDetail {
-	id?: string;
-	summary?: ReportSummary['summary'] & {
-		issues_found?: number;
-		thresholds?: Record<string, unknown>;
-		generated_at?: string;
-		created_at?: string;
-	};
-	findings?: Array<Record<string, unknown>>;
+    id?: string;
+    summary?: ReportSummary['summary'] & {
+        issues_found?: number;
+        thresholds?: Record<string, unknown>;
+        generated_at?: string;
+        created_at?: string;
+    };
+    findings?: Array<Record<string, unknown>>;
 }
 
 export async function listReports(
-	fetchFn: typeof fetch,
-	token: string,
-	limit = 20
+    fetchFn: typeof fetch,
+    token: string,
+    limit = 20
 ): Promise<ReportSummary[]> {
-	return apiFetch<ReportSummary[]>(fetchFn, '/reports', {
-		token,
-		searchParams: { limit }
-	});
+    return apiFetch<ReportSummary[]>(fetchFn, '/reports', {
+        token,
+        searchParams: { limit }
+    });
 }
 
 export async function getReport(fetchFn: typeof fetch, token: string, id: string): Promise<ReportDetail> {
-	return apiFetch<ReportDetail>(fetchFn, `/reports/${id}`, { token });
+    return apiFetch<ReportDetail>(fetchFn, `/reports/${id}`, { token });
+}
+
+export interface KnowledgeItem {
+    source: string;
+    content: string;
+    score: number;
+}
+
+export async function searchKnowledge(
+    fetchFn: typeof fetch,
+    query: string,
+    topK = 3
+): Promise<KnowledgeItem[]> {
+    const response = await apiFetch<{ items: KnowledgeItem[] }>(fetchFn, '/knowledge/search', {
+        searchParams: { q: query, top_k: topK }
+    });
+    return response.items;
+}
+
+export interface LLMSettingsResponse {
+    provider?: string;
+    model?: string | null;
+    enable_explanations?: boolean;
+    enable_patches?: boolean;
+    api_base?: string | null;
+    api_version?: string | null;
+    deployment_name?: string | null;
+}
+
+export async function getLLMSettings(fetchFn: typeof fetch, token: string): Promise<LLMSettingsResponse> {
+    return apiFetch<LLMSettingsResponse>(fetchFn, '/settings/llm', { token });
+}
+
+export async function saveLLMSettings(
+    fetchFn: typeof fetch,
+    token: string,
+    payload: LLMSettingsResponse
+): Promise<{ status: string }> {
+    return apiFetch(fetchFn, '/settings/llm', {
+        method: 'POST',
+        token,
+        body: payload
+    });
+}
+
+export interface LLMTestResult {
+    ok: boolean;
+    stage: string;
+    provider?: string;
+    model?: string;
+    response?: unknown;
+    error?: string;
+}
+
+export async function testLLMSettings(
+    fetchFn: typeof fetch,
+    token: string,
+    live = false
+): Promise<LLMTestResult> {
+    return apiFetch(fetchFn, '/settings/llm/test', {
+        method: 'POST',
+        token,
+        body: { live }
+    });
 }
