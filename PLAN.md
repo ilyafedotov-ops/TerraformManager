@@ -103,6 +103,7 @@
 - ✅ Review tab posts multipart uploads to the new `/scan/upload` endpoint and renders live severity summaries plus artifact download links.
 - ✅ Knowledge tab now calls `/knowledge/search`, delivering real RAG snippets with score metadata and quick links to Markdown docs.
 - ✅ LLM settings page reads/writes `/settings/llm`, supports configuration validation, and exposes live ping feedback.
+- ✅ Knowledge tab now includes manual sync controls for `/knowledge/sync`, enabling GitHub Markdown ingestion without leaving the app.
 - ✅ First generator (AWS S3 baseline) now available via `/generators/aws/s3` and a SvelteKit form with direct download/copy helpers.
 - 🔄 Next: hook generator/review forms to new FastAPI endpoints, embed report viewer tables, and surface knowledge/doc metrics once APIs are exposed.
 

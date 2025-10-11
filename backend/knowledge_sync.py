@@ -25,17 +25,13 @@ def _gh_zip_url(repo_url: str) -> Optional[str]:
     try:
         if "github.com" not in repo_url:
             return None
-        parts = repo_url.strip("/").split("/")
-        # https://github.com/owner/repo
-        if len(parts) < 5:
-            owner = parts[-2]
-            repo = parts[-1]
-            branch = "main"
-        else:
-            owner = parts[-4]
-            repo = parts[-3]
-            # e.g., tree/main
-            branch = parts[-1]
+        cleaned = repo_url.split('?')[0].rstrip('/')
+        parts = cleaned.split('/')
+        owner = parts[parts.index('github.com') + 1]
+        repo = parts[parts.index('github.com') + 2]
+        branch = 'main'
+        if 'tree' in parts:
+            branch = parts[parts.index('tree') + 1]
         return f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{branch}"
     except Exception:
         return None
@@ -102,4 +98,3 @@ def sync_many(sources: Iterable[str], dest_root: Path = DEFAULT_DEST) -> List[Sy
         except Exception as exc:
             results.append(SyncResult(source=src, dest_dir=dest_root, files=[], note=f"error: {exc}"))
     return results
-
