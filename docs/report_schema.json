@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Terraform Review Findings",
+  "type": "object",
+  "definitions": {
+    "aiAttribution": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "cached": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ]
+    },
+    "llm": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "explanations_enabled": {
+          "type": "boolean"
+        },
+        "explanations_requested": {
+          "type": "integer"
+        },
+        "explanations_completed": {
+          "type": "integer"
+        },
+        "patches_enabled": {
+          "type": "boolean"
+        },
+        "patches_requested": {
+          "type": "integer"
+        },
+        "patches_completed": {
+          "type": "integer"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "properties": {
+    "summary": {
+      "type": "object",
+      "properties": {
+        "files_scanned": {
+          "type": "integer"
+        },
+        "issues_found": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "files_scanned",
+        "issues_found"
+      ]
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "CRITICAL"
+            ]
+          },
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "rule": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "explanation": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "suggested_fix_snippet": {
+            "type": "string"
+          },
+          "unified_diff": {
+            "type": "string"
+          },
+          "explanation_ai": {
+            "type": "object",
+            "properties": {
+              "attribution": {
+                "$ref": "#/definitions/aiAttribution"
+              },
+              "why": {
+                "type": "string"
+              },
+              "impact": {
+                "type": "string"
+              },
+              "how_to_fix": {
+                "type": "string"
+              },
+              "example_diff": {
+                "type": "string"
+              },
+              "kb_refs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "attribution"
+            ]
+          },
+          "patch_ai": {
+            "type": "object",
+            "properties": {
+              "attribution": {
+                "$ref": "#/definitions/aiAttribution"
+              },
+              "summary": {
+                "type": "string"
+              },
+              "diff": {
+                "type": "string"
+              },
+              "validation": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string"
+                  },
+                  "details": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "required": [
+              "attribution"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "severity",
+          "file",
+          "rule",
+          "description"
+        ]
+      }
+    }
+  },
+  "required": [
+    "summary",
+    "findings"
+  ]
+}

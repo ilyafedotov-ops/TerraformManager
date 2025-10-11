@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block breadcrumbs %}
+  <div class="text-xs font-semibold uppercase tracking-widest text-blueGray-400">
+    <a class="hover:text-blue-500" href="/ui/dashboard">Home</a>
+    <span class="px-2 text-blueGray-300">/</span>
+    <span class="text-blue-500">Knowledge</span>
+  </div>
+{% endblock %}
+
+{% block page_header %}
+  <h1 class="text-3xl font-bold leading-tight">Knowledge</h1>
+  <p class="mt-2 max-w-2xl text-sm font-medium text-blue-100">
+    Sync Markdown guides from GitHub repositories to enrich the reviewer’s retrieval-augmented responses.
+  </p>
+{% endblock %}
+
+{% block hero_actions %}
+  <a
+    href="/docs"
+    class="inline-flex items-center gap-2 rounded-xl bg-white/15 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
+  >
+    <i class="fas fa-book-open text-xs"></i>
+    Open Docs
+  </a>
+  <a
+    href="/docs/report_schema.json"
+    target="_blank"
+    class="inline-flex items-center gap-2 rounded-xl bg-white/15 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
+  >
+    <i class="fas fa-code text-xs"></i>
+    Report Schema
+  </a>
+{% endblock %}
+
+{% block content %}
+  <section class="grid gap-8 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
+    <article class="rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl">
+      <h2 class="text-lg font-semibold text-blueGray-700">Index status</h2>
+      <p class="mt-1 text-sm text-blueGray-400">RAG searches include everything under <code>knowledge/**</code>.</p>
+      <div class="mt-6 space-y-4">
+        <div class="flex items-center justify-between rounded-2xl bg-blueGray-50 px-4 py-3">
+          <span class="text-sm font-semibold text-blueGray-500">Documents Indexed</span>
+          <span class="text-2xl font-bold text-blue-600">{{ files_count }}</span>
+        </div>
+        <p class="rounded-2xl bg-blueGray-50/60 px-4 py-3 text-xs text-blueGray-400">
+          After adding files, re-index with <code>python -m backend.cli reindex</code> to refresh embeddings.
+        </p>
+      </div>
+    </article>
+    <article class="rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl">
+      <h2 class="text-lg font-semibold text-blueGray-700">Sync from GitHub</h2>
+      <p class="mt-1 text-sm text-blueGray-400">One repository per line; private repos require your local credentials.</p>
+      <form
+        class="mt-4 space-y-4"
+        hx-post="/ui/knowledge/sync"
+        hx-target="#sync-result"
+        hx-swap="innerHTML"
+        hx-indicator="#globalIndicator"
+      >
+        <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">
+          GitHub repositories
+        </label>
+        <textarea
+          name="sources"
+          rows="6"
+          class="w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+        >{{ default_repo }}</textarea>
+        <button
+          type="submit"
+          class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-500 to-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-lg transition hover:from-blue-600 hover:to-indigo-500 focus:outline-none focus:ring-4 focus:ring-blue-200"
+        >
+          <i class="fas fa-sync-alt text-xs"></i>
+          Sync Knowledge
+        </button>
+      </form>
+    </article>
+  </section>
+
+  <div
+    id="sync-result"
+    class="mt-8 rounded-3xl border border-dashed border-blueGray-200 bg-blueGray-50 px-6 py-8 text-sm text-blueGray-400"
+  >
+    Sync results will appear here.
+  </div>
+{% endblock %}
+
+{% block page_actions %}
+  <a
+    href="/docs"
+    class="inline-flex items-center gap-2 rounded-lg border border-blueGray-200 bg-white px-4 py-2 text-sm font-semibold text-blueGray-600 shadow-sm transition hover:border-blue-400 hover:text-blue-700"
+  >
+    <i class="fas fa-book text-xs"></i>
+    Docs
+  </a>
+{% endblock %}

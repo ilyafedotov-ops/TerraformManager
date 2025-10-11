@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block breadcrumbs %}
+  <div class="text-xs font-semibold uppercase tracking-widest text-blueGray-400">
+    Home
+  </div>
+{% endblock %}
+
+{% block page_header %}
+  <h1 class="text-3xl font-bold leading-tight">Dashboard</h1>
+  <p class="mt-2 max-w-xl text-sm font-medium text-blue-100">
+    Overview of your recent Terraform scans, reports, and knowledge base syncs.
+  </p>
+{% endblock %}
+
+{% block hero_actions %}
+  <a
+    href="/ui/reports"
+    class="inline-flex items-center gap-2 rounded-xl bg-white/15 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
+  >
+    <i class="fas fa-clipboard-list text-xs"></i>
+    View Reports
+  </a>
+  <a
+    href="/ui/knowledge"
+    class="inline-flex items-center gap-2 rounded-xl bg-white/15 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
+  >
+    <i class="fas fa-sync-alt text-xs"></i>
+    Sync Knowledge
+  </a>
+{% endblock %}
+
+{% block content %}
+  <section class="tm-card-grid">
+    <article class="tm-data-card">
+      <div class="tm-data-card-title">Reports</div>
+      <div class="tm-data-card-value">{{ stats.reports or 0 }}</div>
+      <div class="tm-data-card-sub">Total saved reports</div>
+    </article>
+    <article class="tm-data-card">
+      <div class="tm-data-card-title">Knowledge Docs</div>
+      <div class="tm-data-card-value">{{ stats.knowledge_files or 0 }}</div>
+      <div class="tm-data-card-sub">Documents in the knowledge index</div>
+    </article>
+    <article class="tm-data-card">
+      <div class="tm-data-card-title">Issues (Last Report)</div>
+      <div class="tm-data-card-value">
+        {{ (stats.last.summary.issues_found if stats.last and stats.last.summary else 0) }}
+      </div>
+      <div class="tm-data-card-sub">
+        Latest scan summary
+        {% if stats.last %}
+          • <span class="font-semibold text-blue-500">{{ stats.last.id }}</span>
+        {% endif %}
+      </div>
+    </article>
+  </section>
+
+  <section class="mt-10">
+    <div class="rounded-2xl bg-white p-6 shadow-xl">
+      <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h2 class="text-lg font-semibold text-blueGray-700">Severity Overview</h2>
+          <p class="text-sm text-blueGray-400">Distribution across the most recent scans</p>
+        </div>
+        {% if stats.last %}
+          <div class="flex items-center gap-2 rounded-full bg-blue-50 px-4 py-1 text-sm font-semibold text-blue-500">
+            <i class="fas fa-clock text-xs"></i>
+            Updated {{ stats.last.created_at }}
+          </div>
+        {% endif %}
+      </div>
+      {% if stats.severity %}
+        <div class="mt-6 space-y-4">
+          {% for sev, count in stats.severity.items() %}
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+              <div class="w-full text-sm font-semibold uppercase text-blueGray-400 sm:w-24">
+                {{ sev }}
+              </div>
+              <div class="h-3 flex-1 overflow-hidden rounded-full bg-blueGray-100">
+                {% set width = (count * 100 // (stats.severity_max or 1)) %}
+                <div
+                  class="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-600"
+                  style="width: {{ width }}%"
+                ></div>
+              </div>
+              <div class="w-12 text-sm font-semibold text-blueGray-600 sm:text-right">
+                {{ count }}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="mt-6 rounded-xl border border-dashed border-blueGray-200 bg-blueGray-50 px-6 py-8 text-center text-blueGray-400">
+          <i class="fas fa-clipboard-check text-2xl"></i>
+          <p class="mt-3 text-sm font-semibold">No reports yet. Run your first scan to populate the dashboard.</p>
+        </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="mt-10">
+    <div class="grid gap-4 md:grid-cols-2">
+      <a
+        href="/ui/scan"
+        class="group rounded-2xl border border-blue-200 bg-white p-6 shadow transition hover:-translate-y-1 hover:border-blue-400 hover:shadow-xl"
+      >
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-lg text-blue-500 transition group-hover:bg-blue-500/20">
+              <i class="fas fa-magic"></i>
+            </span>
+            <div>
+              <h3 class="text-lg font-semibold text-blueGray-700">Start a Scan</h3>
+              <p class="text-sm text-blueGray-400">Analyze a Terraform project from your machine.</p>
+            </div>
+          </div>
+          <i class="fas fa-arrow-right text-blueGray-300 transition group-hover:text-blue-500"></i>
+        </div>
+      </a>
+      <a
+        href="/ui/configs"
+        class="group rounded-2xl border border-blue-200 bg-white p-6 shadow transition hover:-translate-y-1 hover:border-blue-400 hover:shadow-xl"
+      >
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span class="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-lg text-emerald-500 transition group-hover:bg-emerald-500/20">
+              <i class="fas fa-sliders-h"></i>
+            </span>
+            <div>
+              <h3 class="text-lg font-semibold text-blueGray-700">Manage Configs</h3>
+              <p class="text-sm text-blueGray-400">Tune thresholds and waivers for your reviews.</p>
+            </div>
+          </div>
+          <i class="fas fa-arrow-right text-blueGray-300 transition group-hover:text-emerald-500"></i>
+        </div>
+      </a>
+    </div>
+  </section>
+{% endblock %}
+
+{% block page_actions %}
+  <a
+    href="/ui/scan"
+    class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-blue-500"
+  >
+    <i class="fas fa-bolt text-xs"></i>
+    New Scan
+  </a>
+{% endblock %}

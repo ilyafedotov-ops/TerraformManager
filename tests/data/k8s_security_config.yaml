@@ -1,0 +1,16 @@
+cases:
+- name: secure_workloads
+  fixture: tests/fixtures/k8s_secure_workloads.tf
+  expected: []
+- name: insecure_workloads
+  fixture: tests/fixtures/k8s_insecure_workloads.tf
+  expected:
+  - K8S-POD-RUN-AS-NON-ROOT::stateful_set.db
+  - K8S-POD-RESOURCES-LIMITS::stateful_set.db
+  - K8S-POD-SECCOMP::stateful_set.db
+  - K8S-POD-SECCOMP::daemonset.agent
+  - K8S-POD-APPARMOR::daemonset.agent
+  - K8S-POD-RUN-AS-NON-ROOT::daemonset.agent
+  - K8S-POD-RESOURCES-LIMITS::daemonset.agent
+  - K8S-NAMESPACE-NETPOL::insecure
+  - K8S-POD-APPARMOR::stateful_set.db

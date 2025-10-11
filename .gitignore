@@ -1,0 +1,31 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+
+# Virtual environments
+.venv/
+
+# Local environment / secrets
+.env
+
+# Application runtime dirs
+.uploads/
+generated/
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/.pnpm-store/
+
+# Temp clones / misc
+notus-svelte/
+svelte/
+repo_remote/
+
+# OS files
+.DS_Store
+Thumbs.db

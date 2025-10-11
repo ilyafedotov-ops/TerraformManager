@@ -1,0 +1,12 @@
+cases:
+- name: secure
+  fixture: tests/fixtures/aws_s3_secure.tf
+  expected: []
+- name: insecure
+  fixture: tests/fixtures/aws_s3_insecure.tf
+  expected:
+  - AWS-S3-PUBLIC-ACL::insecure
+  - AWS-S3-SSE::insecure
+  - AWS-S3-SECURE-TRANSPORT::insecure
+  - AWS-S3-ACCESS-LOGGING::insecure
+  - AWS-S3-ACCOUNT-BLOCK::missing

@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block breadcrumbs %}
+  <div class="text-xs font-semibold uppercase tracking-widest text-blueGray-400">
+    <a class="hover:text-blue-500" href="/ui/dashboard">Home</a>
+    <span class="px-2 text-blueGray-300">/</span>
+    <span class="text-blue-500">Configs</span>
+  </div>
+{% endblock %}
+
+{% block page_header %}
+  <h1 class="text-3xl font-bold leading-tight">Configs</h1>
+  <p class="mt-2 max-w-2xl text-sm font-medium text-blue-100">
+    Manage tfreview waivers, custom thresholds, and preview how they affect new reports before applying.
+  </p>
+{% endblock %}
+
+{% block hero_actions %}
+  <a
+    href="/ui/reports"
+    class="inline-flex items-center gap-2 rounded-xl bg-white/15 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
+  >
+    <i class="fas fa-clipboard-list text-xs"></i>
+    Review Reports
+  </a>
+{% endblock %}
+
+{% block content %}
+  <section class="grid gap-8 xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+    <article class="rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-blueGray-700">Saved configs</h2>
+        <span class="text-xs font-semibold uppercase tracking-widest text-blueGray-300">Live</span>
+      </div>
+      <p class="mt-1 text-sm text-blueGray-400">Select entries to delete in bulk or manage individually.</p>
+      <div id="configs-list" class="mt-4">
+        {% include "partials/configs_list.html" %}
+      </div>
+    </article>
+    <article class="rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl">
+      <h2 class="text-lg font-semibold text-blueGray-700">Create / update</h2>
+      <p class="mt-1 text-sm text-blueGray-400">Provide a unique name and YAML payload. Existing configs are overwritten.</p>
+      <form
+        class="mt-4 space-y-4"
+        hx-post="/ui/configs/save"
+        hx-target="#configs-list"
+        hx-swap="innerHTML"
+        hx-indicator="#globalIndicator"
+      >
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">Name</label>
+          <input
+            type="text"
+            name="name"
+            placeholder="default"
+            required
+            class="mt-2 w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+          />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">Payload (YAML)</label>
+          <textarea
+            name="payload"
+            rows="12"
+            placeholder="thresholds:\n  fail_on: [HIGH, CRITICAL]\nignore: []"
+            class="mt-2 w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+          ></textarea>
+        </div>
+        <button
+          type="submit"
+          class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-500 to-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-lg transition hover:from-blue-600 hover:to-indigo-500 focus:outline-none focus:ring-4 focus:ring-blue-200"
+        >
+          <i class="fas fa-save text-xs"></i>
+          Save Config
+        </button>
+      </form>
+    </article>
+  </section>
+
+  <section class="mt-8 rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl">
+    <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      <div>
+        <h2 class="text-lg font-semibold text-blueGray-700">Preview application</h2>
+        <p class="text-sm text-blueGray-400">Test thresholds against an existing report or on-the-fly scan.</p>
+      </div>
+      <div class="text-xs font-semibold uppercase tracking-widest text-blueGray-300">Optional</div>
+    </div>
+    <form
+      class="mt-4 space-y-4"
+      hx-post="/ui/configs/preview"
+      hx-target="#preview-result"
+      hx-swap="innerHTML"
+      hx-indicator="#globalIndicator"
+    >
+      <div class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">Config name</label>
+          <input
+            type="text"
+            name="config_name"
+            placeholder="default"
+            required
+            class="mt-2 w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+          />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">Report ID (optional)</label>
+          <input
+            type="text"
+            name="report_id"
+            placeholder="Paste a report id, or use paths below"
+            class="mt-2 w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+          />
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">Paths (comma-separated)</label>
+        <input
+          type="text"
+          name="paths"
+          placeholder="sample, /path/to/dir"
+          class="mt-2 w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+        />
+      </div>
+      <button
+        type="submit"
+        class="inline-flex items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-600 shadow-sm transition hover:border-blue-400 hover:bg-blue-100"
+      >
+        <i class="fas fa-eye text-xs"></i>
+        Preview Config
+      </button>
+    </form>
+    <div
+      id="preview-result"
+      class="mt-6 rounded-2xl border border-dashed border-blueGray-200 bg-blueGray-50 px-6 py-6 text-sm text-blueGray-400"
+    >
+      Preview will appear here.
+    </div>
+  </section>
+{% endblock %}
+
+{% block page_actions %}
+  <a
+    href="/ui/reports"
+    class="inline-flex items-center gap-2 rounded-lg border border-blueGray-200 bg-white px-4 py-2 text-sm font-semibold text-blueGray-600 shadow-sm transition hover:border-blue-400 hover:text-blue-700"
+  >
+    <i class="fas fa-clipboard-list text-xs"></i>
+    Open Reports
+  </a>
+{% endblock %}

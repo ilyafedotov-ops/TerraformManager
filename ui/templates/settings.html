@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+
+{% block breadcrumbs %}
+  <div class="text-xs font-semibold uppercase tracking-widest text-blueGray-400">
+    <a class="hover:text-blue-500" href="/ui/dashboard">Home</a>
+    <span class="px-2 text-blueGray-300">/</span>
+    <span class="text-blue-500">Settings</span>
+  </div>
+{% endblock %}
+
+{% block page_header %}
+  <h1 class="text-3xl font-bold leading-tight">Settings</h1>
+  <p class="mt-2 max-w-2xl text-sm font-medium text-blue-100">
+    Configure server controls, authentication helpers, and LLM provider integrations.
+  </p>
+{% endblock %}
+
+{% block content %}
+  <section class="grid gap-8 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+    <article class="rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl">
+      <h2 class="text-lg font-semibold text-blueGray-700">Server</h2>
+      <p class="mt-1 text-sm text-blueGray-400">Environment variables drive most runtime options.</p>
+      <ul class="mt-4 space-y-3 text-sm text-blueGray-500">
+        <li class="flex items-center justify-between rounded-2xl bg-blueGray-50 px-4 py-3">
+          <span class="font-semibold uppercase tracking-wide text-blueGray-400">Port</span>
+          <code class="rounded bg-blueGray-100 px-2 py-1 text-xs text-blueGray-600">{{ port }}</code>
+        </li>
+        <li class="flex items-center justify-between rounded-2xl bg-blueGray-50 px-4 py-3">
+          <span class="font-semibold uppercase tracking-wide text-blueGray-400">Auth Token Required</span>
+          <span class="text-sm font-semibold text-blueGray-600">{{ 'Yes' if token_required else 'No' }}</span>
+        </li>
+      </ul>
+      <p class="mt-4 text-xs text-blueGray-400">
+        Set <code>TFM_API_TOKEN</code> to require token auth and <code>TFM_PORT</code> to change the listen port.
+      </p>
+      <div class="mt-6 space-y-3">
+        <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">
+          Browser API token (stored locally)
+        </label>
+        <input
+          id="apiTokenInput"
+          type="text"
+          placeholder="Paste token if server enforces one"
+          class="w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+        />
+        <div class="flex gap-3">
+          <button
+            type="button"
+            onclick="tmSaveToken()"
+            class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-blue-500"
+          >
+            <i class="fas fa-save text-xs"></i>
+            Save token
+          </button>
+          <button
+            type="button"
+            onclick="document.getElementById('apiTokenInput').value=''; tmSaveToken();"
+            class="inline-flex items-center gap-2 rounded-lg border border-blueGray-200 px-4 py-2 text-sm font-semibold text-blueGray-600 shadow-sm transition hover:border-blue-400 hover:text-blue-700"
+          >
+            <i class="fas fa-eraser text-xs"></i>
+            Clear
+          </button>
+        </div>
+        <p class="text-xs text-blueGray-400">
+          Headers will be sent as <code>Authorization: Bearer &lt;token&gt;</code> for JSON API calls.
+        </p>
+      </div>
+    </article>
+    <article class="rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl">
+      <h2 class="text-lg font-semibold text-blueGray-700">LLM Provider</h2>
+      <p class="mt-1 text-sm text-blueGray-400">Configure provider, optional Azure routing, and enable advanced responses.</p>
+      <form
+        class="mt-4 space-y-4"
+        hx-post="/ui/settings/llm/save"
+        hx-target="#llm-settings"
+        hx-swap="innerHTML"
+        hx-indicator="#globalIndicator"
+      >
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">Provider</label>
+          <select
+            class="mt-2 w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+            name="provider"
+            id="llmProvider"
+          >
+            <option value="off" {% if (llm.provider or 'off') == 'off' %}selected{% endif %}>Off</option>
+            <option value="openai" {% if (llm.provider or '') == 'openai' %}selected{% endif %}>OpenAI</option>
+            <option value="azure" {% if (llm.provider or '') == 'azure' %}selected{% endif %}>Azure OpenAI</option>
+          </select>
+        </div>
+        <div id="openaiFields" class="space-y-4">
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">Model</label>
+            <select
+              class="mt-2 w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+              id="openaiModelSelect"
+            >
+              {% set openai_models = ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini', 'o4-mini'] %}
+              {% for m in openai_models %}
+                <option value="{{ m }}" {% if (llm.model or '') == m %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+              <option value="custom" {% if llm.model and llm.model not in openai_models %}selected{% endif %}>Custom…</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">Custom model (optional)</label>
+            <input
+              class="mt-2 w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+              type="text"
+              name="model"
+              id="openaiModelInput"
+              placeholder="e.g., gpt-4.1-mini"
+              value="{{ llm.model or '' }}"
+            />
+          </div>
+        </div>
+        <div id="genericModelField" class="space-y-2">
+          <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">Model/Deployment name (optional)</label>
+          <input
+            class="mt-2 w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+            type="text"
+            name="model"
+            id="genericModelInput"
+            placeholder="gpt-4.1-mini or your Azure deployment"
+            value="{{ llm.model or '' }}"
+          />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">OpenAI API Base (optional)</label>
+          <input
+            class="mt-2 w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+            type="text"
+            name="api_base"
+            id="openaiApiBase"
+            placeholder="https://api.openai.com/v1"
+            value="{{ llm.api_base or '' }}"
+          />
+        </div>
+        <div class="grid gap-4 md:grid-cols-2">
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">Azure API Version (optional)</label>
+            <input
+              class="mt-2 w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+              type="text"
+              name="api_version"
+              id="azureApiVersionInput"
+              placeholder="2024-02-15-preview"
+              value="{{ llm.api_version or '' }}"
+            />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">Common versions</label>
+            <select
+              class="mt-2 w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+              id="azureApiVersionSelect"
+            >
+              {% set az_versions = ['2024-07-18', '2024-05-01-preview', '2024-02-15-preview'] %}
+              <option value="">Select version…</option>
+              {% for v in az_versions %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="grid gap-4 md:grid-cols-2">
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">Azure Deployment Name (optional)</label>
+            <input
+              class="mt-2 w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+              type="text"
+              name="deployment_name"
+              id="azureDeploymentNameInput"
+              placeholder="my-gpt4o"
+              value="{{ llm.deployment_name or '' }}"
+            />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold uppercase tracking-wide text-blueGray-400">Prefill common names</label>
+            <select
+              class="mt-2 w-full rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-700 shadow-sm focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+              id="azureDeploymentKindSelect"
+            >
+              <option value="">Kind…</option>
+              {% for kind in ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1-mini', 'o4-mini'] %}
+                <option value="{{ kind }}">{{ kind }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <label class="flex items-center gap-3 rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm font-semibold text-blueGray-500 shadow-sm transition hover:border-blue-300">
+          <input type="checkbox" name="enable_explanations" {% if llm.enable_explanations %}checked{% endif %} class="h-4 w-4 rounded border-blueGray-300 text-blue-600 focus:ring-blue-500" />
+          Enable explanations
+        </label>
+        <label class="flex items-center gap-3 rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm font-semibold text-blueGray-500 shadow-sm transition hover:border-blue-300">
+          <input type="checkbox" name="enable_patches" {% if llm.enable_patches %}checked{% endif %} class="h-4 w-4 rounded border-blueGray-300 text-blue-600 focus:ring-blue-500" />
+          Enable patch suggestions
+        </label>
+        <button
+          type="submit"
+          class="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-500 to-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-lg transition hover:from-blue-600 hover:to-indigo-500 focus:outline-none focus:ring-4 focus:ring-blue-200"
+        >
+          <i class="fas fa-save text-xs"></i>
+          Save
+        </button>
+      </form>
+      <div id="llm-settings" class="mt-4">
+        {% include 'partials/settings_llm.html' %}
+      </div>
+      <p class="mt-3 text-xs text-blueGray-400">
+        Secrets are not stored. Environment variables: <code>OPENAI_API_KEY</code>, <code>AZURE_OPENAI_API_KEY</code>,
+        <code>AZURE_OPENAI_ENDPOINT</code>, <code>AZURE_OPENAI_API_VERSION</code>, <code>AZURE_OPENAI_DEPLOYMENT</code>.
+      </p>
+      <div class="mt-4 flex flex-wrap items-center gap-3 text-sm">
+        <button
+          class="inline-flex items-center gap-2 rounded-lg border border-blueGray-200 px-4 py-2 font-semibold text-blueGray-600 shadow-sm transition hover:border-blue-400 hover:text-blue-700"
+          id="btnTestCfg"
+          onclick="tmTestLLM(false)"
+        >
+          <i class="fas fa-vial text-xs"></i>
+          Test config
+        </button>
+        <button
+          class="inline-flex items-center gap-2 rounded-lg border border-blueGray-200 px-4 py-2 font-semibold text-blueGray-600 shadow-sm transition hover:border-blue-400 hover:text-blue-700"
+          id="btnTestLive"
+          onclick="tmTestLLM(true)"
+        >
+          <i class="fas fa-broadcast-tower text-xs"></i>
+          Test live ping
+        </button>
+        <span id="llm-test-result" class="text-xs font-semibold uppercase tracking-wide text-blueGray-400"></span>
+      </div>
+    </article>
+  </section>
+{% endblock %}
+
+{% block page_actions %}{% endblock %}
+
+<script>
+  (function () {
+    var providerEl = document.getElementById('llmProvider');
+    var openaiFields = document.getElementById('openaiFields');
+    var genericField = document.getElementById('genericModelField');
+    var modelSelect = document.getElementById('openaiModelSelect');
+    var modelInput = document.getElementById('openaiModelInput');
+    var genericInput = document.getElementById('genericModelInput');
+    var apiBase = document.getElementById('openaiApiBase');
+    var modelInfo = document.createElement('div');
+    modelInfo.className = 'mt-2 text-xs text-blueGray-400';
+    if (openaiFields) openaiFields.appendChild(modelInfo);
+    var modelDescriptions = {
+      'gpt-4.1': 'General-purpose, high-quality reasoning model (successor to GPT-4).',
+      'gpt-4.1-mini': 'Smaller, fast variant of GPT-4.1 for cost-sensitive use.',
+      'gpt-4o': 'Multimodal Omni model tuned for speed and quality.',
+      'gpt-4o-mini': 'Smaller, cheaper Omni variant.',
+      'o4-mini': 'Optimized 4-series, strong reasoning at lower cost.'
+    };
+
+    function syncVisibility() {
+      var provider = (providerEl && providerEl.value) || 'off';
+      var isOpenAI = provider === 'openai';
+      if (openaiFields) openaiFields.style.display = isOpenAI ? '' : 'none';
+      if (genericField) genericField.style.display = isOpenAI ? 'none' : '';
+      if (isOpenAI && apiBase && !apiBase.value) apiBase.value = 'https://api.openai.com/v1';
+      var btnLive = document.getElementById('btnTestLive');
+      if (btnLive) btnLive.disabled = provider === 'off';
+    }
+
+    function syncModel() {
+      if (!modelSelect || !modelInput) return;
+      if (modelSelect.value === 'custom') {
+        modelInput.disabled = false;
+      } else {
+        modelInput.value = modelSelect.value;
+        modelInput.disabled = true;
+      }
+      if (modelInfo) modelInfo.textContent = modelDescriptions[modelSelect.value] || '';
+    }
+
+    var azVerSel = document.getElementById('azureApiVersionSelect');
+    var azVerInp = document.getElementById('azureApiVersionInput');
+    if (azVerSel && azVerInp) {
+      azVerSel.addEventListener('change', function () {
+        if (this.value) azVerInp.value = this.value;
+      });
+    }
+
+    var azDepSel = document.getElementById('azureDeploymentKindSelect');
+    var azDepInp = document.getElementById('azureDeploymentNameInput');
+    if (azDepSel && azDepInp) {
+      azDepSel.addEventListener('change', function () {
+        if (!azDepInp.value) azDepInp.value = this.value;
+      });
+    }
+
+    if (providerEl) providerEl.addEventListener('change', syncVisibility);
+    if (modelSelect) modelSelect.addEventListener('change', syncModel);
+
+    syncVisibility();
+    syncModel();
+  })();
+</script>

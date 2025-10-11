@@ -1,0 +1,25 @@
+cases:
+- name: secure
+  fixture: tests/fixtures/aws_rds_secure.tf
+  expected: []
+- name: secure_multi_region
+  fixture: tests/fixtures/aws_rds_multi_region_secure.tf
+  expected: []
+- name: insecure_multi_region
+  fixture: tests/fixtures/aws_rds_multi_region_insecure.tf
+  expected:
+  - AWS-RDS-ENCRYPTION::primary
+  - AWS-RDS-ENCRYPTION::replica
+  - AWS-RDS-BACKUP::replica
+  - AWS-RDS-DELETION-PROTECTION::replica
+  - AWS-RDS-ENHANCED-MONITORING::replica
+  - AWS-RDS-PERF-INSIGHTS::replica
+  - AWS-BACKUP-CROSS-REGION::rds
+- name: insecure
+  fixture: tests/fixtures/aws_rds_insecure.tf
+  expected:
+  - AWS-RDS-ENCRYPTION::primary
+  - AWS-RDS-BACKUP::primary
+  - AWS-RDS-DELETION-PROTECTION::primary
+  - AWS-RDS-ENHANCED-MONITORING::primary
+  - AWS-RDS-PERF-INSIGHTS::primary

@@ -1,0 +1,6 @@
+[
+  "AZ-DIAGNOSTICS-MISSING::virtual_network.vnet",
+  "AZ-DIAGNOSTICS-MISSING::subnet.subnet_app",
+  "AZ-DIAGNOSTICS-MISSING::network_security_group.app",
+  "AZ-DIAGNOSTICS-MISSING::storage_account.logs"
+]
