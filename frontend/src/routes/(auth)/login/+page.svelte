@@ -1,11 +1,20 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
+	import { setToken } from '$lib/stores/auth';
+
 	let email = '';
 	let apiToken = '';
 
 	const handleSubmit = (event: SubmitEvent) => {
 		event.preventDefault();
-		// TODO: Replace with real authentication workflow when backend auth is available.
-		console.info('Attempted login with', { email, apiToken });
+		const trimmed = apiToken.trim();
+		if (!trimmed) {
+			console.info('No API token provided, falling back to local-dev token');
+			setToken('local-dev');
+		} else {
+			setToken(trimmed);
+		}
+		goto('/dashboard');
 	};
 </script>
 

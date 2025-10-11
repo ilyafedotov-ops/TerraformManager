@@ -1,7 +1,10 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
+
 	const handleSubmit = (event: SubmitEvent) => {
 		event.preventDefault();
 		console.info('Password reset placeholder triggered');
+		goto('/login');
 	};
 </script>
 
