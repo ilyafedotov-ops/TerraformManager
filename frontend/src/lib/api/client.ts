@@ -239,6 +239,26 @@ export async function generateAwsS3(
     });
 }
 
+export interface KnowledgeSyncResult {
+    source: string;
+    dest_dir: string;
+    files: string[];
+    note?: string | null;
+}
+
+export async function syncKnowledge(
+    fetchFn: typeof fetch,
+    token: string,
+    sources: string[]
+): Promise<KnowledgeSyncResult[]> {
+    const response = await apiFetch<{ synced: KnowledgeSyncResult[] }>(fetchFn, '/knowledge/sync', {
+        method: 'POST',
+        token,
+        body: { sources }
+    });
+    return response.synced;
+}
+
 export interface ReviewConfigRecord {
     name: string;
     payload: string;
