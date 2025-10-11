@@ -100,6 +100,7 @@
 - ✅ Auth flows (login/register/forgot) now persist API tokens and honour redirect targets supplied by protected routes.
 - ✅ App layout server load enforces token presence, surfaces sign-out control, and mirrors active token metadata in the UI.
 - ✅ Implemented typed API client for FastAPI (`frontend/src/lib/api/client.ts`) and wired dashboard/reports views to live reviewer data.
+- ✅ Review tab posts multipart uploads to the new `/scan/upload` endpoint and renders live severity summaries plus artifact download links.
 - 🔄 Next: hook generator/review forms to new FastAPI endpoints, embed report viewer tables, and surface knowledge/doc metrics once APIs are exposed.
 
 ## Completed (Phase B to date)

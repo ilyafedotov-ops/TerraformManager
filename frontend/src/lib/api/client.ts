@@ -1,7 +1,7 @@
 import { env } from '$env/dynamic/public';
 
 const DEFAULT_BASE = 'http://localhost:8787';
-const API_BASE = (env.PUBLIC_API_BASE ?? DEFAULT_BASE).replace(/\/$/, '');
+export const API_BASE = (env.PUBLIC_API_BASE ?? DEFAULT_BASE).replace(/\/$/, '');
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -26,7 +26,7 @@ export class ApiError extends Error {
 }
 
 function buildUrl(path: string, searchParams?: ApiRequestOptions['searchParams']): string {
-	const url = new URL(path.startsWith('/') ? path : `/${path}`, API_BASE);
+    const url = new URL(path.startsWith('/') ? path : `/${path}`, API_BASE);
 	if (searchParams) {
 		for (const [key, value] of Object.entries(searchParams)) {
 			if (value === undefined || value === null) continue;
@@ -46,32 +46,41 @@ function normaliseBody(body: unknown): BodyInit | undefined {
 	return JSON.stringify(body);
 }
 
-function buildHeaders(token: string | null | undefined, extra?: HeadersInit): Headers {
-	const headers = new Headers(extra ?? undefined);
-	if (!headers.has('Content-Type')) {
-		headers.set('Content-Type', 'application/json');
-	}
-	if (token) {
-		headers.set('Authorization', `Bearer ${token}`);
-	}
-	return headers;
+function buildHeaders(token: string | null | undefined, extra?: HeadersInit, attachJsonContentType = false): Headers {
+    const headers = new Headers(extra ?? undefined);
+    if (attachJsonContentType && !headers.has('Content-Type')) {
+        headers.set('Content-Type', 'application/json');
+    }
+    if (!attachJsonContentType && headers.get('Content-Type') === 'application/json') {
+        headers.delete('Content-Type');
+    }
+    if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+    }
+    return headers;
 }
 
 export async function apiFetch<TResponse, TBody = unknown>(
-	fetchFn: typeof fetch,
-	path: string,
-	{ method = 'GET', token, searchParams, body, headers }: ApiRequestOptions<TBody> = {}
+    fetchFn: typeof fetch,
+    path: string,
+    { method = 'GET', token, searchParams, body, headers }: ApiRequestOptions<TBody> = {}
 ): Promise<TResponse> {
-	const url = buildUrl(path, searchParams);
-	const init: RequestInit = {
-		method,
-		headers: buildHeaders(token, headers),
-		body: normaliseBody(body)
-	};
+    const url = buildUrl(path, searchParams);
+    const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+    const isUrlParams = body instanceof URLSearchParams;
+    const isBlob = typeof Blob !== 'undefined' && body instanceof Blob;
+    const isStructuredBody = isFormData || isUrlParams || isBlob;
+    const bodyInit = normaliseBody(body);
 
-	if (init.body === undefined && init.headers instanceof Headers && init.headers.get('Content-Type') === 'application/json') {
-		init.headers.delete('Content-Type');
-	}
+    const init: RequestInit = {
+        method,
+        headers: buildHeaders(token, headers, bodyInit !== undefined && !isStructuredBody),
+        body: bodyInit
+    };
+
+    if (init.body === undefined && init.headers instanceof Headers) {
+        init.headers.delete('Content-Type');
+    }
 
 	const response = await fetchFn(url, init);
 

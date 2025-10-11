@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 import os
 import uuid
+import tempfile
+import zipfile
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Depends, Header
+from fastapi import FastAPI, HTTPException, Query, Depends, Header, UploadFile, File, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -118,6 +121,61 @@ def delete_report_api(report_id: str, _auth: None = Depends(require_api_token)) 
     if not ok:
         raise HTTPException(404, "report not found")
     return {"status": "deleted", "id": report_id}
+
+
+@app.post("/scan/upload")
+async def scan_upload(
+    files: List[UploadFile] = File(...),
+    terraform_validate: bool = Form(False),
+    save: bool = Form(True),
+) -> Dict[str, Any]:
+    if not files:
+        raise HTTPException(400, "no files uploaded")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        targets: List[Path] = []
+
+        for upload in files:
+            filename = Path(upload.filename or "upload.tf")
+            data = await upload.read()
+            dest = root / filename.name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
+
+            suffix = dest.suffix.lower()
+            if suffix == ".zip":
+                extract_root = root / filename.stem
+                extract_root.mkdir(parents=True, exist_ok=True)
+                try:
+                    with zipfile.ZipFile(BytesIO(data)) as zf:
+                        zf.extractall(extract_root)
+                except zipfile.BadZipFile as exc:
+                    raise HTTPException(400, f"invalid zip archive: {filename}") from exc
+                targets.append(extract_root)
+            elif suffix == ".tf":
+                targets.append(dest)
+
+        if not targets:
+            raise HTTPException(400, "no Terraform files found in upload")
+
+        llm_opts = db_get_llm_settings()
+        provider = (llm_opts.get("provider") or "off").lower()
+        llm = llm_opts if provider in {"openai", "azure"} else None
+
+        report = scan_paths(targets, use_terraform_validate=terraform_validate, llm_options=llm)
+
+        report_id: Optional[str] = None
+        if save:
+            report_id = str(uuid.uuid4())
+            save_report(report_id, report.get("summary", {}), report)
+            report["id"] = report_id
+
+        return {
+            "id": report_id,
+            "summary": report.get("summary", {}),
+            "report": report,
+        }
 
 
 class ConfigPayload(BaseModel):
