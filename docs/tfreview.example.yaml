@@ -1,0 +1,14 @@
+# Example tfreview configuration for TerraformManager
+# Copy to the root of your Terraform repo as `tfreview.yaml`
+# and adjust IDs and thresholds to fit your project.
+
+ignore:
+  - id: AWS-S3-SSE::logs_bucket
+    reason: "Legacy bucket; remediation scheduled Q3"
+  - rule: K8S-POD-RESOURCES-LIMITS
+    reason: "DaemonSet pods managed by platform team"
+
+thresholds:
+  fail_on:
+    - CRITICAL
+    - HIGH

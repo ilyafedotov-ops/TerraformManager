@@ -1,0 +1,53 @@
+name: Terraform Review
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Optional: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+
+      - name: Run generator & reviewer unit tests
+        env:
+          TFM_RUN_TERRAFORM_VALIDATE: "1"
+        run: |
+          python -m pytest tests/test_generators_render.py tests/test_generators_golden.py tests/test_policies_rules.py
+
+      - name: Run integration scanner tests
+        run: |
+          python -m pytest tests/test_integration_scanner.py
+
+      - name: Run CLI smoke tests
+        run: |
+          python -m pytest tests/test_cli_integration.py
+
+      - name: Run reviewer (JSON out)
+        run: |
+          python -m backend.cli scan --path . --out terraform_review_report.json --terraform-validate
+
+      - name: Upload review report
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform_review_report
+          path: terraform_review_report.json

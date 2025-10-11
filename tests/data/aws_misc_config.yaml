@@ -1,0 +1,12 @@
+cases:
+- name: iam_wildcard
+  fixture: tests/fixtures/aws_iam_insecure.tf
+  expected:
+  - AWS-IAM-WILDCARD::wildcard
+- name: vpc_no_flow_logs
+  fixture: tests/fixtures/aws_vpc_no_flow_logs.tf
+  expected:
+  - AWS-VPC-FLOW-LOGS::insecure
+- name: vpc_secure
+  fixture: tests/fixtures/aws_vpc_secure.tf
+  expected: []

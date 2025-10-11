@@ -1,0 +1,27 @@
+<div class="rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl">
+  <h3 class="text-lg font-semibold text-blueGray-700">Sync results</h3>
+  {% if results %}
+    <ul class="mt-4 space-y-4 text-sm text-blueGray-500">
+      {% for r in results %}
+        <li class="rounded-2xl border border-blueGray-100 bg-blueGray-50 px-4 py-3">
+          <div class="flex flex-col gap-1">
+            <span class="font-semibold text-blueGray-600">{{ r.source }}</span>
+            <code class="rounded bg-white px-2 py-1 text-xs text-blueGray-500">{{ r.dest_dir }}</code>
+            {% if r.note %}
+              <span class="text-xs italic text-blueGray-400">{{ r.note }}</span>
+            {% endif %}
+            <span class="text-xs uppercase tracking-wide text-blueGray-400">{{ r.files|length }} files</span>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div class="mt-4 rounded-2xl border border-dashed border-blueGray-200 bg-blueGray-50 px-4 py-4 text-sm text-blueGray-400">
+      Nothing synced.
+    </div>
+  {% endif %}
+  <div class="mt-6 flex items-center gap-3 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-600">
+    <i class="fas fa-check-circle text-lg"></i>
+    Total Markdown files under knowledge/: {{ files_count }}
+  </div>
+</div>

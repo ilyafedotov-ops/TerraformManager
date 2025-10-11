@@ -1,0 +1,19 @@
+<div class="rounded-2xl border border-blueGray-100 bg-blueGray-50 px-4 py-4 text-sm text-blueGray-500">
+  <div class="flex flex-col gap-2">
+    <div>Current provider: <span class="font-semibold text-blueGray-600">{{ (llm.provider or 'off')|capitalize }}</span></div>
+    {% if llm.model %}
+      <div>Model/Deployment: <code class="rounded bg-white px-2 py-1 text-xs text-blueGray-500">{{ llm.model }}</code></div>
+    {% endif %}
+    {% if llm.api_base %}
+      <div>OpenAI API Base: <code class="rounded bg-white px-2 py-1 text-xs text-blueGray-500">{{ llm.api_base }}</code></div>
+    {% endif %}
+    {% if llm.api_version %}
+      <div>Azure API Version: <code class="rounded bg-white px-2 py-1 text-xs text-blueGray-500">{{ llm.api_version }}</code></div>
+    {% endif %}
+    {% if llm.deployment_name %}
+      <div>Azure Deployment: <code class="rounded bg-white px-2 py-1 text-xs text-blueGray-500">{{ llm.deployment_name }}</code></div>
+    {% endif %}
+    <div>Explanations: <span class="font-semibold text-blueGray-600">{{ 'On' if llm.enable_explanations else 'Off' }}</span></div>
+    <div>Patch suggestions: <span class="font-semibold text-blueGray-600">{{ 'On' if llm.enable_patches else 'Off' }}</span></div>
+  </div>
+</div>
