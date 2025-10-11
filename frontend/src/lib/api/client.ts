@@ -238,3 +238,64 @@ export async function generateAwsS3(
         body: payload
     });
 }
+
+export interface ReviewConfigRecord {
+    name: string;
+    payload: string;
+    kind?: string;
+    updated_at?: string;
+}
+
+export async function listReviewConfigs(fetchFn: typeof fetch, token: string): Promise<ReviewConfigRecord[]> {
+    return apiFetch(fetchFn, '/configs', { token });
+}
+
+export async function saveReviewConfig(
+    fetchFn: typeof fetch,
+    token: string,
+    config: { name: string; payload: string; kind?: string }
+): Promise<{ status: string; name: string }> {
+    return apiFetch(fetchFn, '/configs', {
+        method: 'POST',
+        token,
+        body: {
+            name: config.name,
+            payload: config.payload,
+            kind: config.kind ?? 'tfreview'
+        }
+    });
+}
+
+export async function deleteReviewConfig(fetchFn: typeof fetch, token: string, name: string): Promise<{ status: string; name: string }> {
+    return apiFetch(fetchFn, `/configs/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+        token
+    });
+}
+
+export interface ConfigPreviewPayload {
+    config_name: string;
+    report_id?: string | null;
+    paths?: string[] | null;
+}
+
+export interface ConfigPreviewResponse {
+    summary: {
+        before: Record<string, unknown>;
+        after: Record<string, unknown>;
+    };
+    waived: Array<Record<string, unknown>>;
+    active: Array<Record<string, unknown>>;
+}
+
+export async function previewConfigApplication(
+    fetchFn: typeof fetch,
+    token: string,
+    payload: ConfigPreviewPayload
+): Promise<ConfigPreviewResponse> {
+    return apiFetch(fetchFn, '/preview/config-application', {
+        method: 'POST',
+        token,
+        body: payload
+    });
+}
