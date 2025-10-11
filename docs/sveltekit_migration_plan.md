@@ -82,7 +82,7 @@
 
 ## Required Backend Enhancements
 - **Template Generation API**: Add FastAPI endpoints (e.g., `POST /generators/aws/s3`) that accept the same payloads Streamlit collects, render via `jinja2.Template`, and respond with `{filename, content}` for direct download or zipped bundles. This keeps business logic in Python.
-- **Ad-hoc Scan Upload API**: Introduce `POST /scan/upload` accepting multipart form data (multiple `.tf` or zipped modules). Backend should reuse the same extraction logic as Streamlit (`app.py:3411+`) and dispatch to `scan_paths`.
+- **Ad-hoc Scan Upload API**: ✅ Implemented as `POST /scan/upload`, accepting multipart form data (`.tf` or `.zip`) and routing to `scan_paths` while optionally saving reports.
 - **Knowledge Search API**: Expose `GET /knowledge/search?q=&top_k=` returning passages from `backend.rag.retrieve`. Needed for the Knowledge tab search UI.
 - **Report Viewer JSON**: Optionally enrich `/reports/{id}` with flattened finding summaries (severity, remediation) to power table views without re-parsing HTML.
 - **LLM Settings Validation**: Confirm existing `/settings/llm/test` output aligns with UI needs; expand schema if extra metadata is required for TypeScript typing.
@@ -116,6 +116,12 @@
 5. **Knowledge Sync**: Provide manual sync controls + results history (call `/knowledge/sync`).
 6. **Settings**: Manage LLM provider/model toggles, run `test` endpoint, display status using Notus Svelte form layouts.
 7. **Auth Pages**: Implement login/register/forgot-password flows reusing Notus Svelte auth templates; hook into token storage until backend auth is formalized.
+
+**Status (2025-02-14)**
+- ✅ Dashboard and reports routes now source live data via SSR loaders (`frontend/src/routes/(app)/dashboard/+page.ts`, `frontend/src/routes/(app)/reports/+page.ts`).
+- ✅ API client module (`frontend/src/lib/api/client.ts`) centralizes authenticated fetch logic, sharing the cookie-backed token from the app layout.
+- ✅ Auth layouts persist tokens to both cookie + `localStorage`, support redirect-on-auth, and expose sign-out UI.
+- 🔄 Scan/review, configs, knowledge, and settings pages still rely on placeholder markup pending endpoint wiring and upload APIs.
 
 ### Phase 4 – Port Streamlit-Only Functionality
 1. **Generate Wizards**: For each blueprint (AWS S3, ALB/WAF, RDS, VPC, EKS, Azure KV, Azure Diagnostics, Kubernetes modules), replicate form layout in Svelte components. Serialize payload to template generation API.
@@ -166,4 +172,5 @@
 ## References
 - `/sveltejs/kit` documentation on project scaffolding (`npx sv create …`) and grouped layouts, retrieved via Context7.
 - `/sveltejs/kit` TypeScript guidance (`vitePreprocess`, `tsconfig` include paths) for consistent typings across `src/` and tests.
+- FastAPI request-form/file handling docs (Context7 `/fastapi/fastapi`) to inform review upload endpoint design.
 - Existing TerraformManager README and backend modules (`app.py`, `api/ui.py`, `api/main.py`) for source-of-truth behaviors.
