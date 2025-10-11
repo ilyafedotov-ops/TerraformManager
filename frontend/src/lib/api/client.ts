@@ -205,3 +205,36 @@ export async function testLLMSettings(
         body: { live }
     });
 }
+
+export interface AwsS3GeneratorPayload {
+    bucket_name: string;
+    region: string;
+    environment: string;
+    owner_tag: string;
+    cost_center_tag: string;
+    force_destroy: boolean;
+    versioning: boolean;
+    enforce_secure_transport: boolean;
+    kms_key_id?: string | null;
+    backend?: {
+        bucket: string;
+        key: string;
+        region: string;
+        dynamodb_table: string;
+    } | null;
+}
+
+export interface GeneratorResult {
+    filename: string;
+    content: string;
+}
+
+export async function generateAwsS3(
+    fetchFn: typeof fetch,
+    payload: AwsS3GeneratorPayload
+): Promise<GeneratorResult> {
+    return apiFetch(fetchFn, '/generators/aws/s3', {
+        method: 'POST',
+        body: payload
+    });
+}

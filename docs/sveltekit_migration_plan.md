@@ -124,6 +124,7 @@
 - ✅ `POST /scan/upload` supports multipart Terraform uploads; review tab consumes the endpoint with live summaries and artifact downloads.
 - ✅ Knowledge tab consumes `/knowledge/search` and displays scored snippets with Markdown shortcuts.
 - ✅ LLM settings page reads/writes `/settings/llm` and `/settings/llm/test`, surfacing validation + live ping results.
+- ✅ Added `/generators/aws/s3` endpoint and SvelteKit form to emit hardened S3 baselines with optional remote state backend.
 - 🔄 Remaining: configs CRUD, knowledge sync orchestration, and generator wizard integration with future template APIs.
 
 ### Phase 4 – Port Streamlit-Only Functionality

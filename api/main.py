@@ -39,6 +39,7 @@ from fastapi.staticfiles import StaticFiles
 from api import ui as ui_routes
 from backend.version import __version__
 from backend.llm_service import validate_provider_config, live_ping
+from backend.generators.service import render_aws_s3_bucket
 
 
 def require_api_token(x_api_token: str | None = Header(default=None, alias="X-API-Token"), authorization: str | None = Header(default=None)) -> None:
@@ -327,6 +328,40 @@ def knowledge_search(q: str, top_k: int = Query(3, ge=1, le=10)) -> KnowledgeSea
         }
         for item in snippets
     ])
+
+
+class AwsS3BackendPayload(BaseModel):
+    bucket: str
+    key: str
+    region: str
+    dynamodb_table: str
+
+
+class AwsS3GeneratorRequest(BaseModel):
+    bucket_name: str
+    region: str = "us-east-1"
+    environment: str = "prod"
+    owner_tag: str = "platform-team"
+    cost_center_tag: str = "ENG-SRE"
+    force_destroy: bool = False
+    versioning: bool = True
+    enforce_secure_transport: bool = True
+    kms_key_id: Optional[str] = None
+    backend: Optional[AwsS3BackendPayload] = None
+
+
+class GeneratorResponse(BaseModel):
+    filename: str
+    content: str
+
+
+@app.post("/generators/aws/s3", response_model=GeneratorResponse)
+def generate_aws_s3(payload: AwsS3GeneratorRequest) -> GeneratorResponse:
+    try:
+        output = render_aws_s3_bucket(payload.model_dump())
+        return GeneratorResponse(**output)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/settings/llm")
