@@ -105,6 +105,7 @@
 - ✅ LLM settings page reads/writes `/settings/llm`, supports configuration validation, and exposes live ping feedback.
 - ✅ Knowledge tab now includes manual sync controls for `/knowledge/sync`, enabling GitHub Markdown ingestion without leaving the app.
 - ✅ First generator (AWS S3 baseline) now available via `/generators/aws/s3` and a SvelteKit form with direct download/copy helpers.
+- ✅ Azure Storage generator wired via `/generators/azure/storage-account`, with private endpoint and network rule options in the UI.
 - 🔄 Next: hook generator/review forms to new FastAPI endpoints, embed report viewer tables, and surface knowledge/doc metrics once APIs are exposed.
 
 ## Completed (Phase B to date)

@@ -39,7 +39,7 @@ from fastapi.staticfiles import StaticFiles
 from api import ui as ui_routes
 from backend.version import __version__
 from backend.llm_service import validate_provider_config, live_ping
-from backend.generators.service import render_aws_s3_bucket
+from backend.generators.service import render_aws_s3_bucket, render_azure_storage_account
 
 
 def require_api_token(x_api_token: str | None = Header(default=None, alias="X-API-Token"), authorization: str | None = Header(default=None)) -> None:
@@ -350,6 +350,36 @@ class AwsS3GeneratorRequest(BaseModel):
     backend: Optional[AwsS3BackendPayload] = None
 
 
+class AzureStorageBackendPayload(BaseModel):
+    resource_group: str
+    storage_account: str
+    container: str
+    key: str
+
+
+class AzureStoragePrivateEndpointPayload(BaseModel):
+    name: str
+    connection_name: str
+    subnet_id: str
+    private_dns_zone_id: Optional[str] = None
+    dns_zone_group_name: Optional[str] = None
+
+
+class AzureStorageGeneratorRequest(BaseModel):
+    resource_group_name: str
+    storage_account_name: str
+    location: str
+    environment: str = "prod"
+    replication: str = "LRS"
+    versioning: bool = True
+    owner_tag: str = "platform-team"
+    cost_center_tag: str = "ENG-SRE"
+    restrict_network: bool = False
+    allowed_ips: List[str] = []
+    private_endpoint: Optional[AzureStoragePrivateEndpointPayload] = None
+    backend: Optional[AzureStorageBackendPayload] = None
+
+
 class GeneratorResponse(BaseModel):
     filename: str
     content: str
@@ -359,6 +389,15 @@ class GeneratorResponse(BaseModel):
 def generate_aws_s3(payload: AwsS3GeneratorRequest) -> GeneratorResponse:
     try:
         output = render_aws_s3_bucket(payload.model_dump())
+        return GeneratorResponse(**output)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/generators/azure/storage-account", response_model=GeneratorResponse)
+def generate_azure_storage(payload: AzureStorageGeneratorRequest) -> GeneratorResponse:
+    try:
+        output = render_azure_storage_account(payload.model_dump())
         return GeneratorResponse(**output)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

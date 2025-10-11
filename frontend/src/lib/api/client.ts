@@ -239,6 +239,42 @@ export async function generateAwsS3(
     });
 }
 
+export interface AzureStorageGeneratorPayload {
+    resource_group_name: string;
+    storage_account_name: string;
+    location: string;
+    environment: string;
+    replication: string;
+    versioning: boolean;
+    owner_tag: string;
+    cost_center_tag: string;
+    restrict_network: boolean;
+    allowed_ips: string[];
+    private_endpoint?: {
+        name: string;
+        connection_name: string;
+        subnet_id: string;
+        private_dns_zone_id?: string | null;
+        dns_zone_group_name?: string | null;
+    } | null;
+    backend?: {
+        resource_group: string;
+        storage_account: string;
+        container: string;
+        key: string;
+    } | null;
+}
+
+export async function generateAzureStorageAccount(
+    fetchFn: typeof fetch,
+    payload: AzureStorageGeneratorPayload
+): Promise<GeneratorResult> {
+    return apiFetch(fetchFn, '/generators/azure/storage-account', {
+        method: 'POST',
+        body: payload
+    });
+}
+
 export interface KnowledgeSyncResult {
     source: string;
     dest_dir: string;

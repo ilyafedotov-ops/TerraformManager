@@ -126,7 +126,8 @@
 - ✅ Knowledge tab exposes `/knowledge/sync` to pull Markdown docs from GitHub, surfacing results/notes inline.
 - ✅ LLM settings page reads/writes `/settings/llm` and `/settings/llm/test`, surfacing validation + live ping results.
 - ✅ Added `/generators/aws/s3` endpoint and SvelteKit form to emit hardened S3 baselines with optional remote state backend.
-- 🔄 Remaining: configs CRUD, knowledge sync orchestration, and generator wizard integration with future template APIs.
+- ✅ Added `/generators/azure/storage-account` endpoint with SvelteKit form for secured Azure Storage baselines.
+- 🔄 Remaining: additional Azure/K8s generator wiring, expanded preview tooling, and end-to-end documentation updates.
 
 ### Phase 4 – Port Streamlit-Only Functionality
 1. **Generate Wizards**: For each blueprint (AWS S3, ALB/WAF, RDS, VPC, EKS, Azure KV, Azure Diagnostics, Kubernetes modules), replicate form layout in Svelte components. Serialize payload to template generation API.
