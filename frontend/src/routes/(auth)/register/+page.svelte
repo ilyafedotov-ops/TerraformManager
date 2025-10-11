@@ -1,11 +1,13 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+import { goto } from '$app/navigation';
+import { setToken } from '$lib/stores/auth';
 
-	const handleSubmit = (event: SubmitEvent) => {
-		event.preventDefault();
-		console.info('Registration placeholder triggered');
-		goto('/login');
-	};
+const handleSubmit = (event: SubmitEvent) => {
+	event.preventDefault();
+	console.info('Registration placeholder triggered');
+	setToken('local-dev');
+	goto('/dashboard');
+};
 </script>
 
 <form class="space-y-8" on:submit={handleSubmit}>

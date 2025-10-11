@@ -1,7 +1,35 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
+	import { onDestroy, onMount } from 'svelte';
+	import { clearToken, token } from '$lib/stores/auth';
+
 	const { children } = $props();
 
 	let sidebarOpen = $state(false);
+	let currentToken = $state<string | null>(null);
+
+	const unsubscribe = token.subscribe((value) => {
+		currentToken = value;
+	});
+
+	onDestroy(unsubscribe);
+
+	onMount(() => {
+		if (!currentToken) {
+			goto('/login');
+		}
+	});
+
+	$effect(() => {
+		if (typeof window !== 'undefined' && !currentToken) {
+			goto('/login');
+		}
+	});
+
+	const handleSignOut = () => {
+		clearToken();
+		goto('/login');
+	};
 
 	const mainNav = [
 		{ href: '/dashboard', label: 'Dashboard' },
@@ -78,11 +106,24 @@
 				<h1 class="text-2xl font-semibold text-white">Control plane</h1>
 			</div>
 			<div class="flex items-center gap-3">
+				<div class="hidden flex-col text-right text-xs text-slate-500 sm:flex">
+					<span class="uppercase tracking-[0.35em]">API Token</span>
+					<span class="font-mono text-slate-300">
+						{currentToken ? `${currentToken.slice(0, 4)}...${currentToken.slice(-4)}` : 'Not set'}
+					</span>
+				</div>
 				<button
 					type="button"
 					class="rounded-2xl border border-white/10 bg-slate-900/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-sky-400/30 hover:text-white"
 				>
 					Command Palette
+				</button>
+				<button
+					type="button"
+					class="rounded-2xl border border-white/10 bg-slate-900/80 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-rose-400/40 hover:text-white"
+					onclick={handleSignOut}
+				>
+					Sign out
 				</button>
 				<div class="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500/30 to-indigo-500/30 text-base font-semibold text-white">
 					EM
