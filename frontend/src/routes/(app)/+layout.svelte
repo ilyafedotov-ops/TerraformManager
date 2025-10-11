@@ -1,34 +1,36 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { onDestroy, onMount } from 'svelte';
 	import { clearToken, token } from '$lib/stores/auth';
 
-	const { children } = $props();
+	const { children, data } = $props();
 
 	let sidebarOpen = $state(false);
-	let currentToken = $state<string | null>(null);
+	let currentToken = $state<string | null>(data.token ?? null);
+	let unsubscribe: (() => void) | null = null;
 
-	const unsubscribe = token.subscribe((value) => {
-		currentToken = value;
+	if (browser) {
+		unsubscribe = token.subscribe((value) => {
+			currentToken = value;
+		});
+	}
+
+	onDestroy(() => {
+		unsubscribe?.();
 	});
-
-	onDestroy(unsubscribe);
 
 	onMount(() => {
 		if (!currentToken) {
 			goto('/login');
-		}
-	});
-
-	$effect(() => {
-		if (typeof window !== 'undefined' && !currentToken) {
-			goto('/login');
+		} else if (browser) {
+			token.set(currentToken);
 		}
 	});
 
 	const handleSignOut = () => {
 		clearToken();
-		goto('/login');
+		goto('/login', { replaceState: true });
 	};
 
 	const mainNav = [

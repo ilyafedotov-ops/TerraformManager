@@ -95,6 +95,13 @@
 
 # Current Status Summary
 
+### Frontend Migration (SvelteKit)
+- ✅ Scaffolded SvelteKit workspace with Tailwind + Notus integration and environment-aware token storage synced via cookies/localStorage.
+- ✅ Auth flows (login/register/forgot) now persist API tokens and honour redirect targets supplied by protected routes.
+- ✅ App layout server load enforces token presence, surfaces sign-out control, and mirrors active token metadata in the UI.
+- ✅ Implemented typed API client for FastAPI (`frontend/src/lib/api/client.ts`) and wired dashboard/reports views to live reviewer data.
+- 🔄 Next: hook generator/review forms to new FastAPI endpoints, embed report viewer tables, and surface knowledge/doc metrics once APIs are exposed.
+
 ## Completed (Phase B to date)
 - **AWS Generators**: `aws_vpc_networking`, `aws_observability_baseline`, `aws_rds_baseline`, `aws_alb_waf`, `aws_rds_multi_region`, `aws_ecs_fargate_service`, `aws_eks_irsa_service`.
 - **Azure Generators**: `azure_storage_account`, `azure_vnet_baseline`, `azure_key_vault`, `azure_diagnostics_baseline`.

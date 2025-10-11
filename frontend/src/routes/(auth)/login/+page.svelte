@@ -8,13 +8,10 @@
 	const handleSubmit = (event: SubmitEvent) => {
 		event.preventDefault();
 		const trimmed = apiToken.trim();
-		if (!trimmed) {
-			console.info('No API token provided, falling back to local-dev token');
-			setToken('local-dev');
-		} else {
-			setToken(trimmed);
-		}
-		goto('/dashboard');
+		const params = new URLSearchParams(window.location.search);
+		const redirectTo = params.get('redirect') || '/dashboard';
+		setToken(trimmed || 'local-dev');
+		goto(redirectTo, { replaceState: true });
 	};
 </script>
 

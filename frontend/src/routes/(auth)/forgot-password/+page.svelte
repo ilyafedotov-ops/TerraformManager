@@ -4,7 +4,10 @@
 	const handleSubmit = (event: SubmitEvent) => {
 		event.preventDefault();
 		console.info('Password reset placeholder triggered');
-		goto('/login');
+		const params = new URLSearchParams(window.location.search);
+		const redirectTo = params.get('redirect');
+		const target = redirectTo ? `/login?redirect=${encodeURIComponent(redirectTo)}` : '/login';
+		goto(target, { replaceState: true });
 	};
 </script>
 

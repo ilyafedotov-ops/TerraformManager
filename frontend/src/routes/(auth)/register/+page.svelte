@@ -5,8 +5,10 @@ import { setToken } from '$lib/stores/auth';
 const handleSubmit = (event: SubmitEvent) => {
 	event.preventDefault();
 	console.info('Registration placeholder triggered');
+	const params = new URLSearchParams(window.location.search);
+	const redirectTo = params.get('redirect') || '/dashboard';
 	setToken('local-dev');
-	goto('/dashboard');
+	goto(redirectTo, { replaceState: true });
 };
 </script>
 
