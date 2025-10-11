@@ -121,7 +121,10 @@
 - ✅ Dashboard and reports routes now source live data via SSR loaders (`frontend/src/routes/(app)/dashboard/+page.ts`, `frontend/src/routes/(app)/reports/+page.ts`).
 - ✅ API client module (`frontend/src/lib/api/client.ts`) centralizes authenticated fetch logic, sharing the cookie-backed token from the app layout.
 - ✅ Auth layouts persist tokens to both cookie + `localStorage`, support redirect-on-auth, and expose sign-out UI.
-- 🔄 Scan/review, configs, knowledge, and settings pages still rely on placeholder markup pending endpoint wiring and upload APIs.
+- ✅ `POST /scan/upload` supports multipart Terraform uploads; review tab consumes the endpoint with live summaries and artifact downloads.
+- ✅ Knowledge tab consumes `/knowledge/search` and displays scored snippets with Markdown shortcuts.
+- ✅ LLM settings page reads/writes `/settings/llm` and `/settings/llm/test`, surfacing validation + live ping results.
+- 🔄 Remaining: configs CRUD, knowledge sync orchestration, and generator wizard integration with future template APIs.
 
 ### Phase 4 – Port Streamlit-Only Functionality
 1. **Generate Wizards**: For each blueprint (AWS S3, ALB/WAF, RDS, VPC, EKS, Azure KV, Azure Diagnostics, Kubernetes modules), replicate form layout in Svelte components. Serialize payload to template generation API.

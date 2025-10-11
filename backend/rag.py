@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Dict, Any
 import re
 
 from backend.llm_service import KBPassage
@@ -115,6 +115,22 @@ def retrieve_passages(query: str, top_k: int = 3) -> List[KBPassage]:
 
 def retrieve(query: str, top_k: int = 3) -> List[Tuple[str, str]]:
     return [(p.source, p.content) for p in retrieve_passages(query, top_k)]
+
+
+def retrieve_snippets(query: str, top_k: int = 3, max_chars: Optional[int] = 800) -> List[Dict[str, object]]:
+    results: List[Dict[str, object]] = []
+    for passage in retrieve_passages(query, top_k):
+        text = passage.content
+        if max_chars is not None and len(text) > max_chars:
+            text = text[:max_chars]
+        results.append(
+            {
+                "source": passage.source,
+                "content": text,
+                "score": passage.score,
+            }
+        )
+    return results
 
 
 def warm_index() -> int:

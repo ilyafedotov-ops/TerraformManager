@@ -18,6 +18,7 @@ from backend.scanner import scan_paths
 from backend.report_html import render_html_report
 from backend.policies.config import apply_config, load_config
 from backend.knowledge_sync import sync_many
+from backend.rag import retrieve_snippets
 from backend.storage import (
     DEFAULT_DB_PATH,
     get_config,
@@ -309,6 +310,23 @@ def knowledge_sync(req: KnowledgeSyncRequest, _auth: None = Depends(require_api_
             for r in results
         ]
     }
+
+
+class KnowledgeSearchResponse(BaseModel):
+    items: List[Dict[str, Any]]
+
+
+@app.get("/knowledge/search")
+def knowledge_search(q: str, top_k: int = Query(3, ge=1, le=10)) -> KnowledgeSearchResponse:
+    snippets = retrieve_snippets(q, top_k=top_k, max_chars=800)
+    return KnowledgeSearchResponse(items=[
+        {
+            "source": item["source"],
+            "content": item["content"],
+            "score": item.get("score", 0.0),
+        }
+        for item in snippets
+    ])
 
 
 @app.get("/settings/llm")
