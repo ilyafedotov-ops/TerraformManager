@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from uuid import uuid4
 import shutil
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.db.models import (
@@ -282,12 +282,101 @@ def list_projects(
     *,
     db_path: Path = DEFAULT_DB_PATH,
     session: Session | None = None,
+    include_metadata: bool = False,
+    include_stats: bool = True,
+    search: str | None = None,
+    limit: int | None = None,
 ) -> List[Dict[str, Any]]:
     with _get_session(session, db_path) as db:
-        projects = db.execute(
-            select(Project).order_by(Project.updated_at.desc(), Project.created_at.desc())
-        ).scalars()
-        return [project.to_dict(include_metadata=False) for project in projects]
+        stmt = select(Project).order_by(Project.updated_at.desc(), Project.created_at.desc())
+        if search:
+            pattern = f"%{search.lower()}%"
+            stmt = stmt.where(
+                or_(
+                    func.lower(Project.name).like(pattern),
+                    func.lower(Project.slug).like(pattern),
+                )
+            )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        projects = list(db.execute(stmt).scalars())
+        if not include_stats:
+            return [project.to_dict(include_metadata=include_metadata) for project in projects]
+
+        project_ids = [project.id for project in projects]
+        run_counts: Dict[str, int] = {}
+        latest_runs: Dict[str, ProjectRun] = {}
+        assets_count: Dict[str, int] = {}
+        assets_updated: Dict[str, datetime] = {}
+
+        if project_ids:
+            run_count_stmt = (
+                select(ProjectRun.project_id, func.count(ProjectRun.id))
+                .where(ProjectRun.project_id.in_(project_ids))
+                .group_by(ProjectRun.project_id)
+            )
+            for project_id, count in db.execute(run_count_stmt):
+                run_counts[project_id] = int(count or 0)
+
+            latest_run_stmt = (
+                select(ProjectRun)
+                .where(ProjectRun.project_id.in_(project_ids))
+                .order_by(ProjectRun.project_id, ProjectRun.created_at.desc(), ProjectRun.id.desc())
+            )
+            for run in db.execute(latest_run_stmt).scalars():
+                if run.project_id not in latest_runs:
+                    latest_runs[run.project_id] = run
+
+            asset_count_stmt = (
+                select(GeneratedAsset.project_id, func.count(GeneratedAsset.id))
+                .where(GeneratedAsset.project_id.in_(project_ids))
+                .group_by(GeneratedAsset.project_id)
+            )
+            for project_id, count in db.execute(asset_count_stmt):
+                assets_count[project_id] = int(count or 0)
+
+            asset_updated_stmt = (
+                select(GeneratedAsset.project_id, func.max(GeneratedAsset.updated_at))
+                .where(GeneratedAsset.project_id.in_(project_ids))
+                .group_by(GeneratedAsset.project_id)
+            )
+            for project_id, value in db.execute(asset_updated_stmt):
+                if value is not None:
+                    assets_updated[project_id] = value
+
+        results: List[Dict[str, Any]] = []
+        for project in projects:
+            payload = project.to_dict(include_metadata=include_metadata)
+            latest_run = latest_runs.get(project.id)
+            payload["latest_run"] = (
+                {
+                    "id": latest_run.id,
+                    "label": latest_run.label,
+                    "status": latest_run.status,
+                    "kind": latest_run.kind,
+                    "created_at": format_timestamp(latest_run.created_at),
+                    "finished_at": format_timestamp(latest_run.finished_at),
+                    "updated_at": format_timestamp(latest_run.updated_at),
+                }
+                if latest_run
+                else None
+            )
+            payload["run_count"] = run_counts.get(project.id, 0)
+            payload["library_asset_count"] = assets_count.get(project.id, 0)
+
+            last_activity_candidates = [
+                project.updated_at,
+                latest_run.updated_at if latest_run else None,
+                assets_updated.get(project.id),
+            ]
+            last_activity = max(
+                (value for value in last_activity_candidates if value is not None),
+                default=project.updated_at,
+            )
+            payload["last_activity_at"] = format_timestamp(last_activity)
+
+            results.append(payload)
+        return results
 
 
 def get_project(
@@ -725,7 +814,7 @@ def register_generated_asset(
             description=description.strip() if description else None,
             asset_type=cleaned_type,
             tags=tags_value,
-            metadata=metadata_value,
+            asset_metadata=metadata_value,
         )
         db.add(asset)
         db.flush()  # ensure asset.id is available
@@ -760,6 +849,62 @@ def register_generated_asset(
             "asset": payload,
             "version": version.to_dict(include_blob=False),
         }
+
+
+def update_generated_asset(
+    asset_id: str,
+    *,
+    project_id: str | None = None,
+    name: str | None = None,
+    asset_type: str | None = None,
+    description: str | None = None,
+    tags: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Optional[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        asset = db.get(GeneratedAsset, asset_id)
+        if not asset:
+            return None
+        if project_id and asset.project_id != project_id:
+            return None
+
+        if name is not None:
+            trimmed = name.strip()
+            if not trimmed:
+                raise ValueError("asset name cannot be empty")
+            if trimmed != asset.name:
+                existing = db.execute(
+                    select(GeneratedAsset).where(
+                        GeneratedAsset.project_id == asset.project_id,
+                        GeneratedAsset.name == trimmed,
+                        GeneratedAsset.id != asset.id,
+                    )
+                ).scalar_one_or_none()
+                if existing:
+                    raise ValueError(f"asset '{trimmed}' already exists in this project")
+                asset.name = trimmed
+
+        if asset_type is not None:
+            trimmed_type = asset_type.strip()
+            if not trimmed_type:
+                raise ValueError("asset type cannot be empty")
+            asset.asset_type = trimmed_type
+
+        if description is not None:
+            asset.description = description.strip() or None
+
+        if tags is not None:
+            asset.tags = _normalise_tags(tags)
+
+        if metadata is not None:
+            if metadata and not isinstance(metadata, dict):
+                raise ValueError("metadata must be a JSON object")
+            asset.asset_metadata = dict(metadata or {})
+
+        db.flush()
+        return asset.to_dict(include_versions=True)
 
 
 def add_generated_asset_version(
@@ -973,6 +1118,7 @@ def diff_generated_asset_versions(
     *,
     project_id: str | None = None,
     max_bytes: int = MAX_VERSION_TEXT_BYTES,
+    ignore_whitespace: bool = False,
     db_path: Path = DEFAULT_DB_PATH,
     session: Session | None = None,
 ) -> Dict[str, Any]:
@@ -994,8 +1140,12 @@ def diff_generated_asset_versions(
         base_text = _read_text_file(base_path, max_bytes=max_bytes)
         compare_text = _read_text_file(compare_path, max_bytes=max_bytes)
 
-        base_lines = base_text.splitlines()
-        compare_lines = compare_text.splitlines()
+        if ignore_whitespace:
+            base_lines = [line.strip() for line in base_text.splitlines()]
+            compare_lines = [line.strip() for line in compare_text.splitlines()]
+        else:
+            base_lines = base_text.splitlines()
+            compare_lines = compare_text.splitlines()
         diff_lines = difflib.unified_diff(
             base_lines,
             compare_lines,
@@ -1009,6 +1159,7 @@ def diff_generated_asset_versions(
             "base": base_version.to_dict(include_blob=False),
             "compare": compare_version.to_dict(include_blob=False),
             "diff": diff_text,
+            "ignore_whitespace": ignore_whitespace,
         }
 
 

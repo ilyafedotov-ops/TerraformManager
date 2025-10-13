@@ -5,6 +5,7 @@ import {
 	type GeneratedAssetRegisterResponse,
 	type GeneratedAssetSummary,
 	type GeneratedAssetVersionCreatePayload,
+	type GeneratedAssetUpdatePayload,
 	type ProjectCreatePayload,
 	type ProjectDetail,
 	type ProjectRunCreatePayload,
@@ -25,7 +26,8 @@ import {
 	addProjectLibraryAssetVersion as apiAddProjectLibraryAssetVersion,
 	deleteProjectLibraryAssetVersion as apiDeleteProjectLibraryAssetVersion,
 	deleteProjectLibraryAsset as apiDeleteProjectLibraryAsset,
-	getProjectLibraryAsset as apiGetProjectLibraryAsset
+	getProjectLibraryAsset as apiGetProjectLibraryAsset,
+	updateProjectLibraryAsset as apiUpdateProjectLibraryAsset
 } from '$lib/api/client';
 
 type FetchFn = typeof fetch;
@@ -393,6 +395,39 @@ function createProjectStore() {
 						loading: false
 					};
 				});
+			} catch (error) {
+				const message = normaliseError(error);
+				update((state) => ({ ...state, loading: false, error: message }));
+				throw error;
+			}
+		},
+		async updateLibraryAsset(
+			fetchFn: FetchFn,
+			token: string,
+			projectId: string,
+			assetId: string,
+			payload: GeneratedAssetUpdatePayload
+		) {
+			update((state) => ({ ...state, loading: true, error: null }));
+			try {
+				const updated = await apiUpdateProjectLibraryAsset(fetchFn, token, projectId, assetId, payload);
+				update((state) => {
+					const cache = state.library[projectId];
+					const assets = upsertLibraryAsset(cache?.assets ?? [], updated);
+					return {
+						...state,
+						library: {
+							...state.library,
+							[projectId]: {
+								assets,
+								includeVersions: cache?.includeVersions ?? true,
+								fetchedAt: new Date().toISOString()
+							}
+						},
+						loading: false
+					};
+				});
+				return updated;
 			} catch (error) {
 				const message = normaliseError(error);
 				update((state) => ({ ...state, loading: false, error: message }));

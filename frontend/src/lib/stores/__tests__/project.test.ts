@@ -18,7 +18,8 @@ const mocks = vi.hoisted(() => ({
 	addProjectLibraryAssetVersion: vi.fn(),
 	deleteProjectLibraryAssetVersion: vi.fn(),
 	deleteProjectLibraryAsset: vi.fn(),
-	getProjectLibraryAsset: vi.fn()
+	getProjectLibraryAsset: vi.fn(),
+	updateProjectLibraryAsset: vi.fn()
 }));
 
 vi.mock('$lib/api/client', () => ({
@@ -36,7 +37,8 @@ vi.mock('$lib/api/client', () => ({
 	addProjectLibraryAssetVersion: mocks.addProjectLibraryAssetVersion,
 	deleteProjectLibraryAssetVersion: mocks.deleteProjectLibraryAssetVersion,
 	deleteProjectLibraryAsset: mocks.deleteProjectLibraryAsset,
-	getProjectLibraryAsset: mocks.getProjectLibraryAsset
+	getProjectLibraryAsset: mocks.getProjectLibraryAsset,
+	updateProjectLibraryAsset: mocks.updateProjectLibraryAsset
 }));
 
 const snapshot = () => {
@@ -345,5 +347,30 @@ describe('projectState', () => {
 
 		const state = snapshot();
 		expect(state.library[mockProject.id]?.assets).toHaveLength(0);
+	});
+
+	it('updates library asset metadata', async () => {
+		projectState.upsertProject(mockProject);
+		projectState.setActiveProject(mockProject.id);
+		projectState.clearLibrary();
+		mocks.listProjectLibrary.mockResolvedValueOnce([mockAsset]);
+		await projectState.loadLibrary(vi.fn(), 'token', mockProject.id, true);
+
+		const updatedAsset = {
+			...mockAsset,
+			description: 'Updated description',
+			tags: ['baseline', 'prod']
+		};
+		mocks.updateProjectLibraryAsset.mockResolvedValueOnce(updatedAsset);
+
+		const result = await projectState.updateLibraryAsset(vi.fn(), 'token', mockProject.id, mockAsset.id, {
+			description: updatedAsset.description,
+			tags: updatedAsset.tags
+		});
+
+		expect(result.description).toBe('Updated description');
+		const state = snapshot();
+		expect(state.library[mockProject.id]?.assets[0].description).toBe('Updated description');
+		expect(state.library[mockProject.id]?.assets[0].tags).toEqual(updatedAsset.tags);
 	});
 });

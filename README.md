@@ -81,6 +81,8 @@ pnpm dev -- --open
 - Defaults to `http://localhost:5173` and proxies API calls to `http://localhost:8890`; export `VITE_API_BASE` to change.
 - Authenticated routes live under `(app)/` while guest flows live under `(auth)/`; tokens persist via cookies/local storage helpers.
 - The **Projects** workspace lets you create, edit, and delete project folders entirely in the browser, browse recent runs, upload or delete artifacts, and download generator/review outputs without touching the CLI. Select a project and scroll to the "Project artifacts" panel to manage files directly from the UI.
+- Promoting an artifact now opens a structured dialog where you can capture asset type, tags, notes, and JSON metadata before saving it to the library. The dialog remembers your last-used defaults, suggests tags from existing assets, and the library view lets you edit metadata in-place as requirements evolve.
+- Library diffs support unified or side-by-side layouts, an “ignore whitespace” toggle, and copy/download helpers so reviewers can share patches or skim large changes quickly.
 
 ### Authentication Settings
 
