@@ -12,6 +12,8 @@ from backend.llm_service import (
     request_explanation,
     request_patch,
 )
+from backend.costs import run_infracost
+from backend.drift import parse_plan_summary
 from backend.policies import ALL_CHECKS
 from backend.policies.config import load_config, apply_config
 from backend.policies.metadata import get_rule_metadata
@@ -53,6 +55,8 @@ def scan_paths(
     paths: List[Path],
     use_terraform_validate: bool = False,
     llm_options: Optional[Dict[str, Any]] = None,
+    cost_options: Optional[Dict[str, Any]] = None,
+    plan_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     LOGGER.debug(
         "scan_paths invoked",
@@ -60,6 +64,8 @@ def scan_paths(
             "paths": [str(p) for p in paths],
             "use_terraform_validate": use_terraform_validate,
             "llm_enabled": bool(llm_options),
+            "cost_enabled": bool(cost_options),
+            "plan_path": str(plan_path) if plan_path else None,
         },
     )
     review_config = load_config(paths)
@@ -128,12 +134,40 @@ def scan_paths(
             "explanations_enabled": bool(llm_options.get("enable_explanations")),
             "patches_enabled": bool(llm_options.get("enable_patches")),
         }
+
+    if cost_options:
+        usage = cost_options.get("usage_file")
+        usage_path = Path(usage).resolve() if usage else None
+        cost_result = run_infracost(paths, usage_file=usage_path)
+        report["cost"] = cost_result
+        if cost_result and not cost_result.get("error"):
+            cost_summary = cost_result.get("summary") or {}
+            summary["cost"] = {
+                "currency": cost_result.get("currency"),
+                "total_monthly_cost": cost_summary.get("total_monthly_cost"),
+                "total_hourly_cost": cost_summary.get("total_hourly_cost"),
+                "diff_monthly_cost": cost_summary.get("diff_monthly_cost"),
+                "diff_hourly_cost": cost_summary.get("diff_hourly_cost"),
+            }
+
+    if plan_path:
+        drift_result = parse_plan_summary(plan_path)
+        report["drift"] = drift_result
+        if drift_result and not drift_result.get("error"):
+            summary["drift"] = {
+                "has_changes": drift_result.get("has_changes", False),
+                "total_changes": drift_result.get("total_changes", 0),
+                "counts": drift_result.get("counts", {}),
+            }
+
     LOGGER.info(
         "scan_paths completed",
         extra={
             "files_scanned": files_seen,
             "active_findings": len(active_findings),
             "llm": report.get("llm"),
+            "cost_summary": summary.get("cost"),
+            "drift": summary.get("drift"),
         },
     )
     return report

@@ -1,228 +1,239 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-from dataclasses import dataclass
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional
 
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
-DEFAULT_DB_PATH = Path("data/app.db")
+from backend.db.models import Config, Report, Setting, format_timestamp
+from backend.db.session import DEFAULT_DB_PATH as _DEFAULT_DB_PATH, init_models, session_scope
 
-
-def _ensure_parent(path: Path) -> None:
-    if path.parent and not path.parent.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-
-def _connect(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
-    _ensure_parent(db_path)
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    return conn
+DEFAULT_DB_PATH = _DEFAULT_DB_PATH
 
 
 def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
-    conn = _connect(db_path)
-    try:
-        cur = conn.cursor()
-        # configs: named YAML/JSON blobs for scanner config (waivers/thresholds)
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS configs (
-                name TEXT PRIMARY KEY,
-                kind TEXT NOT NULL DEFAULT 'tfreview',
-                payload TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
-            """
-        )
-        # reports: persisted scan results for advanced reporting
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS reports (
-                id TEXT PRIMARY KEY,
-                summary TEXT NOT NULL,
-                report TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
-            """
-        )
-        # settings: simple key/value store (JSON encoded values)
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
-            """
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    """Initialise database tables using SQLAlchemy metadata."""
+    init_models(db_path)
 
 
-def upsert_config(name: str, payload: str, kind: str = "tfreview", db_path: Path = DEFAULT_DB_PATH) -> None:
-    conn = _connect(db_path)
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO configs(name, kind, payload)
-            VALUES(?, ?, ?)
-            ON CONFLICT(name) DO UPDATE SET
-              kind=excluded.kind,
-              payload=excluded.payload,
-              updated_at=CURRENT_TIMESTAMP
-            ;
-            """,
-            (name, kind, payload),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+def upsert_config(
+    name: str,
+    payload: str,
+    kind: str = "tfreview",
+    db_path: Path = DEFAULT_DB_PATH,
+    *,
+    session: Session | None = None,
+) -> None:
+    with _get_session(session, db_path) as db:
+        config = db.get(Config, name)
+        if config:
+            config.kind = kind
+            config.payload = payload
+        else:
+            db.add(Config(name=name, kind=kind, payload=payload))
+        db.flush()
 
 
-def get_config(name: str, db_path: Path = DEFAULT_DB_PATH) -> Optional[Dict[str, Any]]:
-    conn = _connect(db_path)
-    try:
-        cur = conn.cursor()
-        row = cur.execute("SELECT name, kind, payload, created_at, updated_at FROM configs WHERE name=?", (name,)).fetchone()
-        if not row:
+def get_config(
+    name: str,
+    db_path: Path = DEFAULT_DB_PATH,
+    *,
+    session: Session | None = None,
+) -> Optional[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        config = db.get(Config, name)
+        if not config:
             return None
-        return {
-            "name": row["name"],
-            "kind": row["kind"],
-            "payload": row["payload"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
-    finally:
-        conn.close()
+        return config.as_dict()
 
 
-def list_configs(db_path: Path = DEFAULT_DB_PATH) -> List[Dict[str, Any]]:
-    conn = _connect(db_path)
-    try:
-        cur = conn.cursor()
-        rows = cur.execute("SELECT name, kind, length(payload) as size, created_at, updated_at FROM configs ORDER BY updated_at DESC").fetchall()
-        return [dict(row) for row in rows]
-    finally:
-        conn.close()
-
-
-def delete_config(name: str, db_path: Path = DEFAULT_DB_PATH) -> bool:
-    conn = _connect(db_path)
-    try:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM configs WHERE name=?", (name,))
-        conn.commit()
-        return cur.rowcount > 0
-    finally:
-        conn.close()
-
-
-def save_report(report_id: str, summary: Dict[str, Any], report: Dict[str, Any], db_path: Path = DEFAULT_DB_PATH) -> None:
-    conn = _connect(db_path)
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT OR REPLACE INTO reports(id, summary, report, created_at) VALUES(?, ?, ?, COALESCE((SELECT created_at FROM reports WHERE id=?), CURRENT_TIMESTAMP))",
-            (report_id, json.dumps(summary), json.dumps(report), report_id),
+def list_configs(
+    db_path: Path = DEFAULT_DB_PATH,
+    *,
+    session: Session | None = None,
+) -> List[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        stmt = (
+            select(
+                Config.name,
+                Config.kind,
+                func.length(Config.payload).label("size"),
+                Config.created_at,
+                Config.updated_at,
+            )
+            .order_by(Config.updated_at.desc())
         )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def list_reports(limit: int = 50, db_path: Path = DEFAULT_DB_PATH) -> List[Dict[str, Any]]:
-    conn = _connect(db_path)
-    try:
-        cur = conn.cursor()
-        rows = cur.execute("SELECT id, summary, created_at FROM reports ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        rows = db.execute(stmt).all()
         results: List[Dict[str, Any]] = []
         for row in rows:
-            try:
-                summary = json.loads(row["summary"]) if row["summary"] else {}
-            except Exception:
-                summary = {}
-            results.append({"id": row["id"], "summary": summary, "created_at": row["created_at"]})
+            results.append(
+                {
+                    "name": row.name,
+                    "kind": row.kind,
+                    "size": int(row.size or 0),
+                    "created_at": format_timestamp(row.created_at),
+                    "updated_at": format_timestamp(row.updated_at),
+                }
+            )
         return results
-    finally:
-        conn.close()
 
 
-def get_report(report_id: str, db_path: Path = DEFAULT_DB_PATH) -> Optional[Dict[str, Any]]:
-    conn = _connect(db_path)
-    try:
-        cur = conn.cursor()
-        row = cur.execute("SELECT id, summary, report, created_at FROM reports WHERE id=?", (report_id,)).fetchone()
-        if not row:
-            return None
-        try:
-            summary = json.loads(row["summary"]) if row["summary"] else {}
-        except Exception:
-            summary = {}
-        try:
-            report = json.loads(row["report"]) if row["report"] else {}
-        except Exception:
-            report = {}
-        return {"id": row["id"], "summary": summary, "report": report, "created_at": row["created_at"]}
-    finally:
-        conn.close()
+def delete_config(
+    name: str,
+    db_path: Path = DEFAULT_DB_PATH,
+    *,
+    session: Session | None = None,
+) -> bool:
+    with _get_session(session, db_path) as db:
+        config = db.get(Config, name)
+        if not config:
+            return False
+        db.delete(config)
+        db.flush()
+        return True
 
 
-def delete_report(report_id: str, db_path: Path = DEFAULT_DB_PATH) -> bool:
-    conn = _connect(db_path)
-    try:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM reports WHERE id=?", (report_id,))
-        conn.commit()
-        return cur.rowcount > 0
-    finally:
-        conn.close()
+def save_report(
+    report_id: str,
+    summary: Dict[str, Any],
+    report: Dict[str, Any],
+    db_path: Path = DEFAULT_DB_PATH,
+    *,
+    session: Session | None = None,
+) -> None:
+    summary_json = json.dumps(summary)
+    report_json = json.dumps(report)
+    with _get_session(session, db_path) as db:
+        existing = db.get(Report, report_id)
+        if existing:
+            existing.summary = summary_json
+            existing.report = report_json
+        else:
+            db.add(Report(id=report_id, summary=summary_json, report=report_json))
+        db.flush()
 
 
-def upsert_setting(key: str, value: Dict[str, Any] | str, db_path: Path = DEFAULT_DB_PATH) -> None:
-    import json as _json
-    if not isinstance(value, str):
-        payload = _json.dumps(value)
-    else:
-        payload = value
-    conn = _connect(db_path)
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP
-            """,
-            (key, payload),
+def list_reports(
+    limit: int = 50,
+    db_path: Path = DEFAULT_DB_PATH,
+    *,
+    session: Session | None = None,
+) -> List[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        stmt = (
+            select(Report.id, Report.summary, Report.created_at)
+            .order_by(Report.created_at.desc())
+            .limit(limit)
         )
-        conn.commit()
-    finally:
-        conn.close()
+        rows = db.execute(stmt).all()
+        results: List[Dict[str, Any]] = []
+        for row in rows:
+            results.append(
+                {
+                    "id": row.id,
+                    "summary": _safe_json_load(row.summary, expect_mapping=True),
+                    "created_at": format_timestamp(row.created_at),
+                }
+            )
+        return results
 
 
-def get_setting(key: str, db_path: Path = DEFAULT_DB_PATH) -> Optional[str]:
-    conn = _connect(db_path)
-    try:
-        cur = conn.cursor()
-        row = cur.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-        if not row:
+def get_report(
+    report_id: str,
+    db_path: Path = DEFAULT_DB_PATH,
+    *,
+    session: Session | None = None,
+) -> Optional[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        record = db.get(Report, report_id)
+        if not record:
             return None
-        return row["value"]
-    finally:
-        conn.close()
+        return {
+            "id": record.id,
+            "summary": _safe_json_load(record.summary, expect_mapping=True),
+            "report": _safe_json_load(record.report, expect_mapping=False),
+            "created_at": format_timestamp(record.created_at),
+        }
 
 
-def get_llm_settings(db_path: Path = DEFAULT_DB_PATH) -> Dict[str, Any]:
-    import json as _json
-    raw = get_setting("llm", db_path=db_path)
+def delete_report(
+    report_id: str,
+    db_path: Path = DEFAULT_DB_PATH,
+    *,
+    session: Session | None = None,
+) -> bool:
+    with _get_session(session, db_path) as db:
+        record = db.get(Report, report_id)
+        if not record:
+            return False
+        db.delete(record)
+        db.flush()
+        return True
+
+
+def upsert_setting(
+    key: str,
+    value: Dict[str, Any] | str,
+    db_path: Path = DEFAULT_DB_PATH,
+    *,
+    session: Session | None = None,
+) -> None:
+    payload = value if isinstance(value, str) else json.dumps(value)
+    with _get_session(session, db_path) as db:
+        record = db.get(Setting, key)
+        if record:
+            record.value = payload
+        else:
+            db.add(Setting(key=key, value=payload))
+        db.flush()
+
+
+def get_setting(
+    key: str,
+    db_path: Path = DEFAULT_DB_PATH,
+    *,
+    session: Session | None = None,
+) -> Optional[str]:
+    with _get_session(session, db_path) as db:
+        record = db.get(Setting, key)
+        if not record:
+            return None
+        return record.value
+
+
+def get_llm_settings(
+    db_path: Path = DEFAULT_DB_PATH,
+    *,
+    session: Session | None = None,
+) -> Dict[str, Any]:
+    raw = get_setting("llm", db_path=db_path, session=session)
     if not raw:
         return {"provider": "off"}
     try:
-        return _json.loads(raw)
+        return json.loads(raw)
     except Exception:
         return {"provider": "off"}
+
+
+def _safe_json_load(value: Optional[str], *, expect_mapping: bool) -> Any:
+    if not value:
+        return {} if expect_mapping else {}
+    try:
+        data = json.loads(value)
+        if expect_mapping and not isinstance(data, dict):
+            return {}
+        return data
+    except Exception:
+        return {} if expect_mapping else {}
+
+
+@contextmanager
+def _get_session(existing: Session | None, db_path: Path) -> Iterator[Session]:
+    if existing is not None:
+        yield existing
+        return
+    with session_scope(db_path) as scoped:
+        yield scoped

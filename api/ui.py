@@ -4,10 +4,12 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
 
+from backend.db import get_session_dependency
 from backend.scanner import scan_paths
 from backend.report_html import render_html_report
 from backend.policies.config import apply_config, load_config
@@ -26,7 +28,6 @@ from backend.storage import (
 from backend.knowledge_sync import sync_many
 from backend.version import __version__
 from urllib.parse import quote_plus
-from fastapi import Response
 from backend.report_csv import render_csv_findings
 
 
@@ -45,8 +46,11 @@ def root() -> RedirectResponse:
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
-def dashboard(request: Request) -> HTMLResponse:
-    reports = list_reports(limit=20)
+def dashboard(
+    request: Request,
+    session: Session = Depends(get_session_dependency),
+) -> HTMLResponse:
+    reports = list_reports(limit=20, session=session)
     total = len(reports)
     last = reports[0] if reports else None
     sev_counts: Dict[str, int] = {}
@@ -76,11 +80,16 @@ def scan_page(request: Request) -> HTMLResponse:
 
 
 @router.post("/scan/execute", response_class=HTMLResponse)
-def scan_execute(request: Request, paths: str = Form(...), terraform_validate: Optional[bool] = Form(False)) -> HTMLResponse:
+def scan_execute(
+    request: Request,
+    paths: str = Form(...),
+    terraform_validate: Optional[bool] = Form(False),
+    session: Session = Depends(get_session_dependency),
+) -> HTMLResponse:
     path_list = [p.strip() for p in (paths or "").split(",") if p.strip()]
     if not path_list:
         raise HTTPException(400, "No paths provided")
-    llm_opts = db_get_llm_settings()
+    llm_opts = db_get_llm_settings(session=session)
     provider = (llm_opts.get("provider") or "off").lower()
     llm = None
     if provider in {"openai", "azure"}:
@@ -93,7 +102,7 @@ def scan_execute(request: Request, paths: str = Form(...), terraform_validate: O
     rid = None
     try:
         rid = str(uuid.uuid4())
-        save_report(rid, report.get("summary", {}), report)
+        save_report(rid, report.get("summary", {}), report, session=session)
     except Exception:
         pass
     summary_json = json.dumps(report.get("summary", {}), indent=2)
@@ -108,14 +117,21 @@ def scan_execute(request: Request, paths: str = Form(...), terraform_validate: O
 
 
 @router.get("/reports", response_class=HTMLResponse)
-def reports_page(request: Request) -> HTMLResponse:
-    items = list_reports(limit=100)
+def reports_page(
+    request: Request,
+    session: Session = Depends(get_session_dependency),
+) -> HTMLResponse:
+    items = list_reports(limit=100, session=session)
     return TEMPLATES.TemplateResponse("reports.html", {"request": request, "items": items})
 
 
 @router.get("/reports/{report_id}", response_class=HTMLResponse)
-def report_detail(request: Request, report_id: str) -> HTMLResponse:
-    rec = get_report(report_id)
+def report_detail(
+    request: Request,
+    report_id: str,
+    session: Session = Depends(get_session_dependency),
+) -> HTMLResponse:
+    rec = get_report(report_id, session=session)
     if not rec:
         raise HTTPException(404, "report not found")
     # Embed the rendered HTML report within our frame
@@ -127,36 +143,58 @@ def report_detail(request: Request, report_id: str) -> HTMLResponse:
 
 
 @router.post("/reports/delete", response_class=HTMLResponse)
-def reports_delete(request: Request, report_id: str = Form(...)) -> HTMLResponse:
-    delete_report_record(report_id)
-    items = list_reports(limit=100)
+def reports_delete(
+    request: Request,
+    report_id: str = Form(...),
+    session: Session = Depends(get_session_dependency),
+) -> HTMLResponse:
+    delete_report_record(report_id, session=session)
+    items = list_reports(limit=100, session=session)
     return TEMPLATES.TemplateResponse("partials/reports_table.html", {"request": request, "items": items})
 
 
 @router.get("/configs", response_class=HTMLResponse)
-def configs_page(request: Request) -> HTMLResponse:
-    configs = list_configs()
+def configs_page(
+    request: Request,
+    session: Session = Depends(get_session_dependency),
+) -> HTMLResponse:
+    configs = list_configs(session=session)
     return TEMPLATES.TemplateResponse("configs.html", {"request": request, "configs": configs})
 
 
 @router.post("/configs/save", response_class=HTMLResponse)
-def configs_save(request: Request, name: str = Form(...), payload: str = Form(...)) -> HTMLResponse:
-    upsert_config(name, payload)
-    configs = list_configs()
+def configs_save(
+    request: Request,
+    name: str = Form(...),
+    payload: str = Form(...),
+    session: Session = Depends(get_session_dependency),
+) -> HTMLResponse:
+    upsert_config(name, payload, session=session)
+    configs = list_configs(session=session)
     return TEMPLATES.TemplateResponse("partials/configs_list.html", {"request": request, "configs": configs})
 
 
 @router.post("/configs/delete", response_class=HTMLResponse)
-def configs_delete(request: Request, name: str = Form(...)) -> HTMLResponse:
-    delete_config_record(name)
-    configs = list_configs()
+def configs_delete(
+    request: Request,
+    name: str = Form(...),
+    session: Session = Depends(get_session_dependency),
+) -> HTMLResponse:
+    delete_config_record(name, session=session)
+    configs = list_configs(session=session)
     return TEMPLATES.TemplateResponse("partials/configs_list.html", {"request": request, "configs": configs})
 
 
 @router.post("/configs/preview", response_class=HTMLResponse)
-def configs_preview(request: Request, config_name: str = Form(...), report_id: Optional[str] = Form(None), paths: Optional[str] = Form(None)) -> HTMLResponse:
+def configs_preview(
+    request: Request,
+    config_name: str = Form(...),
+    report_id: Optional[str] = Form(None),
+    paths: Optional[str] = Form(None),
+    session: Session = Depends(get_session_dependency),
+) -> HTMLResponse:
     if report_id:
-        rec = get_report(report_id)
+        rec = get_report(report_id, session=session)
         if not rec:
             raise HTTPException(404, "report not found")
         report = rec["report"]
@@ -166,7 +204,7 @@ def configs_preview(request: Request, config_name: str = Form(...), report_id: O
             raise HTTPException(400, "Provide either report_id or paths")
         report = scan_paths([Path(p) for p in path_list], use_terraform_validate=False)
 
-    cfg = get_config(config_name)
+    cfg = get_config(config_name, session=session)
     if not cfg:
         raise HTTPException(404, "config not found")
     tmp_path = Path("/tmp/tfreview.preview.yaml")
@@ -182,16 +220,28 @@ def configs_preview(request: Request, config_name: str = Form(...), report_id: O
 
 # Inline report viewer (filterable)
 @router.get("/reports/{report_id}/viewer", response_class=HTMLResponse)
-def report_viewer(request: Request, report_id: str) -> HTMLResponse:
-    rec = get_report(report_id)
+def report_viewer(
+    request: Request,
+    report_id: str,
+    session: Session = Depends(get_session_dependency),
+) -> HTMLResponse:
+    rec = get_report(report_id, session=session)
     if not rec:
         raise HTTPException(404, "report not found")
     return TEMPLATES.TemplateResponse("report_viewer.html", {"request": request, "report_id": report_id})
 
 
 @router.get("/reports/{report_id}/viewer/table", response_class=HTMLResponse)
-def report_viewer_table(request: Request, report_id: str, severity: Optional[str] = None, rule_contains: Optional[str] = None, q: Optional[str] = None, group_by: Optional[str] = None) -> HTMLResponse:
-    rec = get_report(report_id)
+def report_viewer_table(
+    request: Request,
+    report_id: str,
+    severity: Optional[str] = None,
+    rule_contains: Optional[str] = None,
+    q: Optional[str] = None,
+    group_by: Optional[str] = None,
+    session: Session = Depends(get_session_dependency),
+) -> HTMLResponse:
+    rec = get_report(report_id, session=session)
     if not rec:
         raise HTTPException(404, "report not found")
     findings = list(rec["report"].get("findings", []))
@@ -214,8 +264,14 @@ def report_viewer_table(request: Request, report_id: str, severity: Optional[str
 
 
 @router.get("/reports/{report_id}/viewer/csv")
-def report_viewer_csv(report_id: str, severity: Optional[str] = None, rule_contains: Optional[str] = None, q: Optional[str] = None):
-    rec = get_report(report_id)
+def report_viewer_csv(
+    report_id: str,
+    severity: Optional[str] = None,
+    rule_contains: Optional[str] = None,
+    q: Optional[str] = None,
+    session: Session = Depends(get_session_dependency),
+):
+    rec = get_report(report_id, session=session)
     if not rec:
         raise HTTPException(404, "report not found")
     findings = list(rec["report"].get("findings", []))
@@ -231,7 +287,10 @@ def report_viewer_csv(report_id: str, severity: Optional[str] = None, rule_conta
 
 
 @router.get("/reports/export-zip")
-def reports_export_zip(ids: Optional[str] = None):
+def reports_export_zip(
+    ids: Optional[str] = None,
+    session: Session = Depends(get_session_dependency),
+):
     # ids: comma-separated report IDs
     id_list: List[str] = []
     if ids:
@@ -247,7 +306,7 @@ def reports_export_zip(ids: Optional[str] = None):
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
         found_any = False
         for rid in id_list:
-            rec = get_report(rid)
+            rec = get_report(rid, session=session)
             if not rec:
                 continue
             found_any = True
@@ -262,7 +321,10 @@ def reports_export_zip(ids: Optional[str] = None):
 
 
 @router.get("/reports/export-json")
-def reports_export_json_zip(ids: Optional[str] = None):
+def reports_export_json_zip(
+    ids: Optional[str] = None,
+    session: Session = Depends(get_session_dependency),
+):
     id_list: List[str] = []
     if ids:
         id_list = [s for s in (ids.split(",") if ids else []) if s]
@@ -274,7 +336,7 @@ def reports_export_json_zip(ids: Optional[str] = None):
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
         found_any = False
         for rid in id_list:
-            rec = get_report(rid)
+            rec = get_report(rid, session=session)
             if not rec:
                 continue
             found_any = True
@@ -287,7 +349,10 @@ def reports_export_json_zip(ids: Optional[str] = None):
 
 
 @router.get("/reports/export-html")
-def reports_export_html_zip(ids: Optional[str] = None):
+def reports_export_html_zip(
+    ids: Optional[str] = None,
+    session: Session = Depends(get_session_dependency),
+):
     id_list: List[str] = []
     if ids:
         id_list = [s for s in (ids.split(",") if ids else []) if s]
@@ -300,7 +365,7 @@ def reports_export_html_zip(ids: Optional[str] = None):
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
         found_any = False
         for rid in id_list:
-            rec = get_report(rid)
+            rec = get_report(rid, session=session)
             if not rec:
                 continue
             found_any = True
@@ -313,22 +378,28 @@ def reports_export_html_zip(ids: Optional[str] = None):
 
 
 @router.post("/reports/delete-bulk", response_class=HTMLResponse)
-async def reports_delete_bulk(request: Request) -> HTMLResponse:
+async def reports_delete_bulk(
+    request: Request,
+    session: Session = Depends(get_session_dependency),
+) -> HTMLResponse:
     form = await request.form()
     ids = form.getlist("report_id")
     for rid in ids:
-        delete_report_record(str(rid))
-    items = list_reports(limit=100)
+        delete_report_record(str(rid), session=session)
+    items = list_reports(limit=100, session=session)
     return TEMPLATES.TemplateResponse("partials/reports_table.html", {"request": request, "items": items})
 
 
 @router.post("/configs/delete-bulk", response_class=HTMLResponse)
-async def configs_delete_bulk(request: Request) -> HTMLResponse:
+async def configs_delete_bulk(
+    request: Request,
+    session: Session = Depends(get_session_dependency),
+) -> HTMLResponse:
     form = await request.form()
     names = form.getlist("config_name")
     for name in names:
-        delete_config_record(str(name))
-    configs = list_configs()
+        delete_config_record(str(name), session=session)
+    configs = list_configs(session=session)
     return TEMPLATES.TemplateResponse("partials/configs_list.html", {"request": request, "configs": configs})
 
 
@@ -357,10 +428,13 @@ def knowledge_sync(request: Request, sources: str = Form(...)) -> HTMLResponse:
 
 
 @router.get("/settings", response_class=HTMLResponse)
-def settings_page(request: Request) -> HTMLResponse:
+def settings_page(
+    request: Request,
+    session: Session = Depends(get_session_dependency),
+) -> HTMLResponse:
     token_required = bool(os.getenv("TFM_API_TOKEN") or os.getenv("API_TOKEN"))
-    port = os.getenv("TFM_PORT") or os.getenv("PORT") or "8787"
-    llm_settings = db_get_llm_settings()
+    port = os.getenv("TFM_PORT") or os.getenv("PORT") or "8890"
+    llm_settings = db_get_llm_settings(session=session)
     return TEMPLATES.TemplateResponse("settings.html", {"request": request, "token_required": token_required, "port": port, "llm": llm_settings})
 
 
@@ -374,6 +448,7 @@ def settings_llm_save(
     deployment_name: Optional[str] = Form(None),
     enable_explanations: Optional[str] = Form(None),
     enable_patches: Optional[str] = Form(None),
+    session: Session = Depends(get_session_dependency),
 ) -> HTMLResponse:
     payload = {
         "provider": provider.strip().lower() or "off",
@@ -390,8 +465,8 @@ def settings_llm_save(
         payload["enable_explanations"] = True
     if enable_patches is not None:
         payload["enable_patches"] = True
-    db_upsert_setting("llm", payload)
-    llm_settings = db_get_llm_settings()
+    db_upsert_setting("llm", payload, session=session)
+    llm_settings = db_get_llm_settings(session=session)
     token_required = bool(os.getenv("TFM_API_TOKEN") or os.getenv("API_TOKEN"))
-    port = os.getenv("TFM_PORT") or os.getenv("PORT") or "8787"
+    port = os.getenv("TFM_PORT") or os.getenv("PORT") or "8890"
     return TEMPLATES.TemplateResponse("partials/settings_llm.html", {"request": request, "llm": llm_settings, "token_required": token_required, "port": port})

@@ -73,7 +73,7 @@ def setup_logging(service: str = "terraform-manager", level: Optional[str] = Non
     """
     Configure structured logging once per process.
 
-    Subsequent invocations no-op to avoid clobbering handlers (useful for Streamlit reloads).
+    Subsequent invocations no-op to avoid clobbering handlers (useful for dev-server reloads).
     """
 
     global _CONFIGURED

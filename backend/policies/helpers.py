@@ -32,3 +32,22 @@ def find_line_number(text: str, target: str) -> int:
         if target in line:
             return idx
     return 1
+
+
+def extract_block(text: str, brace_index: int) -> str:
+    """
+    Return the text block starting at the provided `{` index, accounting for nested braces.
+    If the block is not properly closed, returns the remainder of the string.
+    """
+    depth = 0
+    end = brace_index
+    while end < len(text):
+        char = text[end]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[brace_index : end + 1]
+        end += 1
+    return text[brace_index:]

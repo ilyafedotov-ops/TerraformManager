@@ -1,10 +1,15 @@
 import argparse
 import json
+import os
+import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
+from getpass import getpass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
+import httpx
 import yaml
 
 from backend.llm_service import DEFAULT_OPENAI_MODEL
@@ -14,11 +19,73 @@ from backend.utils.env import load_env_file
 from backend.utils.logging import get_logger, setup_logging
 from backend.utils.patch import collect_patches, format_patch_bundle
 from backend.utils.settings import get_llm_settings, update_llm_settings
+from backend.auth import auth_settings
+from backend.generators.docs import generate_docs
+
+
+PRECOMMIT_TEMPLATE = """repos:
+- repo: https://github.com/antonbabenko/pre-commit-terraform
+  rev: v1.88.0
+  hooks:
+    - id: terraform_fmt
+    - id: terraform_validate
+    - id: terraform_docs
+    - id: terraform_tflint
+    - id: terraform_checkov
+- repo: https://github.com/infracost/infracost
+  rev: v0.10.33
+  hooks:
+    - id: infracost_breakdown
+      args:
+        - --path=.
+        - --usage-file=usage.yml
+      additional_dependencies:
+        - pyaml
+"""
 
 
 def _ensure_parent(path: Path) -> None:
     if path.parent and not path.parent.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _collect_fmt_targets(paths: Sequence[Path]) -> List[Path]:
+    targets: set[Path] = set()
+    for path in paths:
+        resolved = path.resolve()
+        if resolved.is_file():
+            targets.add(resolved.parent)
+        else:
+            targets.add(resolved)
+    return sorted(targets)
+
+
+def _run_terraform_fmt(target_dirs: Sequence[Path], write: bool, logger) -> None:
+    binary = shutil.which("terraform")
+    if not binary:
+        logger.warning("terraform binary not found on PATH; skipping fmt step.")
+        return
+
+    flag = [] if write else ["-check"]
+    mode = "write" if write else "check"
+    for directory in target_dirs:
+        if not directory.exists():
+            logger.warning("Skipping terraform fmt for %s (path does not exist).", directory)
+            continue
+
+        logger.info("Running terraform fmt (%s) in %s", mode, directory)
+        command = [binary, "fmt", "-recursive", *flag]
+        try:
+            subprocess.run(command, check=True, cwd=str(directory), capture_output=False)
+        except subprocess.CalledProcessError as exc:
+            logger.error(
+                "terraform fmt (%s) failed in %s (exit=%s)", mode, directory, exc.returncode
+            )
+            if exc.stdout:
+                logger.error(exc.stdout.decode("utf-8", errors="ignore"))
+            if exc.stderr:
+                logger.error(exc.stderr.decode("utf-8", errors="ignore"))
+            sys.exit(exc.returncode)
 
 
 def _build_baseline(report: Dict[str, Any], include_waived: bool = False) -> Dict[str, Any]:
@@ -60,6 +127,106 @@ def _build_baseline(report: Dict[str, Any], include_waived: bool = False) -> Dic
     return baseline
 
 
+def _format_scope(scopes: Sequence[str]) -> str:
+    return " ".join(scopes)
+
+
+def _handle_auth_login(args: argparse.Namespace, logger) -> None:
+    base_url = args.base_url.rstrip("/")
+    email: str = args.email.strip().lower()
+    scopes = args.scope.split() if args.scope else ["console:read", "console:write"]
+    password: str = args.password or getpass("Password or API token: ")
+
+    if not password:
+        logger.error("Password/API token is required.")
+        sys.exit(1)
+
+    data = {
+        "username": email,
+        "password": password,
+        "scope": _format_scope(scopes),
+    }
+
+    timeout = httpx.Timeout(30.0)
+    with httpx.Client(base_url=base_url, timeout=timeout, follow_redirects=False) as client:
+        response = client.post(
+            "/auth/token",
+            data=data,
+            headers={"Accept": "application/json"},
+        )
+
+        if response.status_code != 200:
+            try:
+                detail = response.json()
+            except Exception:  # noqa: BLE001
+                detail = response.text
+            logger.error("Authentication failed with status %s: %s", response.status_code, detail)
+            sys.exit(1)
+
+        payload = response.json()
+        anti_csrf_header = response.headers.get("X-Refresh-Token-CSRF")
+        refresh_cookie = client.cookies.get(auth_settings.refresh_cookie_name)
+        csrf_cookie = client.cookies.get("tm_refresh_csrf")
+
+        result = {
+            "base_url": base_url,
+            "email": email,
+            "scope": scopes,
+            "access_token": payload.get("access_token"),
+            "expires_in": payload.get("expires_in"),
+            "refresh_token": refresh_cookie or payload.get("refresh_token"),
+            "refresh_expires_in": payload.get("refresh_expires_in"),
+            "anti_csrf_token": anti_csrf_header or payload.get("anti_csrf_token") or csrf_cookie,
+        }
+
+        out_path = Path(args.out)
+        _ensure_parent(out_path)
+        out_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        print(f"Wrote credentials to {out_path}")
+
+
+def _load_cli_auth(path: Path, logger) -> dict | None:
+    if not path.exists():
+        logger.debug("Credential file %s not found", path)
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to read credential file %s: %s", path, exc)
+        return None
+
+
+def _maybe_refresh_access_token(auth_payload: dict, logger) -> dict:
+    base_url = auth_payload.get("base_url")
+    refresh_token = auth_payload.get("refresh_token")
+    anti_csrf = auth_payload.get("anti_csrf_token")
+    if not base_url or not refresh_token or not anti_csrf:
+        return auth_payload
+
+    timeout = httpx.Timeout(10.0)
+    with httpx.Client(base_url=base_url, timeout=timeout, follow_redirects=False) as client:
+        client.cookies.set(auth_settings.refresh_cookie_name, refresh_token)
+        headers = {"X-Refresh-Token-CSRF": anti_csrf, "Accept": "application/json"}
+        response = client.post("/auth/refresh", headers=headers)
+
+        if response.status_code != 200:
+            logger.warning("Refresh token invalid (status %s); continuing with stored access token.", response.status_code)
+            return auth_payload
+
+        payload = response.json()
+        new_refresh = client.cookies.get(auth_settings.refresh_cookie_name)
+        new_csrf = response.headers.get("X-Refresh-Token-CSRF") or payload.get("anti_csrf_token")
+        if new_refresh:
+            auth_payload["refresh_token"] = new_refresh
+        if new_csrf:
+            auth_payload["anti_csrf_token"] = new_csrf
+        auth_payload["access_token"] = payload.get("access_token")
+        auth_payload["expires_in"] = payload.get("expires_in")
+        auth_payload["refresh_expires_in"] = payload.get("refresh_expires_in")
+        logger.info("Access token refreshed")
+        return auth_payload
+
+
 def main() -> None:
     load_env_file()
     setup_logging(service="terraform-manager-cli")
@@ -71,6 +238,30 @@ def main() -> None:
     scan.add_argument("--path", action="append", required=True, help="Path to a .tf file or a directory (repeatable)")
     scan.add_argument("--out", default="terraform_review_report.json", help="Output JSON path")
     scan.add_argument("--terraform-validate", action="store_true", help="Attempt `terraform validate` if available")
+    fmt_group = scan.add_mutually_exclusive_group()
+    fmt_group.add_argument(
+        "--terraform-fmt",
+        action="store_true",
+        help="Run `terraform fmt -check -recursive` prior to scanning.",
+    )
+    fmt_group.add_argument(
+        "--terraform-fmt-write",
+        action="store_true",
+        help="Run `terraform fmt -recursive` to rewrite files prior to scanning.",
+    )
+    scan.add_argument(
+        "--cost",
+        action="store_true",
+        help="Run Infracost breakdown and attach cost summary.",
+    )
+    scan.add_argument(
+        "--cost-usage-file",
+        help="Optional Infracost usage file to include usage-based resources.",
+    )
+    scan.add_argument(
+        "--plan-json",
+        help="Path to a Terraform plan JSON file (terraform show -json) for drift analysis.",
+    )
     scan.add_argument(
         "--patch-out",
         help="Optional file path to write combined diff for autofixable findings",
@@ -118,12 +309,93 @@ def main() -> None:
         help="Include findings already waived by existing configuration",
     )
 
+    precommit = sub.add_parser("precommit", help="Generate a sample pre-commit configuration for Terraform policies")
+    precommit.add_argument(
+        "--out",
+        default=".pre-commit-config.yaml",
+        help="Path to write the generated configuration (default: .pre-commit-config.yaml)",
+    )
+    precommit.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite the destination file if it already exists.",
+    )
+    docs_cmd = sub.add_parser("docs", help="Generate Terraform docs for generator templates")
+    docs_cmd.add_argument(
+        "--out",
+        default="docs/generators",
+        help="Directory to write generated documentation (default: docs/generators)",
+    )
+    docs_cmd.add_argument(
+        "--knowledge-out",
+        default="knowledge/generated",
+        help="Optional knowledge directory to mirror generated docs (default: knowledge/generated)",
+    )
+    docs_cmd.add_argument(
+        "--config",
+        default=".terraform-docs.yml",
+        help="Path to terraform-docs configuration file (default: .terraform-docs.yml)",
+    )
+    docs_cmd.add_argument(
+        "--terraform-docs-bin",
+        default=None,
+        help="Path to terraform-docs binary (defaults to resolving from PATH).",
+    )
+    docs_cmd.add_argument(
+        "--skip-reindex",
+        action="store_true",
+        help="Skip knowledge base reindex after docs generation.",
+    )
+
+    auth = sub.add_parser("auth", help="Authenticate against the FastAPI service")
+    auth_sub = auth.add_subparsers(dest="auth_cmd", required=True)
+
+    login = auth_sub.add_parser("login", help="Obtain access and refresh tokens from /auth/token")
+    login.add_argument("--email", required=True, help="Account email address")
+    login.add_argument("--password", help="Password or legacy API token. Prompted if omitted.")
+    login.add_argument(
+        "--base-url",
+        default=os.getenv("TFM_API_BASE", "http://localhost:8890"),
+        help="FastAPI base URL (default: http://localhost:8890)",
+    )
+    login.add_argument(
+        "--scope",
+        default="console:read console:write",
+        help="Space-separated scopes to request (default: console:read console:write)",
+    )
+    login.add_argument(
+        "--out",
+        default="tm_auth.json",
+        help="Where to write the resulting credential payload",
+    )
+
     reindex = sub.add_parser("reindex", help="Build the TF-IDF knowledge index (optional)")
 
     args = parser.parse_args()
+    auth_credentials: dict | None = None
     if args.cmd == "scan":
+        credentials_file = Path(os.getenv("TM_AUTH_FILE", "tm_auth.json"))
+        auth_credentials = _load_cli_auth(credentials_file, logger)
+        if auth_credentials:
+            auth_credentials = _maybe_refresh_access_token(dict(auth_credentials), logger)
+            # Persist updated refresh token / expiry if it changed
+            try:
+                credentials_file.write_text(json.dumps(auth_credentials, indent=2), encoding="utf-8")
+            except Exception:  # noqa: BLE001
+                logger.warning("Unable to update credential file %s", credentials_file)
+
         paths = [Path(p) for p in args.path]
-        logger.debug("Starting scan", extra={"paths": [str(p) for p in paths], "terraform_validate": args.terraform_validate})
+        if args.terraform_fmt or args.terraform_fmt_write:
+            fmt_targets = _collect_fmt_targets(paths)
+            _run_terraform_fmt(fmt_targets, write=args.terraform_fmt_write, logger=logger)
+        logger.debug(
+            "Starting scan",
+            extra={
+                "paths": [str(p) for p in paths],
+                "terraform_validate": args.terraform_validate,
+                "terraform_fmt": "write" if args.terraform_fmt_write else ("check" if args.terraform_fmt else "skip"),
+            },
+        )
         stored_llm = get_llm_settings()
         final_llm = dict(stored_llm)
         if args.llm is not None:
@@ -144,10 +416,20 @@ def main() -> None:
         ):
             llm_options = final_llm
 
+        cost_opts = None
+        if args.cost:
+            cost_opts = {}
+            if args.cost_usage_file:
+                cost_opts["usage_file"] = Path(args.cost_usage_file)
+
+        plan_path = Path(args.plan_json).resolve() if args.plan_json else None
+
         report = scan_paths(
             paths,
             use_terraform_validate=args.terraform_validate,
             llm_options=llm_options,
+            cost_options=cost_opts,
+            plan_path=plan_path,
         )
         logger.info(
             "Scan completed",
@@ -198,6 +480,36 @@ def main() -> None:
             payload = yaml.safe_dump(baseline_data, sort_keys=False)
         out_path.write_text(payload, encoding="utf-8")
         print(f"Wrote baseline to {args.out}")
+    elif args.cmd == "precommit":
+        out_path = Path(args.out)
+        if out_path.exists() and not args.force:
+            print(f"{out_path} already exists. Use --force to overwrite.", file=sys.stderr)
+            sys.exit(1)
+        _ensure_parent(out_path)
+        out_path.write_text(PRECOMMIT_TEMPLATE, encoding="utf-8")
+        print(f"Wrote pre-commit configuration to {out_path}")
+    elif args.cmd == "docs":
+        out_dir = Path(args.out)
+        knowledge_dir = Path(args.knowledge_out) if args.knowledge_out else None
+        config_path = Path(args.config) if args.config else None
+        result = generate_docs(
+            output_dir=out_dir,
+            knowledge_dir=knowledge_dir,
+            config_path=config_path,
+            binary=args.terraform_docs_bin,
+            reindex=not args.skip_reindex,
+        )
+        if result.get("status") != "ok":
+            print(f"Docs generation skipped: {result.get('reason')}", file=sys.stderr)
+        else:
+            generated = result.get("generated", [])
+            print(f"Generated {len(generated)} documentation files in {out_dir}")
+            if knowledge_dir and generated:
+                print(f"Knowledge mirror updated in {knowledge_dir}")
+            if not args.skip_reindex and knowledge_dir:
+                print(f"Knowledge index refreshed (documents indexed: {result.get('indexed_documents')})")
+    elif args.cmd == "auth" and args.auth_cmd == "login":
+        _handle_auth_login(args, logger)
     elif args.cmd == "reindex":
         try:
             from backend.rag import warm_index
@@ -205,6 +517,8 @@ def main() -> None:
             print(f"Knowledge index ready: {count} documents")
         except Exception as exc:
             print(f"Failed to build knowledge index: {exc}")
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":

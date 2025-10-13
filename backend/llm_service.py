@@ -2,7 +2,7 @@
 Utilities for assembling LLM prompts and (later) calling OpenAI/Azure OpenAI.
 
 This module keeps the deterministic scanner untouched while giving the
-Streamlit/CLI layers a single place to build requests for AI-assisted
+UI/CLI layers a single place to build requests for AI-assisted
 explanations and remediation proposals. API invocation will be layered on top of
 the helper functions defined here once credentials are provided.
 """

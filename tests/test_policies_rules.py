@@ -22,6 +22,8 @@ from backend.policies.aws import (
     check_eks_control_plane_logging,
     check_ecs_public_ip,
     check_eks_irsa_trust,
+    check_cloudwatch_log_retention,
+    check_backend_s3_encryption,
 )
 from backend.policies.azure import (
     check_storage_https,
@@ -34,6 +36,7 @@ from backend.policies.azure import (
     check_key_vault_purge_protection,
     check_key_vault_network,
     check_diagnostic_settings,
+    check_backend_azurerm_state,
 )
 from backend.policies.k8s import (
     check_image_not_latest,
@@ -111,6 +114,96 @@ class PolicyRuleTests(unittest.TestCase):
             """
         )
         findings = check_storage_private_endpoint(Path("azure.tf"), text)
+        self.assertEqual(len(findings), 0)
+
+    def test_backend_s3_missing_encryption(self) -> None:
+        text = textwrap.dedent(
+            """
+            terraform {
+              backend "s3" {
+                bucket = "example-state"
+                key    = "env/terraform.tfstate"
+              }
+            }
+            """
+        )
+        findings = check_backend_s3_encryption(Path("backend.tf"), text)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["rule_id"], "TF-BACKEND-S3-ENCRYPT")
+        self.assertIn("encrypt", findings[0]["context"]["missing"])
+
+    def test_backend_s3_with_encryption_and_locking(self) -> None:
+        text = textwrap.dedent(
+            """
+            terraform {
+              backend "s3" {
+                bucket         = "example-state"
+                key            = "env/terraform.tfstate"
+                region         = "us-east-1"
+                encrypt        = true
+                dynamodb_table = "terraform-locks"
+              }
+            }
+            """
+        )
+        findings = check_backend_s3_encryption(Path("backend.tf"), text)
+        self.assertEqual(len(findings), 0)
+
+    def test_backend_azurerm_missing_fields(self) -> None:
+        text = textwrap.dedent(
+            """
+            terraform {
+              backend "azurerm" {
+                resource_group_name = "rg"
+              }
+            }
+            """
+        )
+        findings = check_backend_azurerm_state(Path("backend.tf"), text)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["rule_id"], "TF-BACKEND-AZURE-STATE")
+        self.assertIn("storage_account_name", findings[0]["context"]["missing"])
+
+    def test_backend_azurerm_complete(self) -> None:
+        text = textwrap.dedent(
+            """
+            terraform {
+              backend "azurerm" {
+                resource_group_name  = "rg-state"
+                storage_account_name = "ststate0001"
+                container_name       = "tfstate"
+                key                  = "env/app.tfstate"
+              }
+            }
+            """
+        )
+        findings = check_backend_azurerm_state(Path("backend.tf"), text)
+        self.assertEqual(len(findings), 0)
+
+    def test_cloudwatch_log_group_retention_missing(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "aws_cloudwatch_log_group" "lg" {
+              name = "/aws/lambda/app"
+            }
+            """
+        )
+        findings = check_cloudwatch_log_retention(Path("cloudwatch.tf"), text)
+        self.assertEqual(len(findings), 1)
+        finding = findings[0]
+        self.assertEqual(finding["rule_id"], "AWS-CW-LOG-RETENTION")
+        self.assertEqual(finding["context"]["resource"], "lg")
+
+    def test_cloudwatch_log_group_retention_present(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "aws_cloudwatch_log_group" "lg" {
+              name              = "/aws/lambda/app"
+              retention_in_days = 30
+            }
+            """
+        )
+        findings = check_cloudwatch_log_retention(Path("cloudwatch.tf"), text)
         self.assertEqual(len(findings), 0)
 
     def test_log_analytics_health_alert_missing(self) -> None:
