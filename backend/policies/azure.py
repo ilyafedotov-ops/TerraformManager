@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import List, Dict, Any, Set
 
-from backend.policies.helpers import make_candidate, find_line_number
+from backend.policies.helpers import make_candidate, find_line_number, extract_block
 
 
 def check_storage_https(file: Path, text: str) -> List[Dict[str, Any]]:
@@ -72,6 +72,34 @@ def check_storage_min_tls(file: Path, text: str) -> List[Dict[str, Any]]:
                 unique_id=f"AZ-STORAGE-MIN-TLS::{name}",
             )
             )
+    return findings
+
+
+def check_backend_azurerm_state(file: Path, text: str) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    for match in re.finditer(r'backend\s+"azurerm"\s*{', text):
+        brace_index = text.find("{", match.start())
+        if brace_index == -1:
+            continue
+        block = extract_block(text, brace_index)
+        missing = []
+        for field in ("resource_group_name", "storage_account_name", "container_name", "key"):
+            if re.search(rf'{field}\s*=\s*', block) is None:
+                missing.append(field)
+        if not missing:
+            continue
+        snippet = 'backend "azurerm" ' + block[:200]
+        findings.append(
+            make_candidate(
+                "TF-BACKEND-AZURE-STATE",
+                file,
+                line=find_line_number(text, match.group(0)),
+                context={"missing": ", ".join(missing)},
+                snippet=snippet,
+                suggested_fix_snippet='  resource_group_name  = "rg-terraform-state"\n  storage_account_name = "ststate"\n  container_name       = "tfstate"\n  key                  = "env/app.tfstate"\n',
+                unique_id=f"TF-BACKEND-AZURE-STATE::{file.name}:{match.start()}",
+            )
+        )
     return findings
 
 
@@ -437,6 +465,7 @@ CHECKS = [
     check_storage_https,
     check_storage_blob_public,
     check_storage_min_tls,
+    check_backend_azurerm_state,
     check_storage_private_endpoint,
     check_log_analytics_health_alert,
     check_nsg_open_ssh,

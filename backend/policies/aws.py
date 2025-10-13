@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import List, Dict, Any, Set
 
-from backend.policies.helpers import make_candidate, find_line_number
+from backend.policies.helpers import make_candidate, find_line_number, extract_block
 
 
 def check_s3_sse(file: Path, text: str) -> List[Dict[str, Any]]:
@@ -740,6 +740,57 @@ def check_eks_irsa_trust(file: Path, text: str) -> List[Dict[str, Any]]:
     return findings
 
 
+def check_cloudwatch_log_retention(file: Path, text: str) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    for match in re.finditer(r'resource\s+"aws_cloudwatch_log_group"\s+"([^"]+)"\s*{', text):
+        name = match.group(1)
+        block = text[match.start() : match.start() + 2000]
+        if re.search(r'retention_in_days\s*=\s*\d+', block):
+            continue
+        snippet = match.group(0)
+        findings.append(
+            make_candidate(
+                "AWS-CW-LOG-RETENTION",
+                file,
+                line=find_line_number(text, snippet),
+                context={"resource": name},
+                snippet=snippet,
+                suggested_fix_snippet='  retention_in_days = 90\n',
+                unique_id=f"AWS-CW-LOG-RETENTION::{name}",
+            )
+        )
+    return findings
+
+
+def check_backend_s3_encryption(file: Path, text: str) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    for match in re.finditer(r'backend\s+"s3"\s*{', text):
+        brace_index = text.find("{", match.start())
+        if brace_index == -1:
+            continue
+        block = extract_block(text, brace_index)
+        missing: List[str] = []
+        if re.search(r'encrypt\s*=\s*true', block, re.IGNORECASE) is None:
+            missing.append("encrypt = true")
+        if re.search(r'dynamodb_table\s*=\s*', block) is None:
+            missing.append("dynamodb_table")
+        if not missing:
+            continue
+        snippet = 'backend "s3" ' + block[:200]
+        findings.append(
+            make_candidate(
+                "TF-BACKEND-S3-ENCRYPT",
+                file,
+                line=find_line_number(text, match.group(0)),
+                context={"missing": ", ".join(missing)},
+                snippet=snippet,
+                suggested_fix_snippet='  encrypt        = true\n  dynamodb_table = "terraform-locks"\n',
+                unique_id=f"TF-BACKEND-S3-ENCRYPT::{file.name}:{match.start()}",
+            )
+        )
+    return findings
+
+
 CHECKS = [
     check_s3_sse,
     check_s3_public_acl,
@@ -760,8 +811,10 @@ CHECKS = [
     check_alb_https,
     check_waf_association,
     check_ecs_public_ip,
+    check_cloudwatch_log_retention,
     check_eks_imdsv2,
     check_eks_control_plane_logging,
     check_eks_irsa_trust,
+    check_backend_s3_encryption,
     check_alb_access_logging,
 ]

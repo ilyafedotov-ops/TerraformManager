@@ -24,7 +24,7 @@ def load_env_file() -> None:
     Load key=value pairs from the first .env file we can find.
 
     Existing environment variables are left untouched so callers can override by
-    exporting values before invoking the CLI or Streamlit app.
+    exporting values before invoking the CLI, API, or web app.
     """
 
     for candidate in _candidate_paths():

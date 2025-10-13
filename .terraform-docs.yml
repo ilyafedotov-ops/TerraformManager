@@ -1,0 +1,16 @@
+formatter: markdown table
+header-from: ""
+recursive:
+  enabled: false
+sections:
+  show:
+    - providers
+    - resources
+    - inputs
+    - outputs
+settings:
+  escape: true
+  required: false
+  sort:
+    by: name
+    enabled: true

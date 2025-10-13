@@ -149,6 +149,14 @@ RULES_REGISTRY: Dict[str, RuleMetadata] = {
         recommendation="Create an `aws_wafv2_web_acl_association` referencing ALB '{resource}' and a regional web ACL.",
         knowledge_ref="knowledge/aws_best_practices.md#aws-best-practices-selected",
     ),
+    "AWS-CW-LOG-RETENTION": RuleMetadata(
+        rule_id="AWS-CW-LOG-RETENTION",
+        title="CloudWatch log group '{resource}' does not set retention",
+        severity="MEDIUM",
+        description="Without retention limits, CloudWatch Logs store data indefinitely, driving up storage costs and complicating lifecycle management.",
+        recommendation="Set `retention_in_days` (for example 90) on CloudWatch log group '{resource}' to enforce log lifecycle policies.",
+        knowledge_ref="knowledge/aws_best_practices.md#aws-best-practices-selected",
+    ),
     "AWS-VPC-FLOW-LOGS": RuleMetadata(
         rule_id="AWS-VPC-FLOW-LOGS",
         title="VPC '{resource}' is missing flow logs",
@@ -172,6 +180,14 @@ RULES_REGISTRY: Dict[str, RuleMetadata] = {
         description="IRSA trust policies must scope `sts:AssumeRoleWithWebIdentity` to a specific namespace/service account and require the `sts.amazonaws.com` audience.",
         recommendation="Add `StringEquals` on `<OIDC_HOST>:sub` for the target service account and `StringLike` on `<OIDC_HOST>:aud` equaling `sts.amazonaws.com`.",
         knowledge_ref="knowledge/aws_ecs_eks_service_hardening.md#eks-irsa-trust-policies",
+    ),
+    "TF-BACKEND-S3-ENCRYPT": RuleMetadata(
+        rule_id="TF-BACKEND-S3-ENCRYPT",
+        title="S3 backend is missing encryption or state locking",
+        severity="HIGH",
+        description="Terraform remote state stored in S3 should enable `encrypt = true` and use a DynamoDB table for state locking.",
+        recommendation="Within the `backend \"s3\"` block, set `encrypt = true` and `dynamodb_table` referencing the state lock table.",
+        knowledge_ref="knowledge/terraform_language.md#remote-state-basics",
     ),
     # Azure
     "AZ-STORAGE-HTTPS": RuleMetadata(
@@ -197,6 +213,14 @@ RULES_REGISTRY: Dict[str, RuleMetadata] = {
         description="Older TLS versions are deprecated and vulnerable; enforce TLS 1.2 or higher.",
         recommendation="Set `min_tls_version = \"TLS1_2\"` for storage account '{resource}'.",
         knowledge_ref="knowledge/azure_best_practices.md#azure-best-practices-selected",
+    ),
+    "TF-BACKEND-AZURE-STATE": RuleMetadata(
+        rule_id="TF-BACKEND-AZURE-STATE",
+        title="Azure backend is missing required remote state settings",
+        severity="HIGH",
+        description="Remote state stored in Azure Storage must include explicit resource group, storage account, container, and key settings to avoid default buckets.",
+        recommendation="Specify `resource_group_name`, `storage_account_name`, `container_name`, and `key` inside the `backend \"azurerm\"` block to point at the correct state store.",
+        knowledge_ref="knowledge/terraform_language.md#remote-state-basics",
     ),
     "AZ-NSG-OPEN-SSH": RuleMetadata(
         rule_id="AZ-NSG-OPEN-SSH",
