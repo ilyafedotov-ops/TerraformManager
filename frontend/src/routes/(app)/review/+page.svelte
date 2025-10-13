@@ -1,5 +1,7 @@
 <script lang="ts">
     import { API_BASE } from '$lib/api/client';
+    import ScanForm, { type ScanFormData } from '$lib/components/review/ScanForm.svelte';
+    import ScanSummary from '$lib/components/review/ScanSummary.svelte';
 
     const { data } = $props();
     const token = data.token as string | null;
@@ -7,12 +9,23 @@
     let files = $state<FileList | null>(null);
     let terraformValidate = $state(false);
     let saveReport = $state(true);
+    let includeCost = $state(false);
+    let usageFiles = $state<FileList | null>(null);
+    let planFiles = $state<FileList | null>(null);
     let isSubmitting = $state(false);
     let error = $state<string | null>(null);
     let result = $state<{ id?: string | null; summary?: Record<string, unknown>; report?: Record<string, unknown> } | null>(null);
 
-    const submitScan = async (event: SubmitEvent) => {
-        event.preventDefault();
+    const toFileList = (file: File | null) => {
+        if (!file) return null;
+        if (typeof DataTransfer === 'undefined') return null;
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        return dt.files;
+    };
+
+    const submitScan = async (event?: Event, payload?: ScanFormData) => {
+        event?.preventDefault();
         error = null;
         result = null;
 
@@ -20,15 +33,38 @@
             error = 'API token missing. Sign in to generate one or configure TFM_API_TOKEN on the server.';
             return;
         }
-        if (!files || files.length === 0) {
+        const selectedFiles = payload?.files ?? files;
+        const shouldValidate = payload?.terraformValidate ?? terraformValidate;
+        const shouldSave = payload?.saveReport ?? saveReport;
+        const includeCostFlag = payload?.includeCost ?? includeCost;
+        const usageFile = payload?.usageFile ?? usageFiles?.item(0) ?? null;
+        const planFile = payload?.planFile ?? planFiles?.item(0) ?? null;
+
+        if (!selectedFiles || selectedFiles.length === 0) {
             error = 'Attach at least one .tf or .zip file to scan.';
             return;
         }
 
         const formData = new FormData();
-        Array.from(files).forEach((file) => formData.append('files', file));
-        formData.append('terraform_validate', terraformValidate ? 'true' : 'false');
-        formData.append('save', saveReport ? 'true' : 'false');
+        Array.from(selectedFiles).forEach((file) => formData.append('files', file));
+        formData.append('terraform_validate', shouldValidate ? 'true' : 'false');
+        formData.append('save', shouldSave ? 'true' : 'false');
+        if (includeCostFlag) {
+            formData.append('include_cost', 'true');
+            if (usageFile) {
+                formData.append('cost_usage_file', usageFile);
+            }
+        }
+        if (planFile) {
+            formData.append('plan_file', planFile);
+        }
+
+        files = selectedFiles;
+        terraformValidate = shouldValidate;
+        saveReport = shouldSave;
+        includeCost = includeCostFlag;
+        usageFiles = toFileList(usageFile);
+        planFiles = toFileList(planFile);
 
         isSubmitting = true;
         try {
@@ -57,142 +93,61 @@
         if (!counts) return [] as Array<[string, number]>;
         return Object.entries(counts).map(([sev, count]) => [sev, Number(count ?? 0)] as [string, number]);
     };
+
+    const getSteps = () => {
+        const hasResult = Boolean(result);
+        const hasReportId = Boolean(result?.id);
+        const steps = [
+            {
+                title: 'Upload',
+                description: 'Attach Terraform modules for scanning.',
+                status: (hasResult ? 'completed' : 'current') as 'completed' | 'current' | 'upcoming'
+            },
+            {
+                title: 'Review',
+                description: 'Inspect findings and severity mix.',
+                status: (hasResult ? 'current' : 'upcoming') as 'completed' | 'current' | 'upcoming'
+            },
+            {
+                title: 'Export',
+                description: 'Share JSON, CSV, or HTML artifacts.',
+                status: (hasReportId ? 'current' : 'upcoming') as 'completed' | 'current' | 'upcoming'
+            }
+        ];
+        return steps;
+    };
 </script>
 
 <section class="space-y-8">
     <header class="space-y-3">
-        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">Reviewer</p>
-        <h2 class="text-3xl font-semibold text-white">Upload Terraform for analysis</h2>
-        <p class="max-w-3xl text-sm text-slate-400">
-            Drop one or more Terraform modules (individual <code class="rounded bg-slate-900/70 px-1 py-0.5 text-xs text-slate-200">.tf</code> files or zipped directories).
+        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-blueGray-400">Reviewer</p>
+        <h2 class="text-3xl font-semibold text-blueGray-700">Upload Terraform for analysis</h2>
+        <p class="max-w-3xl text-sm text-blueGray-500">
+            Drop one or more Terraform modules (individual <code class="rounded bg-blueGray-50 px-1 py-0.5 text-xs text-blueGray-600">.tf</code> files or zipped directories).
             The backend will unpack archives, apply the configured review rules, and optionally persist the report for later lookup.
         </p>
     </header>
 
-    <form class="space-y-6 rounded-3xl border border-white/5 bg-slate-950/80 p-6 shadow-xl shadow-slate-950/40" onsubmit={submitScan}>
-        <div class="space-y-4">
-            <label class="block text-sm font-semibold text-slate-200">
-                <span class="uppercase tracking-[0.3em] text-slate-500">Terraform files / archives</span>
-                <input
-                    class="mt-2 w-full cursor-pointer rounded-2xl border border-dashed border-sky-500/40 bg-slate-900/60 px-4 py-6 text-sm text-slate-300 transition hover:border-sky-400 hover:bg-slate-900/70"
-                    type="file"
-                    multiple
-                    accept=".tf,.zip"
-                    bind:files
-                    aria-label="Terraform files or zip archives"
-                />
-            </label>
-
-            <div class="grid gap-4 md:grid-cols-2">
-                <label class="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-slate-200">
-                    <input class="h-4 w-4 rounded border-slate-700 text-sky-400 focus:ring-sky-400/60" type="checkbox" bind:checked={terraformValidate} />
-                    <span>
-                        <span class="font-semibold text-white">Run <code class="rounded bg-slate-800 px-1 py-0.5 text-xs text-slate-200">terraform validate</code></span>
-                        <span class="block text-xs text-slate-400">Requires terraform binary on the API host.</span>
-                    </span>
-                </label>
-                <label class="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-slate-200">
-                    <input class="h-4 w-4 rounded border-slate-700 text-sky-400 focus:ring-sky-400/60" type="checkbox" bind:checked={saveReport} />
-                    <span>
-                        <span class="font-semibold text-white">Store report in database</span>
-                        <span class="block text-xs text-slate-400">Enables follow-up review from the Reports tab.</span>
-                    </span>
-                </label>
-            </div>
-        </div>
-
-        {#if error}
-            <div class="rounded-2xl border border-rose-500/50 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
-                {error}
-            </div>
-        {/if}
-
-        <button
-            class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 via-indigo-500 to-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-900/40 transition hover:from-sky-400 hover:via-indigo-400 hover:to-blue-500 focus:outline-none focus:ring-2 focus:ring-sky-400/40 disabled:cursor-not-allowed disabled:opacity-60"
-            type="submit"
-            disabled={isSubmitting}
-        >
-            {#if isSubmitting}
-                <span class="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-transparent"></span>
-                Running scan…
-            {:else}
-                Run scan
-            {/if}
-        </button>
-    </form>
+    <ScanForm
+        steps={getSteps()}
+        bind:files
+        bind:terraformValidate
+        bind:saveReport
+        bind:includeCost
+        bind:usageFiles
+        bind:planFiles
+        isSubmitting={isSubmitting}
+        error={error}
+        on:submit={(event) => submitScan(undefined, event.detail)}
+    />
 
     {#if result}
-        <section class="space-y-4 rounded-3xl border border-white/5 bg-slate-950/80 p-6 shadow-xl shadow-slate-950/40">
-            <header class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                    <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Scan summary</p>
-                    <h3 class="text-xl font-semibold text-white">{result.id ?? 'Unsaved result'}</h3>
-                </div>
-                {#if result.id}
-                    <div class="flex flex-wrap gap-2">
-                        <a
-                            class="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-sky-400/40 hover:text-white"
-                            href={`${API_BASE}/reports/${result.id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                        >
-                            JSON
-                        </a>
-                        <a
-                            class="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-sky-400/40 hover:text-white"
-                            href={`${API_BASE}/reports/${result.id}/csv`}
-                        >
-                            CSV
-                        </a>
-                        <a
-                            class="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-sky-400/40 hover:text-white"
-                            href={`${API_BASE}/reports/${result.id}/html`}
-                            target="_blank"
-                            rel="noreferrer"
-                        >
-                            HTML
-                        </a>
-                    </div>
-                {/if}
-            </header>
-
-            <div class="grid gap-4 md:grid-cols-3">
-                <div class="rounded-2xl border border-white/5 bg-slate-900/70 p-4">
-                    <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Issues found</p>
-                    <p class="mt-3 text-3xl font-semibold text-white">{(result.summary as { issues_found?: number })?.issues_found ?? 0}</p>
-                </div>
-                <div class="rounded-2xl border border-white/5 bg-slate-900/70 p-4">
-                    <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Waived</p>
-                    <p class="mt-3 text-3xl font-semibold text-white">{(result.report as { waived_findings?: unknown[] })?.waived_findings?.length ?? 0}</p>
-                </div>
-                <div class="rounded-2xl border border-white/5 bg-slate-900/70 p-4">
-                    <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Files scanned</p>
-                    <p class="mt-3 text-3xl font-semibold text-white">{(result.summary as { files_scanned?: number })?.files_scanned ?? 0}</p>
-                </div>
-            </div>
-
-            <section class="space-y-2">
-                <h4 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Severity distribution</h4>
-                {#if severityEntries().length}
-                    <ul class="space-y-2 text-sm text-slate-200">
-                        {#each severityEntries() as [severity, count]}
-                            <li class="flex items-center justify-between rounded-xl border border-white/5 bg-slate-900/60 px-4 py-2">
-                                <span class="uppercase tracking-[0.2em] text-slate-400">{severity}</span>
-                                <span class="font-semibold">{count}</span>
-                            </li>
-                        {/each}
-                    </ul>
-                {:else}
-                    <p class="rounded-xl border border-white/5 bg-slate-900/60 px-4 py-3 text-sm text-slate-400">
-                        No severity counts reported.
-                    </p>
-                {/if}
-            </section>
-
-            <details class="rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-slate-300">
-                <summary class="cursor-pointer text-slate-200 focus:outline-none">Raw summary payload</summary>
-                <pre class="mt-3 overflow-auto rounded-xl bg-slate-950/80 p-3 text-xs text-slate-200">{JSON.stringify(result.summary, null, 2)}</pre>
-            </details>
-        </section>
+        <ScanSummary
+            reportId={result.id ?? null}
+            summary={(result.summary ?? null) as Record<string, unknown> | null}
+            report={(result.report ?? null) as Record<string, unknown> | null}
+            severityEntries={severityEntries()}
+            apiBase={API_BASE}
+        />
     {/if}
 </section>

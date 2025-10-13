@@ -3,6 +3,7 @@ import { writable } from 'svelte/store';
 
 const STORAGE_KEY = 'tmApiToken';
 const COOKIE_NAME = 'tm_api_token';
+const CSRF_COOKIE_NAME = 'tm_refresh_csrf';
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 function readCookie(name: string): string | null {
@@ -17,6 +18,15 @@ function writeCookie(value: string | null) {
 		document.cookie = `${COOKIE_NAME}=${encodeURIComponent(value)}; Path=/; Max-Age=${COOKIE_MAX_AGE}; SameSite=Lax`;
 	} else {
 		document.cookie = `${COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=Lax`;
+	}
+}
+
+function writeCsrfCookie(value: string | null) {
+	if (!browser) return;
+	if (value) {
+		document.cookie = `${CSRF_COOKIE_NAME}=${encodeURIComponent(value)}; Path=/; Max-Age=${COOKIE_MAX_AGE}; SameSite=Lax`;
+	} else {
+		document.cookie = `${CSRF_COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=Lax`;
 	}
 }
 
@@ -52,4 +62,9 @@ export function setToken(value: string) {
 
 export function clearToken() {
 	token.set(null);
+	setRefreshCsrf(null);
+}
+
+export function setRefreshCsrf(value: string | null) {
+	writeCsrfCookie(value ? value.trim() : null);
 }

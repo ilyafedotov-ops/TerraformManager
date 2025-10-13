@@ -1,6 +1,5 @@
 import { redirect } from '@sveltejs/kit';
 
-export const load = ({ cookies }) => {
-	const token = cookies.get('tm_api_token');
-	throw redirect(302, token ? '/dashboard' : '/login');
+export const load = ({ locals }) => {
+	throw redirect(302, locals.token ? '/dashboard' : '/login');
 };

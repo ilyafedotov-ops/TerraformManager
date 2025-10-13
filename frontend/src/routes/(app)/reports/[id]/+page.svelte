@@ -1,11 +1,18 @@
 <script lang="ts">
 	import { env } from '$env/dynamic/public';
-	import type { ReportDetail } from '$lib/api/client';
+import { deleteReport, type ReportDetail, ApiError } from '$lib/api/client';
+import ReportActions from '$lib/components/reports/ReportActions.svelte';
+	import { notifyError, notifySuccess } from '$lib/stores/notifications';
+	import { goto } from '$app/navigation';
+	import { browser } from '$app/environment';
 
 	const { data, params } = $props();
 	const report = data.report as ReportDetail | null;
 	const error = data.error as string | undefined;
-	const apiBase = (env.PUBLIC_API_BASE ?? 'http://localhost:8787').replace(/\/$/, '');
+	const token = data.token as string | null;
+	const apiBase = (env.PUBLIC_API_BASE ?? 'http://localhost:8890').replace(/\/$/, '');
+	let deleting = $state(false);
+	let deleteError = $state<string | null>(null);
 
 	const severityEntries = report?.summary?.severity_counts
 		? Object.entries(report.summary.severity_counts).map(([key, value]) => [key, Number(value ?? 0)] as [string, number]).sort((a, b) => b[1] - a[1])
@@ -23,110 +30,273 @@
 	const generatedAt = formatDate(report?.summary?.generated_at ?? report?.summary?.created_at);
 
 	const findingCount = report?.findings?.length ?? 0;
+	const costSummary = report?.summary?.cost ?? report?.cost?.summary ?? null;
+	const costDetails = report?.cost ?? null;
+	const costCurrency = costSummary?.currency ?? costDetails?.currency ?? null;
+	const costProjects = costDetails?.projects ?? [];
+	const costErrors = costDetails?.errors ?? [];
+	const hasCost = Boolean(costSummary || costProjects.length || costErrors.length);
+	const totalMonthlyCost = costSummary?.total_monthly_cost ?? null;
+	const diffMonthlyCost = costSummary?.diff_monthly_cost ?? null;
+	const totalHourlyCost = costSummary?.total_hourly_cost ?? null;
+	const diffHourlyCost = costSummary?.diff_hourly_cost ?? null;
+
+	const formatCurrency = (value: number | null | undefined) => {
+		if (value === null || value === undefined) return '—';
+		if (!costCurrency) return value.toFixed(2);
+		try {
+			return new Intl.NumberFormat(undefined, { style: 'currency', currency: costCurrency }).format(value);
+		} catch (error) {
+			return `${costCurrency} ${value.toFixed(2)}`;
+		}
+	};
+
+	const driftDetails = report?.drift ?? null;
+	const driftSummary = report?.summary?.drift ?? driftDetails ?? null;
+	const driftCounts = driftSummary?.counts ?? {};
+	const driftCountEntries = Object.entries(driftCounts).filter(([, value]) => Number(value ?? 0) > 0);
+	const driftResourceChanges = driftDetails?.resource_changes ?? [];
+	const driftOutputChanges = driftDetails?.output_changes ?? [];
+	const driftError = driftDetails?.error ?? null;
+	const driftHasChanges = Boolean(driftSummary?.has_changes);
+
+	const handleDelete = async () => {
+		if (!token) {
+			deleteError = 'Missing API token; cannot delete report.';
+			return;
+		}
+		if (browser) {
+			const confirmed = window.confirm(`Delete report ${params.id}? This action cannot be undone.`);
+			if (!confirmed) {
+				return;
+			}
+		}
+		deleting = true;
+		deleteError = null;
+		try {
+			await deleteReport(fetch, token, params.id);
+			notifySuccess(`Report ${params.id} deleted.`);
+			await goto('/reports');
+		} catch (err) {
+			let message = 'Failed to delete report.';
+			if (err instanceof ApiError) {
+				const detail = typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
+				message = detail ? `${err.message}: ${detail}` : err.message;
+			} else if (err instanceof Error) {
+				message = err.message;
+			}
+			deleteError = message;
+			notifyError(message);
+		} finally {
+			deleting = false;
+		}
+	};
 </script>
 
 <section class="space-y-6">
 	<header class="space-y-2">
-		<a class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500 hover:text-sky-300" href="/reports">
+		<a class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400 hover:text-lightBlue-500" href="/reports">
 			← Back to reports
 		</a>
-		<h2 class="text-3xl font-semibold text-white">Report {params.id}</h2>
-		<p class="max-w-2xl text-sm text-slate-400">
+		<h2 class="text-3xl font-semibold text-blueGray-700">Report {params.id}</h2>
+		<p class="max-w-2xl text-sm text-blueGray-500">
 			Download artifacts or inspect severity trends from this run. The embedded findings table will land in a follow-up
 			iteration utilising the existing FastAPI viewer endpoints.
 		</p>
 	</header>
 
 	{#if error}
-		<div class="rounded-3xl border border-rose-500/40 bg-rose-500/10 px-6 py-4 text-sm text-rose-100">
+		<div class="rounded-3xl border border-rose-300 bg-rose-50 px-6 py-4 text-sm text-rose-700">
 			<strong class="font-semibold">Unable to load report.</strong>
-			<span class="ml-2 text-rose-100/80">{error}</span>
+			<span class="ml-2 text-rose-600">{error}</span>
 		</div>
 	{/if}
 
 	{#if report}
-		<div class="space-y-6 rounded-3xl border border-white/5 bg-slate-950/80 p-6 shadow-xl shadow-slate-950/40">
+		<div class="space-y-6 rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl shadow-blueGray-300/40">
 			<div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-				<div class="flex flex-wrap gap-3 text-xs text-slate-400">
-					<span class="rounded-xl border border-white/10 px-3 py-1">
-						Findings: <strong class="text-slate-200">{findingCount}</strong>
+				<div class="flex flex-wrap gap-3 text-xs text-blueGray-500">
+					<span class="rounded-xl border border-blueGray-200 px-3 py-1">
+						Findings: <strong class="text-blueGray-600">{findingCount}</strong>
 					</span>
-					<span class="rounded-xl border border-white/10 px-3 py-1">
-						Issues tracked: <strong class="text-slate-200">{issuesFound}</strong>
+					<span class="rounded-xl border border-blueGray-200 px-3 py-1">
+						Issues tracked: <strong class="text-blueGray-600">{issuesFound}</strong>
 					</span>
 					{#if generatedAt}
-						<span class="rounded-xl border border-white/10 px-3 py-1">
-							Generated: <strong class="text-slate-200">{generatedAt}</strong>
+						<span class="rounded-xl border border-blueGray-200 px-3 py-1">
+							Generated: <strong class="text-blueGray-600">{generatedAt}</strong>
 						</span>
 					{/if}
 				</div>
-				<div class="flex flex-wrap gap-2">
-					<a
-						class="rounded-2xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-sky-400/40 hover:text-white"
-						href={`${apiBase}/reports/${params.id}`}
-						target="_blank"
-						rel="noreferrer"
-					>
-						Download JSON
-					</a>
-					<a
-						class="rounded-2xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-sky-400/40 hover:text-white"
-						href={`${apiBase}/reports/${params.id}/csv`}
-					>
-						Download CSV
-					</a>
-					<a
-						class="rounded-2xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-sky-400/40 hover:text-white"
-						href={`${apiBase}/reports/${params.id}/html`}
-						target="_blank"
-						rel="noreferrer"
-					>
-						Open HTML
-					</a>
-				</div>
+                <ReportActions
+                    id={params.id}
+                    apiBase={apiBase}
+                    viewHref={null}
+                    showView={false}
+                    deleting={deleting}
+                    deleteEnabled={Boolean(token)}
+                    on:delete={() => void handleDelete()}
+                />
 			</div>
+			{#if deleteError}
+				<div class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-700">{deleteError}</div>
+			{/if}
 
 			<div class="grid gap-4 md:grid-cols-3">
-				<div class="rounded-2xl border border-white/5 bg-slate-900/80 p-4">
-					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Issues found</p>
-					<p class="mt-3 text-4xl font-semibold text-white">{issuesFound}</p>
+				<div class="rounded-2xl border border-blueGray-200 bg-blueGray-50 p-4">
+					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">Issues found</p>
+					<p class="mt-3 text-4xl font-semibold text-blueGray-700">{issuesFound}</p>
 				</div>
-				<div class="rounded-2xl border border-white/5 bg-slate-900/80 p-4">
-					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Findings</p>
-					<p class="mt-3 text-4xl font-semibold text-white">{findingCount}</p>
+				<div class="rounded-2xl border border-blueGray-200 bg-blueGray-50 p-4">
+					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">Findings</p>
+					<p class="mt-3 text-4xl font-semibold text-blueGray-700">{findingCount}</p>
 				</div>
-				<div class="rounded-2xl border border-white/5 bg-slate-900/80 p-4">
-					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Top severity</p>
-					<p class="mt-3 text-2xl font-semibold text-white">
+				<div class="rounded-2xl border border-blueGray-200 bg-blueGray-50 p-4">
+					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">Top severity</p>
+					<p class="mt-3 text-2xl font-semibold text-blueGray-700">
 						{severityEntries.length ? severityEntries[0][0] : '—'}
 					</p>
 				</div>
 			</div>
 
 			<section class="space-y-3">
-				<h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">Severity breakdown</h3>
+				<h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">Severity breakdown</h3>
 				{#if severityEntries.length}
 					<div class="space-y-2">
 						{#each severityEntries as [severity, count]}
-							<div class="flex items-center gap-4 rounded-2xl border border-white/5 bg-slate-900/60 px-4 py-3 text-sm">
-								<span class="w-28 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">{severity}</span>
-								<span class="flex-1 text-slate-200">{count}</span>
+							<div class="flex items-center gap-4 rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm">
+								<span class="w-28 text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-500">{severity}</span>
+								<span class="flex-1 text-blueGray-600">{count}</span>
 							</div>
 						{/each}
 					</div>
 				{:else}
-					<p class="rounded-2xl border border-white/5 bg-slate-900/60 px-4 py-3 text-sm text-slate-400">
+					<p class="rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-500">
 						No severity counts recorded for this run.
 					</p>
 				{/if}
 			</section>
 
-			<div class="rounded-2xl border border-dashed border-slate-700/60 bg-slate-900/50 p-6 text-sm text-slate-300">
-				<p class="font-medium text-slate-100">Findings preview</p>
+			{#if hasCost}
+				<section class="space-y-4">
+					<h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">Cost insights</h3>
+					<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+						<div class="rounded-2xl border border-blueGray-200 bg-lightBlue-50 p-4 text-blueGray-700">
+							<p class="text-xs font-semibold uppercase tracking-[0.3em] text-lightBlue-500">Total monthly</p>
+							<p class="mt-2 text-2xl font-semibold">{formatCurrency(totalMonthlyCost)}</p>
+						</div>
+						<div class="rounded-2xl border border-blueGray-200 bg-lightBlue-50 p-4 text-blueGray-700">
+							<p class="text-xs font-semibold uppercase tracking-[0.3em] text-lightBlue-500">Δ monthly</p>
+							<p class="mt-2 text-2xl font-semibold">{formatCurrency(diffMonthlyCost)}</p>
+						</div>
+						<div class="rounded-2xl border border-blueGray-200 bg-lightBlue-50 p-4 text-blueGray-700">
+							<p class="text-xs font-semibold uppercase tracking-[0.3em] text-lightBlue-500">Total hourly</p>
+							<p class="mt-2 text-2xl font-semibold">{formatCurrency(totalHourlyCost)}</p>
+						</div>
+						<div class="rounded-2xl border border-blueGray-200 bg-lightBlue-50 p-4 text-blueGray-700">
+							<p class="text-xs font-semibold uppercase tracking-[0.3em] text-lightBlue-500">Δ hourly</p>
+							<p class="mt-2 text-2xl font-semibold">{formatCurrency(diffHourlyCost)}</p>
+						</div>
+					</div>
+
+					{#if costProjects.length}
+						<div class="overflow-x-auto rounded-2xl border border-blueGray-200">
+							<table class="min-w-full divide-y divide-blueGray-100 text-sm text-blueGray-600">
+								<thead class="bg-blueGray-50 text-xs uppercase tracking-[0.25em] text-blueGray-400">
+									<tr>
+										<th class="px-4 py-3 text-left">Project</th>
+										<th class="px-4 py-3 text-left">Path</th>
+										<th class="px-4 py-3 text-right">Monthly</th>
+										<th class="px-4 py-3 text-right">Δ Monthly</th>
+									</tr>
+								</thead>
+								<tbody class="divide-y divide-blueGray-100">
+									{#each costProjects as project}
+										<tr class="bg-white">
+											<td class="px-4 py-3">{project?.name ?? '—'}</td>
+											<td class="px-4 py-3 text-xs text-blueGray-500">{project?.path ?? '—'}</td>
+											<td class="px-4 py-3 text-right">{formatCurrency((project?.monthly_cost as number | null) ?? null)}</td>
+											<td class="px-4 py-3 text-right">{formatCurrency((project?.diff_monthly_cost as number | null) ?? null)}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+					{/if}
+
+					{#if costErrors.length}
+						<details class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+							<summary class="cursor-pointer font-semibold">Infracost warnings</summary>
+							<ul class="mt-2 list-disc space-y-1 pl-5 text-xs">
+								{#each costErrors as message}
+									<li>{message}</li>
+								{/each}
+							</ul>
+						</details>
+					{/if}
+				</section>
+			{/if}
+
+			{#if driftSummary}
+				<section class="space-y-4">
+					<h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">Plan drift</h3>
+					{#if driftError}
+						<div class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{driftError}</div>
+					{:else}
+						<div class="flex flex-wrap gap-3 text-xs text-blueGray-500">
+							<span class="rounded-xl border border-blueGray-200 px-3 py-1">Total changes: <strong class="text-blueGray-600">{driftSummary?.total_changes ?? 0}</strong></span>
+							<span class="rounded-xl border border-blueGray-200 px-3 py-1">Status: <strong class="text-blueGray-600">{driftHasChanges ? 'Changes detected' : 'No drift'}</strong></span>
+						</div>
+
+						{#if driftCountEntries.length}
+							<ul class="grid gap-2 md:grid-cols-2 lg:grid-cols-4">
+								{#each driftCountEntries as [action, value]}
+									<li class="rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-600">
+										<span class="block text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">{action}</span>
+										<span class="mt-2 text-xl font-semibold text-blueGray-700">{value}</span>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+
+						{#if driftResourceChanges.length}
+							<details class="rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-600">
+								<summary class="cursor-pointer font-semibold">Resource changes ({driftResourceChanges.length})</summary>
+								<div class="mt-2 space-y-2 text-xs">
+									{#each driftResourceChanges as change}
+										<div class="rounded-xl border border-blueGray-200 bg-white px-3 py-2">
+											<p class="font-semibold text-blueGray-700">{(change?.address as string) ?? 'Unknown resource'}</p>
+											<p class="text-blueGray-500">Action: {(change?.action as string) ?? (change?.actions?.join(', ') ?? '—')}</p>
+										</div>
+									{/each}
+								</div>
+							</details>
+						{/if}
+
+						{#if driftOutputChanges.length}
+							<details class="rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-600">
+								<summary class="cursor-pointer font-semibold">Output changes ({driftOutputChanges.length})</summary>
+								<div class="mt-2 space-y-2 text-xs">
+									{#each driftOutputChanges as output}
+										<div class="rounded-xl border border-blueGray-200 bg-white px-3 py-2">
+											<p class="font-semibold text-blueGray-700">{output?.name ?? 'output'}</p>
+											<p class="text-blueGray-500">Actions: {(output?.actions as string[] | undefined)?.join(', ') ?? '—'}</p>
+										</div>
+									{/each}
+								</div>
+							</details>
+						{/if}
+					{/else}
+				{/if}
+			</section>
+			{/if}
+
+			<div class="rounded-2xl border border-dashed border-blueGray-300/60 bg-blueGray-100 p-6 text-sm text-blueGray-500">
+				<p class="font-medium text-blueGray-700">Findings preview</p>
 				{#if findingCount}
 					<p class="mt-2">
 						Inline filtering and diff previews will surface here. In the interim, use the HTML button above or call
-						<code class="rounded bg-slate-900/70 px-1 py-0.5 text-xs text-slate-200">GET /ui/reports/{params.id}/viewer</code> to interact with the
+						<code class="rounded bg-blueGray-50 px-1 py-0.5 text-xs text-blueGray-600">GET /ui/reports/{params.id}/viewer</code> to interact with the
 						legacy viewer.
 					</p>
 				{:else}
@@ -135,7 +305,7 @@
 			</div>
 		</div>
 	{:else if !error}
-		<div class="rounded-3xl border border-white/5 bg-slate-950/80 px-6 py-6 text-sm text-slate-400">
+		<div class="rounded-3xl border border-blueGray-200 bg-white px-6 py-6 text-sm text-blueGray-500">
 			Loading report details...
 		</div>
 	{/if}
