@@ -19,7 +19,8 @@ const mocks = vi.hoisted(() => ({
 	deleteProjectLibraryAssetVersion: vi.fn(),
 	deleteProjectLibraryAsset: vi.fn(),
 	getProjectLibraryAsset: vi.fn(),
-	updateProjectLibraryAsset: vi.fn()
+	updateProjectLibraryAsset: vi.fn(),
+	getProjectOverview: vi.fn()
 }));
 
 vi.mock('$lib/api/client', () => ({
@@ -38,7 +39,8 @@ vi.mock('$lib/api/client', () => ({
 	deleteProjectLibraryAssetVersion: mocks.deleteProjectLibraryAssetVersion,
 	deleteProjectLibraryAsset: mocks.deleteProjectLibraryAsset,
 	getProjectLibraryAsset: mocks.getProjectLibraryAsset,
-	updateProjectLibraryAsset: mocks.updateProjectLibraryAsset
+	updateProjectLibraryAsset: mocks.updateProjectLibraryAsset,
+	getProjectOverview: mocks.getProjectOverview
 }));
 
 const snapshot = () => {
@@ -135,10 +137,14 @@ describe('projectState', () => {
 	});
 
 	it('deletes projects and clears runs', async () => {
-		projectState.upsertProject(mockProject);
-		projectState.setRuns(mockProject.id, [mockRun]);
-		projectState.setArtifactCache(mockRun.id, '.', []);
-		mocks.listProjectLibrary.mockResolvedValueOnce([mockAsset]);
+	projectState.upsertProject(mockProject);
+	projectState.setRuns(mockProject.id, [mockRun]);
+	projectState.setArtifactCache(mockRun.id, '.', []);
+	mocks.listProjectLibrary.mockResolvedValueOnce({
+		items: [mockAsset],
+		nextCursor: null,
+		totalCount: 1
+	});
 		await projectState.loadLibrary(vi.fn(), 'token', mockProject.id, true);
 		mocks.deleteProject.mockResolvedValueOnce(undefined);
 		await projectState.deleteProject(vi.fn(), 'token', mockProject.id);
@@ -157,19 +163,23 @@ describe('projectState', () => {
 			kind: mockRun.kind
 		});
 		expect(created).toEqual(mockRun);
-		const state = snapshot();
-		expect(state.runs[mockProject.id]).toBeTruthy();
-		expect(state.runs[mockProject.id][0].id).toBe(mockRun.id);
+	const state = snapshot();
+	expect(state.runs[mockProject.id]).toBeTruthy();
+	expect(state.runs[mockProject.id]?.items[0].id).toBe(mockRun.id);
 		expect(get(activeProjectRuns)[0]?.id).toBe(mockRun.id);
 	});
 
 	it('refreshes runs via API call', async () => {
 		projectState.upsertProject(mockProject);
-		mocks.listProjectRuns.mockResolvedValueOnce([mockRun]);
+		mocks.listProjectRuns.mockResolvedValueOnce({
+			items: [mockRun],
+			nextCursor: null,
+			totalCount: 1
+		});
 		await projectState.refreshRuns(vi.fn(), 'token', mockProject.id, 10);
-		const state = snapshot();
-		expect(state.runs[mockProject.id]).toHaveLength(1);
-		expect(state.runs[mockProject.id][0].id).toBe(mockRun.id);
+	const state = snapshot();
+	expect(state.runs[mockProject.id]?.items).toHaveLength(1);
+	expect(state.runs[mockProject.id]?.items[0].id).toBe(mockRun.id);
 	});
 
 	it('caches and clears artifacts', () => {
@@ -228,9 +238,13 @@ describe('projectState', () => {
 	});
 
 	it('loads library assets and caches them', async () => {
-		projectState.upsertProject(mockProject);
-		projectState.setActiveProject(mockProject.id);
-		mocks.listProjectLibrary.mockResolvedValueOnce([mockAsset]);
+	projectState.upsertProject(mockProject);
+	projectState.setActiveProject(mockProject.id);
+	mocks.listProjectLibrary.mockResolvedValueOnce({
+		items: [mockAsset],
+		nextCursor: null,
+		totalCount: 1
+	});
 
 		const assets = await projectState.loadLibrary(vi.fn(), 'token', mockProject.id, true);
 
@@ -241,10 +255,14 @@ describe('projectState', () => {
 	});
 
 	it('registers library assets and updates cache', async () => {
-		projectState.upsertProject(mockProject);
-		projectState.setActiveProject(mockProject.id);
-		projectState.clearLibrary();
-		mocks.listProjectLibrary.mockResolvedValueOnce([]);
+	projectState.upsertProject(mockProject);
+	projectState.setActiveProject(mockProject.id);
+	projectState.clearLibrary();
+	mocks.listProjectLibrary.mockResolvedValueOnce({
+		items: [],
+		nextCursor: null,
+		totalCount: 0
+	});
 		await projectState.loadLibrary(vi.fn(), 'token', mockProject.id);
 
 		mocks.registerProjectLibraryAsset.mockResolvedValueOnce({
@@ -264,10 +282,14 @@ describe('projectState', () => {
 	});
 
 	it('adds library versions and refreshes the asset entry', async () => {
-		projectState.upsertProject(mockProject);
-		projectState.setActiveProject(mockProject.id);
-		projectState.clearLibrary();
-		mocks.listProjectLibrary.mockResolvedValueOnce([mockAsset]);
+	projectState.upsertProject(mockProject);
+	projectState.setActiveProject(mockProject.id);
+	projectState.clearLibrary();
+	mocks.listProjectLibrary.mockResolvedValueOnce({
+		items: [mockAsset],
+		nextCursor: null,
+		totalCount: 1
+	});
 		await projectState.loadLibrary(vi.fn(), 'token', mockProject.id, true);
 
 		const newVersion = {
@@ -314,7 +336,11 @@ describe('projectState', () => {
 			latest_version_id: secondVersion.id,
 			versions: [secondVersion, mockAssetVersion]
 		};
-		mocks.listProjectLibrary.mockResolvedValueOnce([assetWithTwoVersions]);
+	mocks.listProjectLibrary.mockResolvedValueOnce({
+		items: [assetWithTwoVersions],
+		nextCursor: null,
+		totalCount: 1
+	});
 		await projectState.loadLibrary(vi.fn(), 'token', mockProject.id, true);
 
 		mocks.deleteProjectLibraryAssetVersion.mockResolvedValueOnce(undefined);
@@ -338,7 +364,11 @@ describe('projectState', () => {
 		projectState.upsertProject(mockProject);
 		projectState.setActiveProject(mockProject.id);
 		projectState.clearLibrary();
-		mocks.listProjectLibrary.mockResolvedValueOnce([mockAsset]);
+	mocks.listProjectLibrary.mockResolvedValueOnce({
+		items: [mockAsset],
+		nextCursor: null,
+		totalCount: 1
+	});
 		await projectState.loadLibrary(vi.fn(), 'token', mockProject.id, true);
 
 		mocks.deleteProjectLibraryAsset.mockResolvedValueOnce(undefined);
@@ -353,7 +383,11 @@ describe('projectState', () => {
 		projectState.upsertProject(mockProject);
 		projectState.setActiveProject(mockProject.id);
 		projectState.clearLibrary();
-		mocks.listProjectLibrary.mockResolvedValueOnce([mockAsset]);
+	mocks.listProjectLibrary.mockResolvedValueOnce({
+		items: [mockAsset],
+		nextCursor: null,
+		totalCount: 1
+	});
 		await projectState.loadLibrary(vi.fn(), 'token', mockProject.id, true);
 
 		const updatedAsset = {

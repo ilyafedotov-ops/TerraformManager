@@ -116,6 +116,9 @@ def test_project_and_run_artifacts(storage_context: Dict[str, Path]) -> None:
 
     listed = storage.list_projects(db_path=db_path)
     assert listed and listed[0]["id"] == project["id"]
+    assert listed[0]["run_count"] == 0
+    assert listed[0]["library_asset_count"] == 0
+    assert listed[0]["last_activity_at"]
 
     fetched = storage.get_project(project_id=project["id"], db_path=db_path)
     assert fetched is not None and fetched["metadata"]["env"] == "dev"
@@ -130,8 +133,13 @@ def test_project_and_run_artifacts(storage_context: Dict[str, Path]) -> None:
     )
     assert run["status"] == "queued"
 
-    runs = storage.list_project_runs(project["id"], db_path=db_path)
+    runs_payload = storage.list_project_runs(project["id"], db_path=db_path)
+    runs = runs_payload["items"]
     assert len(runs) == 1 and runs[0]["id"] == run["id"]
+    assert runs_payload["total_count"] == 1
+
+    listed_after_run = storage.list_projects(db_path=db_path)
+    assert listed_after_run and listed_after_run[0]["run_count"] == 1
 
     run_detail = storage.get_project_run(run["id"], project_id=project["id"], db_path=db_path)
     assert run_detail is not None
@@ -196,6 +204,11 @@ def test_project_and_run_artifacts(storage_context: Dict[str, Path]) -> None:
         path="outputs/main.tf",
         db_path=db_path,
     )
+
+    overview = storage.get_project_overview(project["id"], db_path=db_path)
+    assert overview["project"]["id"] == project["id"]
+    assert overview["run_count"] == 1
+    assert overview["latest_run"]["id"] == run["id"]
 
     storage.delete_project(project["id"], remove_files=True, db_path=db_path)
     assert not (projects_root / project["slug"]).exists()

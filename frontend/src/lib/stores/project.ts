@@ -11,6 +11,7 @@ import {
 	type ProjectRunCreatePayload,
 	type ProjectRunSummary,
 	type ProjectSummary,
+	type ProjectOverview,
 	type ProjectUpdatePayload,
 	createProject as apiCreateProject,
 	createProjectRun as apiCreateProjectRun,
@@ -27,7 +28,8 @@ import {
 	deleteProjectLibraryAssetVersion as apiDeleteProjectLibraryAssetVersion,
 	deleteProjectLibraryAsset as apiDeleteProjectLibraryAsset,
 	getProjectLibraryAsset as apiGetProjectLibraryAsset,
-	updateProjectLibraryAsset as apiUpdateProjectLibraryAsset
+	updateProjectLibraryAsset as apiUpdateProjectLibraryAsset,
+	getProjectOverview as apiGetProjectOverview
 } from '$lib/api/client';
 
 type FetchFn = typeof fetch;
@@ -39,18 +41,33 @@ interface ArtifactCacheEntry {
 	fetchedAt: string;
 }
 
+interface ProjectRunCacheEntry {
+	items: ProjectRunSummary[];
+	nextCursor: string | null;
+	totalCount: number;
+	fetchedAt: string;
+}
+
 interface ProjectLibraryCacheEntry {
 	assets: GeneratedAssetSummary[];
 	includeVersions: boolean;
+	nextCursor: string | null;
+	totalCount: number;
+	fetchedAt: string;
+}
+
+interface ProjectOverviewCacheEntry {
+	data: ProjectOverview;
 	fetchedAt: string;
 }
 
 interface ProjectState {
 	projects: ProjectSummary[];
 	activeProjectId: string | null;
-	runs: Record<string, ProjectRunSummary[]>;
+	runs: Record<string, ProjectRunCacheEntry>;
 	artifacts: Record<string, ArtifactCacheEntry>;
 	library: Record<string, ProjectLibraryCacheEntry>;
+	overview: Record<string, ProjectOverviewCacheEntry>;
 	loading: boolean;
 	error: string | null;
 }
@@ -61,6 +78,7 @@ const initialState: ProjectState = {
 	runs: {},
 	artifacts: {},
 	library: {},
+	overview: {},
 	loading: false,
 	error: null
 };
@@ -126,7 +144,7 @@ function createProjectStore() {
 		},
 		removeProject(projectId: string) {
 			update((state) => {
-				const runIds = new Set((state.runs[projectId] ?? []).map((run) => run.id));
+				const runIds = new Set((state.runs[projectId]?.items ?? []).map((run) => run.id));
 				const projects = state.projects.filter((item) => item.id !== projectId);
 				const runs = Object.fromEntries(
 					Object.entries(state.runs).filter(([key]) => key !== projectId)
@@ -137,29 +155,46 @@ function createProjectStore() {
 				const library = Object.fromEntries(
 					Object.entries(state.library).filter(([key]) => key !== projectId)
 				);
+				const overview = Object.fromEntries(
+					Object.entries(state.overview).filter(([key]) => key !== projectId)
+				);
 				const activeProjectId =
 					state.activeProjectId === projectId ? (projects[0]?.id ?? null) : state.activeProjectId;
-				return { ...state, projects, runs, artifacts, library, activeProjectId };
+				return { ...state, projects, runs, artifacts, library, overview, activeProjectId };
 			});
 		},
 		setRuns(projectId: string, runs: ProjectRunSummary[]) {
 			update((state) => ({
 				...state,
-				runs: { ...state.runs, [projectId]: runs }
+				runs: {
+					...state.runs,
+					[projectId]: {
+						items: runs,
+						nextCursor: null,
+						totalCount: runs.length,
+						fetchedAt: new Date().toISOString()
+					}
+				}
 			}));
 		},
 		upsertRun(projectId: string, run: ProjectRunSummary) {
 			update((state) => {
-				const current = state.runs[projectId] ?? [];
-				const exists = current.some((item) => item.id === run.id);
-				const nextRuns = exists
-					? current.map((item) => (item.id === run.id ? { ...item, ...run } : item))
-					: [run, ...current];
+				const cache = state.runs[projectId];
+				const items = cache?.items ?? [];
+				const exists = items.some((item) => item.id === run.id);
+				const nextItems = exists
+					? items.map((item) => (item.id === run.id ? { ...item, ...run } : item))
+					: [run, ...items];
 				return {
 					...state,
 					runs: {
 						...state.runs,
-						[projectId]: nextRuns
+						[projectId]: {
+							items: nextItems,
+							nextCursor: cache?.nextCursor ?? null,
+							totalCount: exists ? cache?.totalCount ?? nextItems.length : (cache?.totalCount ?? 0) + 1,
+							fetchedAt: new Date().toISOString()
+						}
 					}
 				};
 			});
@@ -194,9 +229,15 @@ function createProjectStore() {
 			const key = makeArtifactKey(runId, path);
 			return currentState.artifacts[key] ?? null;
 		},
-		getCachedLibrary(projectId: string) {
-			return currentState.library[projectId] ?? null;
-		},
+	getCachedLibrary(projectId: string) {
+		return currentState.library[projectId] ?? null;
+	},
+	getCachedRuns(projectId: string) {
+		return currentState.runs[projectId] ?? null;
+	},
+	getCachedOverview(projectId: string) {
+		return currentState.overview[projectId] ?? null;
+	},
 		clearLibrary(projectId?: string) {
 			if (!projectId) {
 				update((state) => ({ ...state, library: {} }));
@@ -230,23 +271,76 @@ function createProjectStore() {
 				throw error;
 			}
 		},
-		async loadLibrary(fetchFn: FetchFn, token: string, projectId: string, includeVersions = false) {
-			update((state) => ({ ...state, loading: true, error: null }));
-			try {
-				const assets = await apiListProjectLibrary(fetchFn, token, projectId, includeVersions);
-				update((state) => ({
+	async loadLibrary(fetchFn: FetchFn, token: string, projectId: string, includeVersions = false) {
+		update((state) => ({ ...state, loading: true, error: null }));
+		try {
+			const response = await apiListProjectLibrary(fetchFn, token, projectId, { includeVersions });
+			update((state) => ({
 					...state,
 					library: {
 						...state.library,
 						[projectId]: {
-							assets,
+							assets: response.items,
 							includeVersions,
+							nextCursor: response.nextCursor ?? null,
+							totalCount: response.totalCount,
 							fetchedAt: new Date().toISOString()
 						}
 					},
 					loading: false
 				}));
-				return assets;
+				return response.items;
+			} catch (error) {
+				const message = normaliseError(error);
+				update((state) => ({ ...state, loading: false, error: message }));
+				throw error;
+			}
+		},
+		clearOverview(projectId?: string) {
+			if (!projectId) {
+				update((state) => ({ ...state, overview: {} }));
+				return;
+			}
+			update((state) => {
+				const next = Object.fromEntries(
+					Object.entries(state.overview).filter(([key]) => key !== projectId)
+				);
+				return { ...state, overview: next };
+			});
+		},
+		async loadOverview(
+			fetchFn: FetchFn,
+			token: string,
+			projectId: string,
+			options: { recentAssets?: number; includeMetadata?: boolean } = {}
+		) {
+			update((state) => ({ ...state, loading: true, error: null }));
+			try {
+				const overview = await apiGetProjectOverview(fetchFn, token, projectId, options);
+				update((state) => ({
+					...state,
+					overview: {
+						...state.overview,
+						[projectId]: {
+							data: overview,
+							fetchedAt: new Date().toISOString()
+						}
+					},
+					projects: state.projects.map((project) =>
+						project.id === projectId
+							? {
+									...project,
+									...overview.project,
+									run_count: overview.run_count,
+									library_asset_count: overview.library_asset_count,
+									latest_run: overview.latest_run ?? project.latest_run,
+									last_activity_at: overview.last_activity_at ?? project.last_activity_at
+								}
+							: project
+					),
+					loading: false
+				}));
+				return overview;
 			} catch (error) {
 				const message = normaliseError(error);
 				update((state) => ({ ...state, loading: false, error: message }));
@@ -271,6 +365,7 @@ function createProjectStore() {
 				update((state) => {
 					const cache = state.library[projectId];
 					const assets = upsertLibraryAsset(cache?.assets ?? [], updated);
+					const existed = cache?.assets?.some((item) => item.id === updated.id) ?? false;
 					return {
 						...state,
 						library: {
@@ -278,6 +373,8 @@ function createProjectStore() {
 							[projectId]: {
 								assets,
 								includeVersions: cache?.includeVersions ?? Boolean(updated.versions?.length),
+								nextCursor: cache?.nextCursor ?? null,
+								totalCount: cache ? (existed ? cache.totalCount : cache.totalCount + 1) : assets.length,
 								fetchedAt: new Date().toISOString()
 							}
 						},
@@ -318,6 +415,8 @@ function createProjectStore() {
 							[projectId]: {
 								assets,
 								includeVersions: true,
+								nextCursor: cache?.nextCursor ?? null,
+								totalCount: cache?.totalCount ?? assets.length,
 								fetchedAt: new Date().toISOString()
 							}
 						},
@@ -353,6 +452,8 @@ function createProjectStore() {
 							[projectId]: {
 								assets,
 								includeVersions: true,
+								nextCursor: cache?.nextCursor ?? null,
+								totalCount: cache?.totalCount ?? assets.length,
 								fetchedAt: new Date().toISOString()
 							}
 						},
@@ -380,12 +481,15 @@ function createProjectStore() {
 					if (!cache) {
 						return { ...state, loading: false };
 					}
+					const existed = cache.assets.some((item) => item.id === assetId);
 					const assets = cache.assets.filter((item) => item.id !== assetId);
 					const nextLibrary = {
 						...state.library,
 						[projectId]: {
 							assets,
 							includeVersions: cache.includeVersions,
+							nextCursor: cache.nextCursor,
+							totalCount: existed ? Math.max(0, cache.totalCount - 1) : cache.totalCount,
 							fetchedAt: new Date().toISOString()
 						}
 					};
@@ -421,6 +525,8 @@ function createProjectStore() {
 							[projectId]: {
 								assets,
 								includeVersions: cache?.includeVersions ?? true,
+								nextCursor: cache?.nextCursor ?? null,
+								totalCount: cache?.totalCount ?? assets.length,
 								fetchedAt: new Date().toISOString()
 							}
 						},
@@ -451,6 +557,44 @@ function createProjectStore() {
 				throw error;
 		}
 	},
+	async loadMoreLibrary(fetchFn: FetchFn, token: string, projectId: string, limit = 100) {
+		const cache = currentState.library[projectId];
+		if (!cache?.nextCursor) {
+			return [] as GeneratedAssetSummary[];
+		}
+		update((state) => ({ ...state, error: null }));
+		try {
+			const response = await apiListProjectLibrary(fetchFn, token, projectId, {
+				includeVersions: cache.includeVersions,
+				cursor: cache.nextCursor ?? undefined,
+				limit
+			});
+			update((state) => {
+				const existingCache = state.library[projectId];
+				const existingAssets = existingCache?.assets ?? [];
+				const existingIds = new Set(existingAssets.map((item) => item.id));
+				const merged = [...existingAssets, ...response.items.filter((item) => !existingIds.has(item.id))];
+				return {
+					...state,
+					library: {
+						...state.library,
+						[projectId]: {
+							assets: merged,
+							includeVersions: cache.includeVersions,
+							nextCursor: response.nextCursor ?? null,
+							totalCount: response.totalCount,
+							fetchedAt: new Date().toISOString()
+						}
+					}
+				};
+			});
+			return response.items;
+		} catch (error) {
+			const message = normaliseError(error);
+			update((state) => ({ ...state, error: message }));
+			throw error;
+		}
+	},
 	async updateProject(fetchFn: FetchFn, token: string, projectId: string, payload: ProjectUpdatePayload) {
 		update((state) => ({ ...state, loading: true, error: null }));
 		try {
@@ -477,7 +621,7 @@ function createProjectStore() {
 		try {
 			await apiDeleteProject(fetchFn, token, projectId, removeFiles);
 			update((state) => {
-				const projectRunIds = new Set((state.runs[projectId] ?? []).map((run) => run.id));
+				const projectRunIds = new Set((state.runs[projectId]?.items ?? []).map((run) => run.id));
 				const updatedProjects = state.projects.filter((project) => project.id !== projectId);
 				const runs = Object.fromEntries(
 					Object.entries(state.runs).filter(([key]) => key !== projectId)
@@ -488,6 +632,9 @@ function createProjectStore() {
 				const library = Object.fromEntries(
 					Object.entries(state.library).filter(([key]) => key !== projectId)
 				);
+				const overview = Object.fromEntries(
+					Object.entries(state.overview).filter(([key]) => key !== projectId)
+				);
 				const activeProjectId =
 					state.activeProjectId === projectId ? (updatedProjects[0]?.id ?? null) : state.activeProjectId;
 				return {
@@ -496,6 +643,7 @@ function createProjectStore() {
 					runs,
 					artifacts,
 					library,
+					overview,
 					activeProjectId,
 					loading: false
 				};
@@ -506,19 +654,63 @@ function createProjectStore() {
 			throw error;
 		}
 	},
-		async refreshRuns(fetchFn: FetchFn, token: string, projectId: string, limit = 50) {
-			update((state) => ({ ...state, loading: true, error: null }));
+	async refreshRuns(fetchFn: FetchFn, token: string, projectId: string, limit = 50) {
+		update((state) => ({ ...state, loading: true, error: null }));
+		try {
+			const response = await apiListProjectRuns(fetchFn, token, projectId, { limit });
+			update((state) => ({
+				...state,
+				runs: {
+					...state.runs,
+					[projectId]: {
+						items: response.items,
+						nextCursor: response.nextCursor ?? null,
+						totalCount: response.totalCount,
+						fetchedAt: new Date().toISOString()
+					}
+				},
+				loading: false
+			}));
+			return response.items;
+		} catch (error) {
+			const message = normaliseError(error);
+			update((state) => ({ ...state, loading: false, error: message }));
+			throw error;
+		}
+	},
+		async loadMoreRuns(fetchFn: FetchFn, token: string, projectId: string, limit = 50) {
+			const cache = currentState.runs[projectId];
+			if (!cache?.nextCursor) {
+				return [] as ProjectRunSummary[];
+			}
+			update((state) => ({ ...state, error: null }));
 			try {
-				const runs = await apiListProjectRuns(fetchFn, token, projectId, limit);
-				update((state) => ({
-					...state,
-					runs: { ...state.runs, [projectId]: runs },
-					loading: false
-				}));
-				return runs;
+				const response = await apiListProjectRuns(fetchFn, token, projectId, {
+					limit,
+					cursor: cache.nextCursor ?? undefined
+				});
+				update((state) => {
+					const existingCache = state.runs[projectId];
+					const existingItems = existingCache?.items ?? [];
+					const existingIds = new Set(existingItems.map((item) => item.id));
+					const merged = [...existingItems, ...response.items.filter((item) => !existingIds.has(item.id))];
+					return {
+						...state,
+						runs: {
+							...state.runs,
+							[projectId]: {
+								items: merged,
+								nextCursor: response.nextCursor ?? null,
+								totalCount: response.totalCount,
+								fetchedAt: new Date().toISOString()
+							}
+						}
+					};
+				});
+				return response.items;
 			} catch (error) {
 				const message = normaliseError(error);
-				update((state) => ({ ...state, loading: false, error: message }));
+				update((state) => ({ ...state, error: message }));
 				throw error;
 			}
 		},
@@ -532,12 +724,19 @@ function createProjectStore() {
 			try {
 				const run = await apiCreateProjectRun(fetchFn, token, projectId, payload);
 				update((state) => {
-					const current = state.runs[projectId] ?? [];
+					const cache = state.runs[projectId];
+					const items = cache?.items ?? [];
+					const exists = items.some((item) => item.id === run.id);
 					return {
 						...state,
 						runs: {
 							...state.runs,
-							[projectId]: [run, ...current]
+							[projectId]: {
+								items: exists ? items : [run, ...items],
+								nextCursor: cache?.nextCursor ?? null,
+								totalCount: exists ? cache?.totalCount ?? items.length : (cache?.totalCount ?? 0) + 1,
+								fetchedAt: new Date().toISOString()
+							}
 						},
 						loading: false
 					};
@@ -675,9 +874,13 @@ export const activeProject = derived(projectState, ($state) =>
 );
 
 export const activeProjectRuns = derived([projectState, activeProject], ([$state, $active]) =>
-	$active ? $state.runs[$active.id] ?? [] : []
+	$active ? $state.runs[$active.id]?.items ?? [] : []
 );
 
 export const activeProjectLibrary = derived([projectState, activeProject], ([$state, $active]) =>
 	$active ? $state.library[$active.id]?.assets ?? [] : []
+);
+
+export const activeProjectOverview = derived([projectState, activeProject], ([$state, $active]) =>
+	$active ? $state.overview[$active.id]?.data ?? null : null
 );
