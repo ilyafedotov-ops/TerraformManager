@@ -301,7 +301,7 @@ class GeneratedAsset(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     asset_type: Mapped[str] = mapped_column(String(48), nullable=False, default="artifact")
     tags: Mapped[List[str]] = mapped_column(JSON, nullable=False, default=list)
-    metadata: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    asset_metadata: Mapped[Dict[str, Any]] = mapped_column("metadata", JSON, nullable=False, default=dict)
     latest_version_id: Mapped[str | None] = mapped_column(String, ForeignKey("generated_asset_versions.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -317,13 +317,16 @@ class GeneratedAsset(Base):
 
     project: Mapped[Project] = relationship(back_populates="assets")
     versions: Mapped[List["GeneratedAssetVersion"]] = relationship(  # type: ignore[name-defined]
+        "GeneratedAssetVersion",
         back_populates="asset",
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="GeneratedAssetVersion.created_at.desc()",
+        foreign_keys="GeneratedAssetVersion.asset_id",
     )
     latest_version: Mapped["GeneratedAssetVersion | None"] = relationship(  # type: ignore[name-defined]
-        back_populates="asset_latest",
+        "GeneratedAssetVersion",
+        primaryjoin="GeneratedAsset.latest_version_id == GeneratedAssetVersion.id",
         foreign_keys="GeneratedAsset.latest_version_id",
         post_update=True,
         uselist=False,
@@ -339,7 +342,7 @@ class GeneratedAsset(Base):
             "description": self.description,
             "asset_type": self.asset_type,
             "tags": list(self.tags or []),
-            "metadata": dict(self.metadata or {}),
+            "metadata": dict(self.asset_metadata or {}),
             "latest_version_id": self.latest_version_id,
             "created_at": format_timestamp(self.created_at),
             "updated_at": format_timestamp(self.updated_at),
@@ -369,8 +372,17 @@ class GeneratedAssetVersion(Base):
         server_default=func.current_timestamp(),
     )
 
-    asset: Mapped[GeneratedAsset] = relationship(back_populates="versions")
-    asset_latest: Mapped[GeneratedAsset] = relationship(back_populates="latest_version", foreign_keys="GeneratedAsset.latest_version_id")
+    asset: Mapped[GeneratedAsset] = relationship(
+        "GeneratedAsset",
+        back_populates="versions",
+        foreign_keys=[asset_id],
+    )
+    asset_latest: Mapped[GeneratedAsset] = relationship(
+        "GeneratedAsset",
+        back_populates="latest_version",
+        primaryjoin="GeneratedAsset.latest_version_id == GeneratedAssetVersion.id",
+        viewonly=True,
+    )
     project: Mapped[Project] = relationship()
     run: Mapped[ProjectRun | None] = relationship()
     report: Mapped[Report | None] = relationship()

@@ -53,19 +53,30 @@ let removeFiles = $state(false);
 
 let libraryLoading = $state(false);
 let libraryError = $state<string | null>(null);
-let diffState = $state<
-	| {
-		assetId: string;
-		versionId: string;
-		againstVersionId: string;
-		diff: string | null;
-		error: string | null;
-		loading: boolean;
-	}
-	| null
->(null);
+type DiffState = {
+	assetId: string;
+	versionId: string;
+	againstVersionId: string;
+	diff: string | null;
+	error: string | null;
+	loading: boolean;
+	ignoreWhitespace: boolean;
+};
+
+let diffState = $state<DiffState | null>(null);
+let diffLayout = $state<'unified' | 'split'>('unified');
+
+let editAssetTarget = $state<GeneratedAssetSummary | null>(null);
+let editAssetName = $state('');
+let editAssetType = $state('');
+let editAssetTags = $state('');
+let editAssetDescription = $state('');
+let editAssetMetadata = $state('{\n\n}');
+let editAssetError = $state<string | null>(null);
+let editAssetSubmitting = $state(false);
 
 let metadataToggled = $state(false);
+const pendingLibraryLoads = new Set<string>();
 
 	$effect(() => {
 		const project = $activeProject as ProjectDetail | null;
@@ -200,6 +211,7 @@ $effect(() => {
 	if (!token || !project) {
 		libraryError = null;
 		libraryLoading = false;
+		pendingLibraryLoads.clear();
 		return;
 	}
 	const cached = projectState.getCachedLibrary(project.id);
@@ -208,7 +220,11 @@ $effect(() => {
 		libraryLoading = false;
 		return;
 	}
+	if (pendingLibraryLoads.has(project.id)) {
+		return;
+	}
 	libraryLoading = true;
+	pendingLibraryLoads.add(project.id);
 	void projectState
 		.loadLibrary(fetch, token, project.id, true)
 		.then(() => {
@@ -219,6 +235,7 @@ $effect(() => {
 			libraryError = error instanceof Error ? error.message : 'Unable to load project library.';
 		})
 		.finally(() => {
+			pendingLibraryLoads.delete(project.id);
 			libraryLoading = false;
 		});
 });
@@ -302,7 +319,8 @@ const handleDownloadVersion = async (assetId: string, version: GeneratedAssetVer
 const handleDiffVersion = async (
 	asset: GeneratedAssetSummary,
 	version: GeneratedAssetVersionSummary,
-	againstVersionId: string | null
+	againstVersionId: string | null,
+	options: { ignoreWhitespace?: boolean } = {}
 ) => {
 	const project = $activeProject as ProjectDetail | null;
 	if (!project || !token) {
@@ -317,33 +335,38 @@ const handleDiffVersion = async (
 		assetId: asset.id,
 		versionId: version.id,
 		againstVersionId,
+		ignoreWhitespace: options.ignoreWhitespace ?? false,
 		diff: null,
 		error: null,
 		loading: true
 	};
 	try {
-		const payload = await diffProjectLibraryAssetVersions(
-			fetch,
-			token,
-			project.id,
-			asset.id,
-			version.id,
-			againstVersionId
-		);
-		diffState = {
-			assetId: asset.id,
-			versionId: version.id,
-			againstVersionId,
-			diff: payload.diff,
-			error: null,
-			loading: false
-		};
+	const payload = await diffProjectLibraryAssetVersions(
+		fetch,
+		token,
+		project.id,
+		asset.id,
+		version.id,
+		againstVersionId,
+		options
+	);
+	diffState = {
+		assetId: asset.id,
+		versionId: version.id,
+		againstVersionId,
+		ignoreWhitespace: payload.ignore_whitespace ?? options.ignoreWhitespace ?? false,
+		diff: payload.diff,
+		error: null,
+		loading: false
+	};
 	} catch (error) {
 		const message = error instanceof Error ? error.message : 'Failed to generate diff.';
+		const ignoreWhitespace = options.ignoreWhitespace ?? diffState?.ignoreWhitespace ?? false;
 		diffState = {
 			assetId: asset.id,
 			versionId: version.id,
 			againstVersionId,
+			ignoreWhitespace,
 			diff: null,
 			error: message,
 			loading: false
@@ -353,6 +376,187 @@ const handleDiffVersion = async (
 
 const handleCloseDiff = () => {
 	diffState = null;
+};
+
+const handleCopyDiff = async () => {
+	if (!diffState || !diffState.diff) {
+		notifyError('No diff available to copy.');
+		return;
+	}
+	if (!browser || !navigator.clipboard) {
+		notifyError('Clipboard access is not available.');
+		return;
+	}
+	try {
+		await navigator.clipboard.writeText(diffState.diff);
+		notifySuccess('Diff copied to clipboard.');
+	} catch (error) {
+		const message = error instanceof Error ? error.message : 'Failed to copy diff.';
+		notifyError(message);
+	}
+};
+
+const handleDownloadDiffText = () => {
+	if (!diffState || !diffState.diff) {
+		notifyError('No diff available to download.');
+		return;
+	}
+	const blob = new Blob([diffState.diff], { type: 'text/plain;charset=utf-8' });
+	const url = URL.createObjectURL(blob);
+	const anchor = document.createElement('a');
+	anchor.href = url;
+	anchor.download = `diff-${diffState.versionId}-vs-${diffState.againstVersionId}.patch`;
+	document.body.appendChild(anchor);
+	anchor.click();
+	document.body.removeChild(anchor);
+	if (browser) {
+		setTimeout(() => URL.revokeObjectURL(url), 500);
+	}
+};
+
+const toggleIgnoreWhitespace = () => {
+	const currentDiff = diffState;
+	if (!currentDiff) return;
+	const project = $activeProject as ProjectDetail | null;
+	if (!project || !token) {
+		notifyError('Select a project to diff assets.');
+		return;
+	}
+	const asset = libraryAssets.find((item) => item.id === currentDiff.assetId);
+	if (!asset) {
+		notifyError('Asset not found in current library.');
+		return;
+	}
+	const version = asset.versions?.find((item) => item.id === currentDiff.versionId);
+	if (!version) {
+		notifyError('Version not found.');
+		return;
+	}
+	const baseVersionId = currentDiff.againstVersionId;
+	if (!baseVersionId) {
+		notifyError('No base version selected for diff.');
+		return;
+	}
+	void handleDiffVersion(asset, version, baseVersionId, {
+		ignoreWhitespace: !currentDiff.ignoreWhitespace
+	});
+};
+
+const setDiffLayout = (layout: 'unified' | 'split') => {
+	diffLayout = layout;
+};
+
+type SplitRow = {
+	left: string;
+	right: string;
+	type: 'context' | 'added' | 'removed';
+};
+
+const buildSplitRows = (diffText: string): SplitRow[] => {
+	const rows: SplitRow[] = [];
+	for (const rawLine of diffText.split('\n')) {
+		if (!rawLine || rawLine.startsWith('@@') || rawLine.startsWith('---') || rawLine.startsWith('+++')) {
+			continue;
+		}
+		if (rawLine.startsWith('+')) {
+			rows.push({ left: '', right: rawLine.slice(1), type: 'added' });
+			continue;
+		}
+		if (rawLine.startsWith('-')) {
+			rows.push({ left: rawLine.slice(1), right: '', type: 'removed' });
+			continue;
+		}
+		if (rawLine.startsWith('\\')) {
+			continue;
+		}
+		const value = rawLine.startsWith(' ') ? rawLine.slice(1) : rawLine;
+		rows.push({ left: value, right: value, type: 'context' });
+	}
+	return rows;
+};
+
+const toggleDiffWhitespace = () => {
+	if (!diffState) return;
+	diffState = {
+		...diffState,
+		ignoreWhitespace: !diffState.ignoreWhitespace,
+		loading: true,
+		diff: diffState.diff,
+		error: null
+	};
+};
+
+const openEditAsset = (asset: GeneratedAssetSummary) => {
+	editAssetTarget = asset;
+	editAssetName = asset.name;
+	editAssetType = asset.asset_type;
+	editAssetDescription = asset.description ?? '';
+	editAssetTags = asset.tags.join(', ');
+	editAssetMetadata = JSON.stringify(asset.metadata ?? {}, null, 2);
+	editAssetError = null;
+};
+
+const closeEditAsset = () => {
+	if (editAssetSubmitting) return;
+	editAssetTarget = null;
+	editAssetError = null;
+};
+
+const handleEditAssetSubmit = async (event: SubmitEvent) => {
+	event.preventDefault();
+	const project = $activeProject as ProjectDetail | null;
+	if (!project || !token || !editAssetTarget) {
+		notifyError('Select a project to update assets.');
+		return;
+	}
+	const trimmedName = editAssetName.trim();
+	if (!trimmedName) {
+		editAssetError = 'Asset name is required.';
+		return;
+	}
+	const trimmedType = editAssetType.trim();
+	if (!trimmedType) {
+		editAssetError = 'Asset type is required.';
+		return;
+	}
+	const tagList = editAssetTags
+		.split(',')
+		.map((tag) => tag.trim())
+		.filter((tag) => tag.length > 0);
+	let metadata: Record<string, unknown> | undefined;
+	const metadataPayload = editAssetMetadata.trim();
+	if (metadataPayload) {
+		try {
+			const parsed = JSON.parse(metadataPayload);
+			if (!parsed || typeof parsed !== 'object') {
+				throw new Error('Metadata must be a JSON object.');
+			}
+			metadata = parsed as Record<string, unknown>;
+		} catch (error) {
+			editAssetError = error instanceof Error ? error.message : 'Metadata must be valid JSON.';
+			return;
+		}
+	}
+
+	editAssetSubmitting = true;
+	editAssetError = null;
+	try {
+		await projectState.updateLibraryAsset(fetch, token, project.id, editAssetTarget.id, {
+			name: trimmedName,
+			asset_type: trimmedType,
+			description: editAssetDescription.trim() || undefined,
+			tags: tagList,
+			metadata
+		});
+		notifySuccess('Asset updated.');
+		closeEditAsset();
+	} catch (error) {
+		const message = error instanceof Error ? error.message : 'Failed to update asset.';
+		editAssetError = message;
+		notifyError(message);
+	} finally {
+		editAssetSubmitting = false;
+	}
 };
 </script>
 
@@ -368,7 +572,116 @@ const handleCloseDiff = () => {
 			<div class="rounded-3xl border border-amber-300 bg-amber-50 px-6 py-3 text-sm text-amber-700">
 				{loadError}
 			</div>
-		{/if}
+{/if}
+
+{#if editAssetTarget}
+	<div class="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
+		<button
+			type="button"
+			class="absolute inset-0 bg-slate-900/60"
+			onclick={closeEditAsset}
+			aria-label="Close edit asset modal"
+		></button>
+		<div class="relative w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl shadow-slate-900/20" role="dialog" aria-modal="true">
+			<div class="flex items-start justify-between gap-4">
+				<div>
+					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Edit asset</p>
+					<p class="mt-1 text-sm text-slate-600">{editAssetTarget.name}</p>
+				</div>
+				<button
+					type="button"
+					class="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-500"
+					onclick={closeEditAsset}
+					aria-label="Close edit asset dialog"
+				>
+					Close
+				</button>
+			</div>
+			<form class="mt-4 space-y-4 text-sm" onsubmit={handleEditAssetSubmit}>
+				<div class="grid gap-3">
+					<label class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400" for="edit-asset-name">
+						Asset name
+					</label>
+					<input
+						id="edit-asset-name"
+						class="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
+						type="text"
+						bind:value={editAssetName}
+						required
+					/>
+				</div>
+				<div class="grid gap-3">
+					<label class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400" for="edit-asset-type">
+						Asset type
+					</label>
+					<input
+						id="edit-asset-type"
+						class="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
+						type="text"
+						bind:value={editAssetType}
+						required
+					/>
+				</div>
+				<div class="grid gap-3">
+					<label class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400" for="edit-asset-tags">
+						Tags
+					</label>
+					<input
+						id="edit-asset-tags"
+						class="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
+						type="text"
+						placeholder="baseline, production"
+						bind:value={editAssetTags}
+					/>
+					<p class="text-xs text-slate-400">Separate with commas.</p>
+				</div>
+				<div class="grid gap-3">
+					<label class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400" for="edit-asset-description">
+						Description
+					</label>
+					<textarea
+						id="edit-asset-description"
+						class="h-20 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
+						bind:value={editAssetDescription}
+					></textarea>
+				</div>
+				<div class="grid gap-3">
+					<label class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400" for="edit-asset-metadata">
+						Metadata (JSON)
+					</label>
+					<textarea
+						id="edit-asset-metadata"
+						class="h-24 rounded-xl border border-slate-200 px-3 py-2 font-mono text-[0.75rem] text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
+						bind:value={editAssetMetadata}
+					></textarea>
+				</div>
+				{#if editAssetError}
+					<p class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">{editAssetError}</p>
+				{/if}
+				<div class="flex flex-wrap items-center justify-end gap-2 pt-2">
+					<button
+						type="button"
+						class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+						onclick={closeEditAsset}
+						disabled={editAssetSubmitting}
+					>
+						Cancel
+					</button>
+					<button
+						type="submit"
+						class="inline-flex items-center gap-2 rounded-xl border border-sky-500 bg-sky-500 px-4 py-2 text-xs font-semibold text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-60"
+						disabled={editAssetSubmitting}
+					>
+						{#if editAssetSubmitting}
+							<span class="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"></span>
+						{/if}
+						Save changes
+					</button>
+				</div>
+			</form>
+		</div>
+	</div>
+{/if}
 	</header>
 
 	<section class="rounded-3xl border border-slate-200 bg-white px-6 py-6 shadow-sm shadow-slate-200">
@@ -706,6 +1019,7 @@ const handleCloseDiff = () => {
 										{#if asset.versions && asset.versions.length}
 											<ul class="space-y-2 text-xs text-slate-600">
 						{#each asset.versions as version, versionIndex (version.id)}
+							{@const previousVersion = asset.versions ? asset.versions[versionIndex + 1] ?? null : null}
 								<li class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
 									<div class="space-y-1">
 										<span class="font-mono text-[0.7rem] text-slate-600">{version.display_path}</span>
@@ -730,35 +1044,115 @@ const handleCloseDiff = () => {
 										>
 											Download
 										</button>
-									{@const previousVersion = asset.versions ? asset.versions[versionIndex + 1] ?? null : null}
-										<button
-											type="button"
-											class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1 text-[0.65rem] font-semibold text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-											onclick={() => void handleDiffVersion(asset, version, previousVersion?.id ?? null)}
-											disabled={!previousVersion || (diffState?.loading && diffState.assetId === asset.id && diffState.versionId === version.id)}
-										>
-											Diff prev
-										</button>
+									<button
+										type="button"
+										class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1 text-[0.65rem] font-semibold text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+										onclick={() => {
+											diffLayout = diffLayout;
+											void handleDiffVersion(asset, version, previousVersion?.id ?? null, {
+												ignoreWhitespace: diffState?.ignoreWhitespace ?? false
+											});
+										}}
+										disabled={!previousVersion || (diffState?.loading && diffState.assetId === asset.id && diffState.versionId === version.id)}
+									>
+										Diff prev
+									</button>
 									</div>
 								</li>
 								{#if diffState && diffState.assetId === asset.id && diffState.versionId === version.id}
 									<li class="space-y-2 rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
-										<div class="flex items-center justify-between gap-2">
+										<div class="flex flex-wrap items-center justify-between gap-2">
 											<p class="font-semibold uppercase tracking-[0.25em] text-slate-400">Diff vs {diffState.againstVersionId}</p>
-											<button
-												type="button"
-												class="rounded-xl border border-slate-200 bg-slate-50 px-2 py-1 text-[0.65rem] font-semibold text-slate-500"
-												onclick={handleCloseDiff}
-											>
-												Close
-											</button>
+											<div class="flex flex-wrap items-center gap-2">
+												<button
+													type="button"
+													class="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-2 py-1 text-[0.65rem] font-semibold transition hover:bg-slate-100"
+													class:bg-sky-500={diffLayout === 'unified'}
+													class:text-white={diffLayout === 'unified'}
+													class:border-sky-500={diffLayout === 'unified'}
+													onclick={() => setDiffLayout('unified')}
+													disabled={diffState.loading}
+												>
+													Unified
+												</button>
+												<button
+													type="button"
+													class="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-2 py-1 text-[0.65rem] font-semibold transition hover:bg-slate-100"
+													class:bg-sky-500={diffLayout === 'split'}
+													class:text-white={diffLayout === 'split'}
+													class:border-sky-500={diffLayout === 'split'}
+													onclick={() => setDiffLayout('split')}
+													disabled={diffState.loading}
+												>
+													Split view
+												</button>
+												<button
+													type="button"
+													class="inline-flex items-center gap-1 rounded-xl border px-2 py-1 text-[0.65rem] font-semibold transition"
+													class:border-emerald-500={diffState.ignoreWhitespace}
+													class:bg-emerald-500={diffState.ignoreWhitespace}
+													class:text-white={diffState.ignoreWhitespace}
+													class:border-slate-200={!diffState.ignoreWhitespace}
+													class:bg-slate-50={!diffState.ignoreWhitespace}
+													class:text-slate-500={!diffState.ignoreWhitespace}
+													onclick={toggleIgnoreWhitespace}
+													disabled={diffState.loading}
+												>
+													{diffState.ignoreWhitespace ? 'Ignore whitespace ✓' : 'Ignore whitespace'}
+												</button>
+												<button
+													type="button"
+													class="rounded-xl border border-slate-200 bg-slate-50 px-2 py-1 text-[0.65rem] font-semibold text-slate-500"
+													onclick={handleCopyDiff}
+													disabled={!diffState.diff || diffState.loading}
+												>
+													Copy
+												</button>
+												<button
+													type="button"
+													class="rounded-xl border border-slate-200 bg-slate-50 px-2 py-1 text-[0.65rem] font-semibold text-slate-500"
+													onclick={handleDownloadDiffText}
+													disabled={!diffState.diff || diffState.loading}
+												>
+													Download
+												</button>
+												<button
+													type="button"
+													class="rounded-xl border border-slate-200 bg-slate-50 px-2 py-1 text-[0.65rem] font-semibold text-slate-500"
+													onclick={handleCloseDiff}
+												>
+													Close
+												</button>
+											</div>
 										</div>
 										{#if diffState.loading}
 											<p class="text-slate-400">Generating diff…</p>
 										{:else if diffState.error}
 											<p class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-600">{diffState.error}</p>
 										{:else if diffState.diff}
-											<pre class="max-h-64 overflow-auto rounded-xl border border-slate-200 bg-slate-900 p-3 font-mono text-[0.65rem] text-slate-100"><code>{diffState.diff}</code></pre>
+											{@const splitRows = diffLayout === 'split' && diffState.diff ? buildSplitRows(diffState.diff) : []}
+											{#if diffLayout === 'split'}
+												<div class="max-h-64 overflow-auto rounded-xl border border-slate-200">
+													<table class="w-full text-left text-[0.65rem] font-mono">
+														<thead class="bg-slate-50 text-[0.6rem] uppercase tracking-[0.2em] text-slate-400">
+															<tr>
+																<th class="w-1/2 border-b border-slate-200 px-3 py-2">Base</th>
+																<th class="w-1/2 border-b border-slate-200 px-3 py-2">Compare</th>
+															</tr>
+														</thead>
+														<tbody>
+															{#each splitRows as row, idx (idx)}
+																<tr class={row.type === 'added' ? 'bg-emerald-50 text-emerald-700' : row.type === 'removed' ? 'bg-rose-50 text-rose-600' : ''}>
+																	<td class="whitespace-pre-wrap border-r border-slate-200 px-3 py-1 align-top">{row.left}</td>
+																	<td class="whitespace-pre-wrap px-3 py-1 align-top">{row.right}</td>
+																</tr>
+															{/each}
+														</tbody>
+													</table>
+												</div>
+											{:else}
+												<pre class="max-h-64 overflow-auto rounded-xl border border-slate-200 bg-slate-900 p-3 font-mono text-[0.65rem] text-slate-100"><code>{diffState.diff}</code></pre>
+											{/if}
 										{:else}
 											<p class="text-slate-400">No differences detected.</p>
 										{/if}
@@ -771,6 +1165,13 @@ const handleCloseDiff = () => {
 					{/if}
 									</div>
 									<div class="flex flex-wrap gap-2">
+										<button
+											type="button"
+											class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-500 transition hover:bg-slate-100"
+											onclick={() => openEditAsset(asset)}
+										>
+											Edit details
+										</button>
 										<button
 											type="button"
 											class="inline-flex items-center gap-2 rounded-xl border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-600 transition hover:bg-rose-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"

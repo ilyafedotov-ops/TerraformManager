@@ -31,6 +31,7 @@ from backend.storage import (
     list_generated_assets,
     get_generated_asset,
     register_generated_asset,
+    update_generated_asset,
     add_generated_asset_version,
     delete_generated_asset_version,
     delete_generated_asset,
@@ -178,6 +179,14 @@ class GeneratedAssetVersionCreateRequest(BaseModel):
         description="Base64-encoded content for direct upload.",
     )
     promote_latest: bool = Field(default=True)
+
+
+class GeneratedAssetUpdateRequest(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=160)
+    asset_type: Optional[str] = Field(default=None, min_length=1, max_length=48)
+    description: Optional[str] = Field(default=None, max_length=1024)
+    tags: Optional[List[str]] = Field(default=None)
+    metadata: Optional[Dict[str, Any]] = Field(default=None)
 
 
 @router.get("/", response_model=List[ProjectBaseResponse])
@@ -626,6 +635,37 @@ def project_library_add_version(
     return GeneratedAssetRegisterResponse.model_validate(result)
 
 
+@router.patch("/{project_id}/library/{asset_id}", response_model=GeneratedAssetSummary)
+def project_library_update(
+    project_id: str,
+    asset_id: str,
+    payload: GeneratedAssetUpdateRequest,
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> GeneratedAssetSummary:
+    project = get_project(project_id=project_id, session=session)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+
+    try:
+        updated = update_generated_asset(
+            asset_id,
+            project_id=project_id,
+            name=payload.name,
+            asset_type=payload.asset_type,
+            description=payload.description,
+            tags=payload.tags,
+            metadata=payload.metadata,
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
+    return GeneratedAssetSummary.model_validate(updated)
+
+
 @router.delete(
     "/{project_id}/library/{asset_id}/versions/{version_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -696,6 +736,7 @@ def project_library_version_diff(
     asset_id: str,
     version_id: str,
     against: str = Query(..., description="Version ID to diff against"),
+    ignore_whitespace: bool = Query(False, description="Ignore whitespace when generating diff"),
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
@@ -710,6 +751,7 @@ def project_library_version_diff(
             base_version_id=against,
             compare_version_id=version_id,
             project_id=project_id,
+            ignore_whitespace=ignore_whitespace,
             session=session,
         )
     except ValueError as exc:

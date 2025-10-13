@@ -186,6 +186,7 @@ export interface GeneratedAssetDiffResponse {
 	base: GeneratedAssetVersionSummary;
 	compare: GeneratedAssetVersionSummary;
 	diff: string;
+	ignore_whitespace?: boolean;
 }
 
 export interface GeneratedAssetCreatePayload {
@@ -212,6 +213,14 @@ export interface GeneratedAssetVersionCreatePayload {
 	notes?: string | null;
 	content_base64?: string | null;
 	promote_latest?: boolean;
+}
+
+export interface GeneratedAssetUpdatePayload {
+	name?: string | null;
+	asset_type?: string | null;
+	description?: string | null;
+	tags?: string[] | null;
+	metadata?: Record<string, unknown> | null;
 }
 
 function buildUrl(path: string, searchParams?: ApiRequestOptions['searchParams']): string {
@@ -1000,6 +1009,20 @@ export async function addProjectLibraryAssetVersion(
 	});
 }
 
+export async function updateProjectLibraryAsset(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	assetId: string,
+	payload: GeneratedAssetUpdatePayload
+): Promise<GeneratedAssetSummary> {
+	return apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}`, {
+		method: 'PATCH',
+		token,
+		body: payload
+	});
+}
+
 export async function deleteProjectLibraryAssetVersion(
 	fetchFn: typeof fetch,
 	token: string,
@@ -1056,11 +1079,16 @@ export async function diffProjectLibraryAssetVersions(
 	projectId: string,
 	assetId: string,
 	versionId: string,
-	againstVersionId: string
+	againstVersionId: string,
+	options?: { ignoreWhitespace?: boolean }
 ): Promise<GeneratedAssetDiffResponse> {
+	const searchParams: Record<string, string> = { against: againstVersionId };
+	if (options?.ignoreWhitespace) {
+		searchParams.ignore_whitespace = 'true';
+	}
 	return apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}/versions/${versionId}/diff`, {
 		token,
-		searchParams: { against: againstVersionId }
+		searchParams
 	});
 }
 

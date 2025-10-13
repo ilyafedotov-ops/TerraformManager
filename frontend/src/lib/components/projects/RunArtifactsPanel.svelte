@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
-	import { downloadRunArtifact, type ArtifactEntry } from '$lib/api/client';
-	import { notifyError, notifySuccess } from '$lib/stores/notifications';
-	import { activeProject, activeProjectRuns, projectState } from '$lib/stores/project';
+import { browser } from '$app/environment';
+import { onMount } from 'svelte';
+import { downloadRunArtifact, type ArtifactEntry } from '$lib/api/client';
+import { notifyError, notifySuccess } from '$lib/stores/notifications';
+import { activeProject, activeProjectRuns, activeProjectLibrary, projectState } from '$lib/stores/project';
 
 interface Props {
 	token: string | null;
@@ -40,12 +41,106 @@ let previousContent = $state<string | null>(null);
 let previousError = $state<string | null>(null);
 let previousLoading = $state(false);
 let promoteBusyPath = $state<string | null>(null);
+let promoteTarget = $state<ArtifactEntry | null>(null);
+let promoteName = $state('');
+let promoteType = $state('terraform');
+let promoteTags = $state('');
+let promoteDescription = $state('');
+let promoteNotes = $state('');
+let promoteMetadata = $state('{\n\n}');
+let promoteError = $state<string | null>(null);
+let promoteSubmitting = $state(false);
+let promotionPrefsLoaded = $state(false);
+let showTagSuggestions = $state(false);
 
 	const activeProjectValue = $derived($activeProject);
 	const projectRuns = $derived($activeProjectRuns);
 	const selectedRun = $derived(projectRuns.find((run) => run.id === selectedRunId) ?? null);
+	const libraryAssets = $derived($activeProjectLibrary);
+	const tagSuggestions = $derived(
+		(() => {
+			const tags = new Set<string>();
+			for (const asset of libraryAssets) {
+				for (const tag of asset.tags ?? []) {
+					if (tag) {
+						tags.add(tag);
+					}
+				}
+			}
+			return Array.from(tags).sort((a, b) => a.localeCompare(b));
+		})()
+	);
 
 	const normalisePath = (value: string) => (value && value !== '.' ? value : '.');
+
+	const PREFERENCE_KEY = 'tfm_promotion_defaults';
+
+	const loadPromotionDefaults = (): {
+		assetType?: string;
+		tags?: string;
+		metadata?: string;
+		description?: string;
+		notes?: string;
+	} => {
+		if (!browser) return {};
+		try {
+			const raw = window.localStorage.getItem(PREFERENCE_KEY);
+			if (!raw) return {};
+			const parsed = JSON.parse(raw);
+			if (!parsed || typeof parsed !== 'object') return {};
+			return parsed;
+		} catch {
+			return {};
+		}
+	};
+
+	const storePromotionDefaults = (prefs: {
+		assetType?: string;
+		tags?: string;
+		metadata?: string;
+		description?: string;
+		notes?: string;
+	}) => {
+		if (!browser) return;
+		try {
+			window.localStorage.setItem(PREFERENCE_KEY, JSON.stringify(prefs));
+		} catch {
+			// ignore storage errors
+		}
+	};
+
+	onMount(() => {
+		if (!promotionPrefsLoaded) {
+			const defaults = loadPromotionDefaults();
+			if (defaults.assetType) {
+				promoteType = defaults.assetType;
+			}
+			if (defaults.tags) {
+				promoteTags = defaults.tags;
+			}
+			if (defaults.metadata) {
+				promoteMetadata = defaults.metadata;
+			}
+			if (defaults.description) {
+				promoteDescription = defaults.description;
+			}
+			if (defaults.notes) {
+				promoteNotes = defaults.notes;
+			}
+			promotionPrefsLoaded = true;
+		}
+	});
+
+	const applyTagSuggestion = (tag: string) => {
+		const existing = promoteTags
+			.split(',')
+			.map((value) => value.trim())
+			.filter((value) => value.length > 0);
+		if (!existing.includes(tag)) {
+			existing.push(tag);
+			promoteTags = existing.join(', ');
+		}
+	};
 
 	const updateBreadcrumbs = (path: string) => {
 		const normalised = normalisePath(path);
@@ -365,49 +460,109 @@ const resetArtifacts = () => {
 	}
 };
 
-	const handlePromoteArtifact = async (entry: ArtifactEntry) => {
+	const openPromoteModal = (entry: ArtifactEntry) => {
 		if (entry.is_dir) {
-			await navigateToPath(entry.path);
+			void navigateToPath(entry.path);
 			return;
 		}
+		promoteTarget = entry;
+		promoteName = entry.name || entry.path;
+		const defaults = loadPromotionDefaults();
+		if (!promotionPrefsLoaded) {
+			promotionPrefsLoaded = true;
+		}
+		if (defaults.assetType) promoteType = defaults.assetType;
+		else if (!promoteType.trim()) promoteType = 'terraform';
+		if (defaults.tags !== undefined) promoteTags = defaults.tags;
+		if (defaults.metadata) promoteMetadata = defaults.metadata;
+		else if (!promoteMetadata.trim()) promoteMetadata = '{\n\n}';
+		if (defaults.description !== undefined) promoteDescription = defaults.description;
+		if (defaults.notes !== undefined) promoteNotes = defaults.notes;
+		if (!promoteType.trim()) {
+			promoteType = 'terraform';
+		}
+		if (!promoteMetadata.trim()) {
+			promoteMetadata = '{\n\n}';
+		}
+		promoteError = null;
+	};
+
+	const closePromoteModal = () => {
+		if (promoteSubmitting) return;
+		promoteTarget = null;
+		promoteError = null;
+		showTagSuggestions = false;
+	};
+
+	const handlePromoteSubmit = async (event: SubmitEvent) => {
+		event.preventDefault();
 		if (!token) {
 			notifyError('Sign in to promote artifacts.');
 			return;
 		}
-		if (!activeProjectValue || !selectedRunId) {
+		if (!activeProjectValue || !selectedRunId || !promoteTarget) {
 			notifyError('Select a project and run to promote artifacts.');
 			return;
 		}
-
-		let assetName = entry.name || entry.path;
-		let assetType = 'terraform';
-		if (browser) {
-			const requestedName = window.prompt('Library asset name', assetName);
-			if (!requestedName || !requestedName.trim()) {
-				notifyError('Promotion cancelled – provide a name for the asset.');
+		const trimmedName = promoteName.trim();
+		if (!trimmedName) {
+			promoteError = 'Asset name is required.';
+			return;
+		}
+		const trimmedType = promoteType.trim();
+		if (!trimmedType) {
+			promoteError = 'Asset type is required.';
+			return;
+		}
+		const tagList = promoteTags
+			.split(',')
+			.map((tag) => tag.trim())
+			.filter((tag) => tag.length > 0);
+		let metadata: Record<string, unknown> | undefined;
+		const metadataPayload = promoteMetadata.trim();
+		if (metadataPayload) {
+			try {
+				const parsed = JSON.parse(metadataPayload);
+				if (!parsed || typeof parsed !== 'object') {
+					throw new Error('Metadata must be a JSON object.');
+				}
+				metadata = parsed as Record<string, unknown>;
+			} catch (error) {
+				promoteError = error instanceof Error ? error.message : 'Metadata must be valid JSON.';
 				return;
-			}
-			assetName = requestedName.trim();
-			const requestedType = window.prompt('Asset type (e.g. terraform, policy)', assetType);
-			if (requestedType && requestedType.trim()) {
-				assetType = requestedType.trim();
 			}
 		}
 
-		promoteBusyPath = entry.path;
+		promoteBusyPath = promoteTarget.path;
+		promoteSubmitting = true;
+		promoteError = null;
 		try {
 			await projectState.registerLibraryAsset(fetch, token, activeProjectValue.id, {
-				name: assetName,
-				asset_type: assetType,
+				name: trimmedName,
+				asset_type: trimmedType,
+				description: promoteDescription.trim() || undefined,
+				tags: tagList,
+				metadata,
 				run_id: selectedRunId,
-				artifact_path: entry.path
+				artifact_path: promoteTarget.path,
+				notes: promoteNotes.trim() || undefined
 			});
-			notifySuccess(`Promoted ${assetName} to the library.`);
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Failed to promote artifact.';
-			notifyError(message);
+		notifySuccess(`Promoted ${trimmedName} to the library.`);
+		closePromoteModal();
+		storePromotionDefaults({
+			assetType: trimmedType,
+			tags: tagList.join(', '),
+			metadata: metadataPayload || undefined,
+			description: promoteDescription.trim() || undefined,
+			notes: promoteNotes.trim() || undefined
+		});
+	} catch (error) {
+		const message = error instanceof Error ? error.message : 'Failed to promote artifact.';
+		promoteError = message;
+		notifyError(message);
 		} finally {
 			promoteBusyPath = null;
+			promoteSubmitting = false;
 		}
 	};
 
@@ -724,12 +879,12 @@ const resetArtifacts = () => {
 									>
 										Download
 									</button>
-									<button
-										type="button"
-										class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-										onclick={() => void handlePromoteArtifact(entry)}
-										disabled={promoteBusyPath === entry.path}
-									>
+										<button
+											type="button"
+											class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+											onclick={() => openPromoteModal(entry)}
+											disabled={promoteBusyPath === entry.path}
+										>
 										{#if promoteBusyPath === entry.path}
 											<span class="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"></span>
 										{/if}
@@ -808,3 +963,165 @@ const resetArtifacts = () => {
 		</div>
 	{/if}
 </section>
+
+{#if promoteTarget}
+	<div class="fixed inset-0 z-50 flex items-center justify-center px-4 py-6">
+		<button
+			type="button"
+			class="absolute inset-0 bg-slate-900/60"
+			onclick={closePromoteModal}
+			aria-label="Close promotion dialog"
+		></button>
+		<div
+			class="relative w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl shadow-slate-900/20"
+			role="dialog"
+			aria-modal="true"
+		>
+			<div class="flex items-start justify-between gap-4">
+				<div>
+					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Promote artifact</p>
+					<p class="mt-1 text-sm text-slate-600">{promoteTarget.path}</p>
+				</div>
+				<button
+					type="button"
+					class="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-semibold text-slate-500"
+					onclick={closePromoteModal}
+					aria-label="Close promotion dialog"
+				>
+					Close
+				</button>
+			</div>
+			<form class="mt-4 space-y-4 text-sm" onsubmit={handlePromoteSubmit}>
+				<div class="grid gap-3">
+					<label class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400" for="promote-name">
+						Asset name
+					</label>
+					<input
+						id="promote-name"
+						class="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
+						type="text"
+						bind:value={promoteName}
+						required
+					/>
+				</div>
+				<div class="grid gap-3">
+					<label class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400" for="promote-type">
+						Asset type
+					</label>
+					<input
+						id="promote-type"
+						class="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
+						type="text"
+						bind:value={promoteType}
+						required
+					/>
+				</div>
+				<div class="relative grid gap-3">
+					<label class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400" for="promote-tags">
+						Tags
+					</label>
+					<input
+						id="promote-tags"
+						class="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
+						type="text"
+						placeholder="baseline, production"
+						bind:value={promoteTags}
+						onfocus={() => (showTagSuggestions = tagSuggestions.length > 0)}
+						onblur={() => setTimeout(() => (showTagSuggestions = false), 120)}
+						onkeydown={(event: KeyboardEvent) => {
+							if (event.key === 'Enter' && !event.shiftKey) {
+								event.preventDefault();
+								const parts = promoteTags
+									.split(',')
+									.map((tag) => tag.trim())
+									.filter((tag) => tag.length > 0);
+								promoteTags = Array.from(new Set(parts)).join(', ');
+							}
+						}}
+					/>
+					<p class="text-xs text-slate-400">Separate tags with commas.</p>
+					{#if showTagSuggestions && tagSuggestions.length}
+						<div class="absolute z-20 mt-1 w-full max-w-xs rounded-xl border border-slate-200 bg-white p-2 shadow-lg shadow-slate-900/10">
+							<p class="px-2 pb-1 text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-slate-400">
+								Suggested tags
+							</p>
+							<ul class="max-h-36 overflow-auto text-xs">
+								{#each tagSuggestions as tag (tag)}
+									<li>
+										<button
+											type="button"
+											class="w-full rounded-lg px-2 py-1 text-left text-slate-600 transition hover:bg-slate-100"
+											onclick={() => {
+												applyTagSuggestion(tag);
+												showTagSuggestions = false;
+											}}
+										>
+											{tag}
+										</button>
+									</li>
+								{/each}
+							</ul>
+						</div>
+					{/if}
+				</div>
+				<div class="grid gap-3">
+					<label class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400" for="promote-description">
+						Description
+					</label>
+					<textarea
+						id="promote-description"
+						class="h-20 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
+						bind:value={promoteDescription}
+					></textarea>
+				</div>
+				<div class="grid gap-3">
+					<label class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400" for="promote-notes">
+						Notes
+					</label>
+					<textarea
+						id="promote-notes"
+						class="h-20 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
+						bind:value={promoteNotes}
+						placeholder="Additional context or instructions"
+					></textarea>
+				</div>
+				<div class="grid gap-3">
+					<label class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400" for="promote-metadata">
+						Metadata (JSON)
+					</label>
+					<textarea
+						id="promote-metadata"
+						class="h-24 rounded-xl border border-slate-200 px-3 py-2 font-mono text-[0.75rem] text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
+						bind:value={promoteMetadata}
+						placeholder={`{
+  "env": "prod"
+}`}
+					></textarea>
+				</div>
+				{#if promoteError}
+					<p class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">{promoteError}</p>
+				{/if}
+				<div class="flex flex-wrap items-center justify-end gap-2 pt-2">
+					<button
+						type="button"
+						class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+						onclick={closePromoteModal}
+						disabled={promoteSubmitting}
+					>
+						Cancel
+					</button>
+					<button
+						type="submit"
+						class="inline-flex items-center gap-2 rounded-xl border border-sky-500 bg-sky-500 px-4 py-2 text-xs font-semibold text-white transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-60"
+						disabled={promoteSubmitting}
+					>
+						{#if promoteSubmitting}
+							<span class="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"></span>
+						{/if}
+						Promote to library
+					</button>
+				</div>
+			</form>
+		</div>
+	</div>
+{/if}
