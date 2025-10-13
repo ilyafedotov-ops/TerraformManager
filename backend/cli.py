@@ -21,6 +21,13 @@ from backend.utils.patch import collect_patches, format_patch_bundle
 from backend.utils.settings import get_llm_settings, update_llm_settings
 from backend.auth import auth_settings
 from backend.generators.docs import generate_docs
+from backend.storage import (
+    create_project,
+    list_projects,
+    list_project_runs,
+    create_project_run,
+    list_run_artifacts,
+)
 
 
 PRECOMMIT_TEMPLATE = """repos:
@@ -58,6 +65,26 @@ def _collect_fmt_targets(paths: Sequence[Path]) -> List[Path]:
         else:
             targets.add(resolved)
     return sorted(targets)
+
+
+def _load_json_payload(value: str) -> Dict[str, Any]:
+    """Load JSON from an inline string or a file path."""
+    if not value:
+        return {}
+    candidate = Path(value)
+    try:
+        if candidate.exists():
+            return json.loads(candidate.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"failed to parse JSON from file {value}: {exc}") from exc
+    try:
+        return json.loads(value)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"failed to parse JSON payload: {exc}") from exc
+
+
+def _print_json(data: Any) -> None:
+    print(json.dumps(data, indent=2, sort_keys=False, default=str))
 
 
 def _run_terraform_fmt(target_dirs: Sequence[Path], write: bool, logger) -> None:
@@ -371,6 +398,62 @@ def main() -> None:
 
     reindex = sub.add_parser("reindex", help="Build the TF-IDF knowledge index (optional)")
 
+    project = sub.add_parser("project", help="Manage Terraform Manager projects and runs")
+    project_sub = project.add_subparsers(dest="project_cmd", required=True)
+
+    project_list = project_sub.add_parser("list", help="List known projects")
+    project_list.add_argument(
+        "--json",
+        action="store_true",
+        help="Output JSON instead of human-readable summary",
+    )
+
+    project_create = project_sub.add_parser("create", help="Create a new project workspace")
+    project_create.add_argument("--name", required=True, help="Project name")
+    project_create.add_argument("--description", help="Optional project description")
+    project_create.add_argument("--slug", help="Optional slug (auto-generated if omitted)")
+    project_create.add_argument(
+        "--metadata",
+        help="Inline JSON object or path to JSON file for project metadata",
+    )
+
+    project_runs = project_sub.add_parser("runs", help="List runs for a project")
+    project_runs.add_argument("--project-id", required=True, help="Project identifier")
+    project_runs.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Number of runs to return (default: 50)",
+    )
+    project_runs.add_argument(
+        "--json",
+        action="store_true",
+        help="Output JSON instead of human-readable summary",
+    )
+
+    project_run_create = project_sub.add_parser("run-create", help="Create a run entry for a project")
+    project_run_create.add_argument("--project-id", required=True, help="Project identifier")
+    project_run_create.add_argument("--label", required=True, help="Run label/description")
+    project_run_create.add_argument("--kind", required=True, help="Run kind (e.g., generator, review)")
+    project_run_create.add_argument(
+        "--parameters",
+        help="Inline JSON object or path to JSON file for run parameters",
+    )
+
+    project_artifacts = project_sub.add_parser("artifacts", help="Inspect run artifacts on disk")
+    project_artifacts.add_argument("--project-id", required=True, help="Project identifier")
+    project_artifacts.add_argument("--run-id", required=True, help="Run identifier")
+    project_artifacts.add_argument(
+        "--path",
+        default="",
+        help="Relative directory within the run artifacts (default: root)",
+    )
+    project_artifacts.add_argument(
+        "--json",
+        action="store_true",
+        help="Output JSON instead of human-readable summary",
+    )
+
     args = parser.parse_args()
     auth_credentials: dict | None = None
     if args.cmd == "scan":
@@ -517,6 +600,70 @@ def main() -> None:
             print(f"Knowledge index ready: {count} documents")
         except Exception as exc:
             print(f"Failed to build knowledge index: {exc}")
+    elif args.cmd == "project":
+        try:
+            if args.project_cmd == "list":
+                projects = list_projects()
+                if args.json:
+                    _print_json(projects)
+                else:
+                    if not projects:
+                        print("No projects found.")
+                    for project in projects:
+                        print(
+                            f"{project['id']}  {project['name']} "
+                            f"(slug={project['slug']}) updated={project.get('updated_at')}"
+                        )
+            elif args.project_cmd == "create":
+                metadata: Dict[str, Any] = {}
+                if args.metadata:
+                    metadata = _load_json_payload(args.metadata)
+                project = create_project(
+                    name=args.name,
+                    description=args.description,
+                    slug=args.slug,
+                    metadata=metadata,
+                )
+                _print_json(project)
+            elif args.project_cmd == "runs":
+                runs = list_project_runs(args.project_id, limit=args.limit)
+                if args.json:
+                    _print_json(runs)
+                else:
+                    if not runs:
+                        print("No runs found.")
+                    for run in runs:
+                        print(
+                            f"{run['id']}  {run['label']} [{run['status']}] kind={run['kind']} "
+                            f"created={run.get('created_at')}"
+                        )
+            elif args.project_cmd == "run-create":
+                parameters: Dict[str, Any] = {}
+                if args.parameters:
+                    parameters = _load_json_payload(args.parameters)
+                run = create_project_run(
+                    project_id=args.project_id,
+                    label=args.label,
+                    kind=args.kind,
+                    parameters=parameters,
+                )
+                _print_json(run)
+            elif args.project_cmd == "artifacts":
+                entries = list_run_artifacts(args.project_id, args.run_id, path=args.path or None)
+                if args.json:
+                    _print_json(entries)
+                else:
+                    if not entries:
+                        print("No artifacts found.")
+                    for entry in entries:
+                        marker = "<dir>" if entry["is_dir"] else f"{entry.get('size', 0)} bytes"
+                        print(f"{entry['path'] or '.'}  {marker}  modified={entry.get('modified_at')}")
+        except ValueError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Command failed: %s", exc)
+            sys.exit(1)
     else:
         parser.print_help()
 

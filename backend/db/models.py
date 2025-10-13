@@ -198,6 +198,93 @@ class AuthAudit(Base):
     session: Mapped[RefreshSession | None] = relationship(back_populates="audit_events")
 
 
+class Project(Base):
+    __tablename__ = "projects"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    slug: Mapped[str] = mapped_column(String(160), unique=True, nullable=False, index=True)
+    root_path: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    project_metadata: Mapped[Dict[str, Any]] = mapped_column("metadata", JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+        server_onupdate=func.current_timestamp(),
+    )
+
+    runs: Mapped[List["ProjectRun"]] = relationship(  # type: ignore[name-defined]
+        back_populates="project",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    def to_dict(self, include_metadata: bool = True) -> Dict[str, Any]:
+        payload = dict(self.project_metadata or {}) if include_metadata else None
+        return {
+            "id": self.id,
+            "name": self.name,
+            "slug": self.slug,
+            "root_path": self.root_path,
+            "description": self.description,
+            "metadata": payload,
+            "created_at": format_timestamp(self.created_at),
+            "updated_at": format_timestamp(self.updated_at),
+        }
+
+
+class ProjectRun(Base):
+    __tablename__ = "project_runs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[str] = mapped_column(String(48), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
+    triggered_by: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    parameters: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    summary: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    artifacts_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+        server_onupdate=func.current_timestamp(),
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    project: Mapped[Project] = relationship(back_populates="runs")
+
+    def to_dict(self, include_parameters: bool = True, include_summary: bool = True) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "project_id": self.project_id,
+            "label": self.label,
+            "kind": self.kind,
+            "status": self.status,
+            "triggered_by": self.triggered_by,
+            "parameters": dict(self.parameters or {}) if include_parameters else None,
+            "summary": dict(self.summary or {}) if include_summary else None,
+            "artifacts_path": self.artifacts_path,
+            "created_at": format_timestamp(self.created_at),
+            "updated_at": format_timestamp(self.updated_at),
+            "started_at": format_timestamp(self.started_at),
+            "finished_at": format_timestamp(self.finished_at),
+        }
+
+
 
 def format_timestamp(value: Optional[datetime]) -> Optional[str]:
     if value is None:
