@@ -1,43 +1,62 @@
 import type { PageLoad } from './$types';
-import { listReports, type ReportSummary } from '$lib/api/client';
+import { listAuthEvents, listReports } from '$lib/api/client';
+import type { DashboardStats } from '$lib/types/dashboard';
 
-interface DashboardStats {
-	reports: number;
-	last: ReportSummary | null;
-	severityCounts: Record<string, number>;
+async function buildDashboardStats(fetchFn: typeof fetch, token: string): Promise<DashboardStats> {
+	const reports = await listReports(fetchFn, token, 20);
+	const severityCounts: Record<string, number> = {};
+	const recentSeverityCounts: Record<string, number> = {};
+
+	for (const report of reports) {
+		const counts = report.summary?.severity_counts ?? {};
+		for (const [severity, value] of Object.entries(counts)) {
+			severityCounts[severity] = (severityCounts[severity] ?? 0) + Number(value ?? 0);
+		}
+	}
+
+	for (const report of reports.slice(0, 5)) {
+		const counts = report.summary?.severity_counts ?? {};
+		for (const [severity, value] of Object.entries(counts)) {
+			recentSeverityCounts[severity] = (recentSeverityCounts[severity] ?? 0) + Number(value ?? 0);
+		}
+	}
+
+	return {
+		reports: reports.length,
+		last: reports[0] ?? null,
+		severityCounts,
+		recentSeverityCounts
+	};
 }
 
-export const load: PageLoad = async ({ fetch, parent }) => {
+const humaniseError = (error: unknown): string =>
+	error instanceof Error ? error.message : 'Failed to load dashboard data';
+
+export const load = (async ({ fetch, parent }) => {
 	const { token } = await parent();
 
 	if (!token) {
 		return {
-			stats: null,
-			error: 'Missing API token'
+			stats: Promise.resolve<DashboardStats | null>(null),
+			error: 'Missing API token',
+			authEvents: Promise.resolve([]),
+			authEventsError: 'Missing API token'
 		};
 	}
 
-	try {
-		const reports = await listReports(fetch, token, 20);
-		const severityCounts: Record<string, number> = {};
-		for (const report of reports) {
-			const counts = report.summary?.severity_counts ?? {};
-			for (const [severity, value] of Object.entries(counts)) {
-				severityCounts[severity] = (severityCounts[severity] ?? 0) + Number(value ?? 0);
-			}
-		}
+	const statsPromise = buildDashboardStats(fetch, token);
+	const eventsPromise = listAuthEvents(fetch, token, 20).then((payload) => payload.events);
+	const safeEventsPromise = eventsPromise.catch(() => []);
 
-		const stats: DashboardStats = {
-			reports: reports.length,
-			last: reports[0] ?? null,
-			severityCounts
-		};
-
-		return { stats };
-	} catch (error) {
-		return {
-			stats: null,
-			error: error instanceof Error ? error.message : 'Failed to load dashboard data'
-		};
-	}
-};
+	return {
+		stats: statsPromise.catch(() => null),
+		error: statsPromise.then(() => null).catch((error) => humaniseError(error)),
+		authEvents: safeEventsPromise,
+		authEventsError: eventsPromise.then(() => null).catch((error) => humaniseError(error))
+	};
+}) satisfies PageLoad<{
+	stats: Promise<DashboardStats | null>;
+	error: Promise<string | null> | string | null;
+	authEvents: Promise<Awaited<ReturnType<typeof listAuthEvents>>['events']>;
+	authEventsError: Promise<string | null> | string | null;
+}>;

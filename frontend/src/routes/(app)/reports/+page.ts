@@ -4,12 +4,12 @@ import { listReports, type ReportSummary, ApiError } from '$lib/api/client';
 export const load: PageLoad = async ({ fetch, parent }) => {
 	const { token } = await parent();
 	if (!token) {
-		return { reports: [], error: 'Missing API token' };
+		return { reports: [], error: 'Missing API token', token: null };
 	}
 
 	try {
 		const reports = await listReports(fetch, token, 100);
-		return { reports };
+		return { reports, token };
 	} catch (error) {
 		const message =
 			error instanceof ApiError
@@ -17,6 +17,6 @@ export const load: PageLoad = async ({ fetch, parent }) => {
 				: error instanceof Error
 					? error.message
 					: 'Failed to load reports';
-		return { reports: [], error: message };
+		return { reports: [], error: message, token };
 	}
 };

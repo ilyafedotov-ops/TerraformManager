@@ -1,47 +1,73 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { enhance } from '$app/forms';
+	import { browser } from '$app/environment';
+	import { notifySuccess } from '$lib/stores/notifications';
 
-	const handleSubmit = (event: SubmitEvent) => {
-		event.preventDefault();
-		console.info('Password reset placeholder triggered');
-		const params = new URLSearchParams(window.location.search);
-		const redirectTo = params.get('redirect');
-		const target = redirectTo ? `/login?redirect=${encodeURIComponent(redirectTo)}` : '/login';
-		goto(target, { replaceState: true });
-	};
+	const { form } = $props();
+	let email = $state(form?.values?.email ?? '');
+	let lastMessage = $state<string | null>(null);
+
+	$effect(() => {
+		const nextEmail = form?.values?.email;
+		if (nextEmail !== undefined && nextEmail !== email) {
+			email = nextEmail;
+		}
+	});
+
+	$effect(() => {
+		const message = form?.success ? form?.message ?? null : null;
+		if (!browser) return;
+		if (message && message !== lastMessage) {
+			notifySuccess(message, { duration: 6000 });
+			lastMessage = message;
+		}
+	});
 </script>
 
-<form class="space-y-8" on:submit={handleSubmit}>
+<form class="space-y-8" method="POST" use:enhance>
 	<div class="space-y-2">
-		<h2 class="text-3xl font-semibold text-white">Recover API token</h2>
-		<p class="text-sm text-slate-400">
-			Need access again? Enter your work email and we&rsquo;ll share token retrieval instructions. Automated delivery
-			will be wired into identity integrations later in the migration.
+		<h2 class="text-3xl font-semibold text-blueGray-700">Recover API token</h2>
+		<p class="text-sm text-blueGray-500">
+			Enter your work email and we&rsquo;ll send the latest onboarding instructions. Automated delivery will hook into
+			your identity provider later in the migration, but this keeps the workflow in-product today.
 		</p>
 	</div>
 
+	{#if form?.error}
+		<div class="rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+			{form.error}
+		</div>
+	{/if}
+
+	{#if form?.success && form.message}
+		<div class="rounded-2xl border border-violet-300 bg-violet-50 px-4 py-3 text-sm text-violet-700">
+			{form.message}
+		</div>
+	{/if}
+
 	<div class="space-y-6">
-		<label class="block space-y-2 text-sm font-medium text-slate-200">
+		<label class="block space-y-2 text-sm font-medium text-blueGray-600">
 			<span>Email</span>
 			<input
-				class="w-full rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-base text-white shadow-inner shadow-slate-950/60 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/40"
+				class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
 				type="email"
 				name="email"
 				placeholder="security@company.com"
+				bind:value={email}
 				required
 			/>
 		</label>
 	</div>
 
 	<button
-		class="inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-violet-500 via-indigo-500 to-purple-500 px-6 py-3 text-base font-semibold text-white shadow-lg shadow-violet-900/40 transition hover:from-violet-400 hover:via-indigo-400 hover:to-purple-400 focus:outline-none focus:ring-2 focus:ring-violet-400/40"
+		class="inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-violet-500 via-indigo-500 to-purple-500 px-6 py-3 text-base font-semibold text-white shadow-lg shadow-violet-300/40 transition hover:from-violet-400 hover:via-indigo-400 hover:to-purple-400 focus:outline-none focus:ring-2 focus:ring-violet-200"
 		type="submit"
 	>
 		Send recovery email
 	</button>
 
-	<p class="text-xs text-slate-500">
+	<p class="text-xs text-blueGray-400">
 		Remembered your token?
-		<a class="font-semibold text-sky-300 hover:text-sky-200" href="/login">Back to sign-in</a>
+		<a class="font-semibold text-lightBlue-600 hover:text-lightBlue-700" href="/login">Back to sign-in</a>
 	</p>
 </form>

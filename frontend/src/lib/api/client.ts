@@ -1,6 +1,6 @@
 import { env } from '$env/dynamic/public';
 
-const DEFAULT_BASE = 'http://localhost:8787';
+const DEFAULT_BASE = 'http://localhost:8890';
 export const API_BASE = (env.PUBLIC_API_BASE ?? DEFAULT_BASE).replace(/\/$/, '');
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -23,6 +23,65 @@ export class ApiError extends Error {
 		this.status = status;
 		this.detail = detail;
 	}
+}
+
+export interface CostSummary {
+	currency?: string | null;
+	total_monthly_cost?: number | null;
+	total_hourly_cost?: number | null;
+	diff_monthly_cost?: number | null;
+	diff_hourly_cost?: number | null;
+}
+
+export interface CostProject {
+	name?: string | null;
+	path?: string | null;
+	monthly_cost?: number | null;
+	diff_monthly_cost?: number | null;
+	hourly_cost?: number | null;
+	diff_hourly_cost?: number | null;
+}
+
+export interface CostReport {
+	tool?: string;
+	currency?: string | null;
+	summary?: CostSummary | null;
+	projects?: CostProject[] | null;
+	errors?: string[] | null;
+}
+
+export interface DriftCounts {
+	create?: number;
+	update?: number;
+	delete?: number;
+	replace?: number;
+	'no-op'?: number;
+}
+
+export interface DriftChange {
+	address?: string | null;
+	action?: string | null;
+	actions?: string[] | null;
+}
+
+export interface DriftOutputChange {
+	name?: string | null;
+	actions?: string[] | null;
+	before?: unknown;
+	after?: unknown;
+}
+
+export interface DriftSummary {
+	has_changes?: boolean;
+	total_changes?: number;
+	counts?: DriftCounts | null;
+}
+
+export interface DriftReport extends DriftSummary {
+	source?: string | null;
+	resource_changes?: DriftChange[] | null;
+	output_changes?: DriftOutputChange[] | null;
+	error?: string | null;
 }
 
 function buildUrl(path: string, searchParams?: ApiRequestOptions['searchParams']): string {
@@ -107,24 +166,138 @@ export async function apiFetch<TResponse, TBody = unknown>(
 	return (await response.text()) as TResponse;
 }
 
+export interface RefreshSessionResponse {
+	access_token: string;
+	expires_in: number;
+	refresh_token?: string | null;
+	refresh_expires_in: number;
+	anti_csrf_token?: string | null;
+	session_id?: string | null;
+}
+
+export interface AuthSession {
+	id: string;
+	family_id?: string | null;
+	created_at: string;
+	last_used_at?: string | null;
+	expires_at: string;
+	ip_address?: string | null;
+	user_agent?: string | null;
+	scopes: string[];
+	is_current: boolean;
+}
+
+export interface SessionListResponse {
+	sessions: AuthSession[];
+	current_session_id?: string | null;
+}
+
+export async function refreshSession(
+	fetchFn: typeof fetch,
+	csrfToken: string,
+	cookieHeader?: string
+): Promise<RefreshSessionResponse> {
+	const headers = new Headers({
+		'X-Refresh-Token-CSRF': csrfToken,
+		Accept: 'application/json'
+	});
+	if (cookieHeader) {
+		headers.set('cookie', cookieHeader);
+	}
+
+	const response = await fetchFn(`${API_BASE}/auth/refresh`, {
+		method: 'POST',
+		headers,
+		credentials: 'include'
+	});
+
+	if (!response.ok) {
+		let detail: unknown = null;
+		try {
+			const contentType = response.headers.get('content-type');
+			detail = contentType && contentType.includes('application/json') ? await response.json() : await response.text();
+		} catch {
+			detail = null;
+		}
+		throw new ApiError(`Refresh failed with status ${response.status}`, response.status, detail);
+	}
+
+	const data = (await response.json()) as RefreshSessionResponse;
+	const headerCsrf = response.headers.get('X-Refresh-Token-CSRF');
+	if (headerCsrf) {
+		data.anti_csrf_token = headerCsrf;
+	}
+	return data;
+}
+
+export async function listAuthSessions(fetchFn: typeof fetch, token: string): Promise<SessionListResponse> {
+	return apiFetch<SessionListResponse>(fetchFn, '/auth/sessions', {
+		token
+	});
+}
+
+export async function revokeAuthSession(
+	fetchFn: typeof fetch,
+	token: string,
+	sessionId: string
+): Promise<{ status: string; session_id?: string; revoked_at?: string | null }> {
+	return apiFetch(fetchFn, `/auth/sessions/${encodeURIComponent(sessionId)}`, {
+		method: 'DELETE',
+		token
+	});
+}
+
+export interface AuthEvent {
+	id: string;
+	event: string;
+	created_at: string;
+	subject?: string | null;
+	session_id?: string | null;
+	ip_address?: string | null;
+	user_agent?: string | null;
+	scopes: string[];
+	details: Record<string, unknown>;
+}
+
+export interface AuthEventListResponse {
+	events: AuthEvent[];
+}
+
+export async function listAuthEvents(
+	fetchFn: typeof fetch,
+	token: string,
+	limit = 25
+): Promise<AuthEventListResponse> {
+	return apiFetch<AuthEventListResponse>(fetchFn, '/auth/events', {
+		token,
+		searchParams: { limit }
+	});
+}
+
 export interface ReportSummary {
 	id: string;
 	created_at?: string;
 	summary?: {
 		issues_found?: number;
 		severity_counts?: Record<string, number>;
+		files_scanned?: number;
+		cost?: CostSummary | null;
+		drift?: DriftSummary | null;
 	};
 }
 
 export interface ReportDetail {
-    id?: string;
-    summary?: ReportSummary['summary'] & {
-        issues_found?: number;
-        thresholds?: Record<string, unknown>;
-        generated_at?: string;
-        created_at?: string;
-    };
-    findings?: Array<Record<string, unknown>>;
+	id?: string;
+	summary?: ReportSummary['summary'] & {
+		issues_found?: number;
+		thresholds?: Record<string, unknown>;
+		generated_at?: string;
+		created_at?: string;
+	};
+	findings?: Array<Record<string, unknown>>;
+	cost?: CostReport | null;
+	drift?: DriftReport | null;
+	waived_findings?: Array<Record<string, unknown>>;
 }
 
 export async function listReports(
@@ -142,10 +315,23 @@ export async function getReport(fetchFn: typeof fetch, token: string, id: string
     return apiFetch<ReportDetail>(fetchFn, `/reports/${id}`, { token });
 }
 
+export async function deleteReport(fetchFn: typeof fetch, token: string, id: string): Promise<{ status: string; id: string }> {
+    return apiFetch(fetchFn, `/reports/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        token
+    });
+}
+
 export interface KnowledgeItem {
     source: string;
     content: string;
     score: number;
+}
+
+export interface KnowledgeDocument {
+    path: string;
+    title: string;
+    content: string;
 }
 
 export async function searchKnowledge(
@@ -157,6 +343,13 @@ export async function searchKnowledge(
         searchParams: { q: query, top_k: topK }
     });
     return response.items;
+}
+
+export async function getKnowledgeDocument(fetchFn: typeof fetch, token: string, path: string): Promise<KnowledgeDocument> {
+    return apiFetch(fetchFn, '/knowledge/doc', {
+        token,
+        searchParams: { path }
+    });
 }
 
 export interface LLMSettingsResponse {

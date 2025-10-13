@@ -1,5 +1,9 @@
 <script lang="ts">
     import { API_BASE, syncKnowledge, type KnowledgeItem, type KnowledgeSyncResult } from '$lib/api/client';
+    import { goto } from '$app/navigation';
+    import { notifyError, notifySuccess } from '$lib/stores/notifications';
+    import KnowledgeResults from '$lib/components/knowledge/KnowledgeResults.svelte';
+    import KnowledgeSyncForm from '$lib/components/knowledge/KnowledgeSyncForm.svelte';
 
     const { data } = $props();
     let query = $state<string>(data.query ?? 'terraform security best practices');
@@ -31,16 +35,19 @@
             const url = new URL(window.location.href);
             url.searchParams.set('q', query);
             url.searchParams.set('top_k', String(topK));
-            window.history.replaceState(window.history.state, '', url.toString());
+            await goto(`${url.pathname}${url.search}`, {
+                replaceState: true,
+                keepFocus: true,
+                noScroll: true
+            });
         } catch (err) {
-            error = err instanceof Error ? err.message : 'Unable to fetch knowledge results.';
+            const message = err instanceof Error ? err.message : 'Unable to fetch knowledge results.';
+            error = message;
+            notifyError(message);
         } finally {
             isSearching = false;
         }
     };
-
-    const previewContent = (item: KnowledgeItem) => item.content;
-    const knowledgeHref = (item: KnowledgeItem) => `/knowledge/${item.source}`;
 
     const parseSources = (): string[] =>
         syncSources
@@ -53,19 +60,23 @@
         syncResults = [];
         if (!token) {
             syncStatus = 'API token required to run knowledge sync.';
+            notifyError(syncStatus);
             return;
         }
         const sources = parseSources();
         if (!sources.length) {
             syncStatus = 'Provide at least one GitHub repository URL.';
+            notifyError(syncStatus);
             return;
         }
         isSyncing = true;
         try {
             syncResults = await syncKnowledge(fetch, token, sources);
             syncStatus = 'Knowledge sync completed.';
+            notifySuccess(`Knowledge sync completed for ${syncResults.length} source${syncResults.length === 1 ? '' : 's'}.`);
         } catch (err) {
             syncStatus = err instanceof Error ? err.message : 'Knowledge sync failed.';
+            notifyError(syncStatus);
         } finally {
             isSyncing = false;
         }
@@ -74,30 +85,30 @@
 
 <section class="space-y-8">
     <header class="space-y-3">
-        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">Knowledge base</p>
-        <h2 class="text-3xl font-semibold text-white">Search internal remediation guides</h2>
-        <p class="max-w-3xl text-sm text-slate-400">
+        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-blueGray-400">Knowledge base</p>
+        <h2 class="text-3xl font-semibold text-blueGray-700">Search internal remediation guides</h2>
+        <p class="max-w-3xl text-sm text-blueGray-500">
             Results are served by the Python RAG index (`backend.rag`). Use this tool to surface best practices, remediation
             snippets, and architectural context while triaging reviewer findings.
         </p>
     </header>
 
-    <div class="space-y-6 rounded-3xl border border-white/5 bg-slate-950/80 p-6 shadow-xl shadow-slate-950/40">
+    <div class="space-y-6 rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl shadow-blueGray-300/40">
         <form class="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,220px)]" onsubmit={runSearch}>
-            <label class="block space-y-2 text-sm font-medium text-slate-200">
-                <span class="uppercase tracking-[0.3em] text-slate-500">Search term</span>
+            <label class="block space-y-2 text-sm font-medium text-blueGray-600">
+                <span class="uppercase tracking-[0.3em] text-blueGray-400">Search term</span>
                 <input
-                    class="w-full rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-base text-white shadow-inner shadow-slate-950/60 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/40"
+                    class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
                     type="search"
                     placeholder="e.g. AWS S3 encryption, Azure diagnostics"
                     bind:value={query}
                     name="q"
                 />
             </label>
-            <label class="block space-y-2 text-sm font-medium text-slate-200">
-                <span class="uppercase tracking-[0.3em] text-slate-500">Top results</span>
+            <label class="block space-y-2 text-sm font-medium text-blueGray-600">
+                <span class="uppercase tracking-[0.3em] text-blueGray-400">Top results</span>
                 <input
-                    class="w-full rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-base text-white shadow-inner shadow-slate-950/60 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/40"
+                    class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
                     type="number"
                     min="1"
                     max="10"
@@ -107,12 +118,12 @@
             </label>
             <div class="md:col-span-2 flex flex-wrap items-center justify-between gap-3">
                 {#if error}
-                    <div class="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs text-rose-100">
+                    <div class="rounded-xl border border-rose-300 bg-rose-50 px-4 py-2 text-xs text-rose-700">
                         {error}
                     </div>
                 {/if}
                 <button
-                    class="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 via-indigo-500 to-blue-600 px-5 py-2 text-sm font-semibold text-white shadow-md shadow-sky-900/40 transition hover:from-sky-400 hover:via-indigo-400 hover:to-blue-500 focus:outline-none focus:ring-2 focus:ring-sky-400/40 disabled:cursor-not-allowed disabled:opacity-60"
+                    class="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-lightBlue-500 via-indigo-500 to-blue-600 px-5 py-2 text-sm font-semibold text-white shadow-md shadow-lightBlue-300/50 transition hover:from-lightBlue-400 hover:via-indigo-400 hover:to-blue-500 focus:outline-none focus:ring-2 focus:ring-lightBlue-200 disabled:cursor-not-allowed disabled:opacity-60"
                     type="submit"
                     disabled={isSearching}
                 >
@@ -128,84 +139,20 @@
 
         <section class="space-y-4">
             <header class="flex items-center justify-between">
-                <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500">Results</h3>
-                <p class="text-xs text-slate-500">Showing {results.length} matched documents.</p>
+                <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-blueGray-400">Results</h3>
+                <p class="text-xs text-blueGray-400">Showing {results.length} matched documents.</p>
             </header>
 
-            {#if results.length === 0 && !error}
-                <p class="rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 text-sm text-slate-400">
-                    No documents matched. Broaden the query or add new Markdown files under <code class="rounded bg-slate-900/70 px-1 py-0.5 text-xs text-slate-200">knowledge/</code> then run
-                    <code class="rounded bg-slate-900/70 px-1 py-0.5 text-xs text-slate-200">python -m backend.cli reindex</code>.
-                </p>
-            {:else}
-                <ul class="space-y-4">
-                    {#each results as item (item.source)}
-                        <li class="space-y-3 rounded-2xl border border-white/5 bg-slate-900/70 p-5">
-                            <div class="flex flex-wrap items-center justify-between gap-3">
-                                <div>
-                                    <p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">{item.source}</p>
-                                    <p class="text-xs text-slate-500">Score: {item.score.toFixed(2)}</p>
-                                </div>
-                                <a
-                                    class="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-sky-400/40 hover:text-white"
-                                    href={knowledgeHref(item)}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                >
-                                    Open markdown
-                                </a>
-                            </div>
-                            <pre class="overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950/70 p-4 text-xs text-slate-200">{previewContent(item)}</pre>
-                        </li>
-                    {/each}
-                </ul>
-            {/if}
+            <KnowledgeResults items={results} error={error} />
         </section>
 
-        <section class="space-y-4 rounded-3xl border border-white/5 bg-slate-900/70 p-5">
-            <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500">Sync external sources</h3>
-            <p class="text-xs text-slate-400">
-                Pull Markdown documentation from GitHub repositories (public or accessible with configured credentials). Each
-                repository is cloned as a ZIP and stored under <code class="rounded bg-slate-900/70 px-1 py-0.5 text-xs text-slate-200">knowledge/external</code>.
-            </p>
-            <label class="block space-y-2 text-xs font-medium text-slate-200">
-                <span>Repositories (one per line)</span>
-                <textarea
-                    class="h-24 w-full rounded-2xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm text-white shadow-inner shadow-slate-950/60 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/40"
-                    bind:value={syncSources}
-                    placeholder="https://github.com/hashicorp/policy-library-azure-storage-terraform"
-                ></textarea>
-            </label>
-            {#if syncStatus}
-                <div class="rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-2 text-xs text-slate-200">{syncStatus}</div>
-            {/if}
-            <button
-                class="inline-flex items-center gap-2 rounded-2xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-sky-400/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                type="button"
-                onclick={runSync}
-                disabled={isSyncing}
-            >
-                {#if isSyncing}
-                    <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
-                    Syncing…
-                {:else}
-                    Sync knowledge
-                {/if}
-            </button>
-
-            {#if syncResults.length}
-                <ul class="space-y-3 text-xs text-slate-200">
-                    {#each syncResults as item}
-                        <li class="rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3">
-                            <p class="font-semibold text-slate-100">{item.source}</p>
-                            <p class="text-slate-400">Stored in <code>{item.dest_dir}</code> • Files: {item.files.length}</p>
-                            {#if item.note}
-                                <p class="text-amber-300">Note: {item.note}</p>
-                            {/if}
-                        </li>
-                    {/each}
-                </ul>
-            {/if}
-        </section>
+        <KnowledgeSyncForm
+            bind:sources={syncSources}
+            status={syncStatus}
+            results={syncResults}
+            isSyncing={isSyncing}
+            tokenPresent={Boolean(token)}
+            on:sync={runSync}
+        />
     </div>
 </section>

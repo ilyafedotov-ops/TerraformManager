@@ -2,8 +2,8 @@
 	const { children } = $props();
 </script>
 
-<div class="flex min-h-screen flex-col bg-slate-950 text-slate-100 lg:flex-row">
-	<div class="relative hidden flex-1 flex-col justify-between overflow-hidden bg-gradient-to-br from-sky-500 via-indigo-500 to-blue-900 p-12 lg:flex">
+<div class="flex min-h-screen flex-col bg-blueGray-100 text-blueGray-700 lg:flex-row">
+	<div class="relative hidden flex-1 flex-col justify-between overflow-hidden bg-gradient-to-br from-lightBlue-500 via-indigo-500 to-blue-900 p-12 text-white lg:flex">
 		<div class="relative z-10 flex items-center gap-3 text-lg font-semibold tracking-wide uppercase text-white/90">
 			<span class="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20 text-2xl leading-none">TF</span>
 			Terraform Manager
@@ -25,16 +25,16 @@
 
 	<div class="flex flex-1 items-center justify-center px-6 py-12 sm:px-12 lg:px-16">
 		<div class="w-full max-w-lg space-y-10">
-			<div class="flex items-center gap-3 text-slate-400 lg:hidden">
-				<span class="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500/10 text-2xl leading-none text-sky-300">
+			<div class="flex items-center gap-3 text-blueGray-400 lg:hidden">
+				<span class="flex h-10 w-10 items-center justify-center rounded-xl bg-lightBlue-100 text-2xl leading-none text-lightBlue-500">
 					TF
 				</span>
 				<div>
-					<p class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500">Terraform Manager</p>
-					<p class="text-lg font-semibold text-white">Sign in to continue</p>
+					<p class="text-sm font-semibold uppercase tracking-[0.3em] text-blueGray-400">Terraform Manager</p>
+					<p class="text-lg font-semibold text-blueGray-700">Sign in to continue</p>
 				</div>
 			</div>
-			<div class="rounded-3xl border border-white/5 bg-slate-900/70 p-8 shadow-2xl shadow-sky-900/30 backdrop-blur">
+			<div class="rounded-3xl border border-blueGray-200 bg-white p-8 shadow-xl shadow-blueGray-200/50">
 				{@render children?.()}
 			</div>
 		</div>
