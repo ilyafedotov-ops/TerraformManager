@@ -26,23 +26,23 @@
     let activeGenerator = $state<GeneratorId>('aws_s3');
 
     const inputClass =
-        'w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200';
+        'w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200';
     const textareaClass =
-        'w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-sm text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200';
-    const checkboxClass = 'flex items-center gap-3 rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-600';
-    const checkboxInputClass = 'h-4 w-4 rounded border-blueGray-300 text-lightBlue-500 focus:ring-lightBlue-200';
-    const statusClass = 'rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-2 text-xs text-blueGray-600';
+        'w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200';
+    const checkboxClass = 'flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600';
+    const checkboxInputClass = 'h-4 w-4 rounded border-slate-300 text-sky-500 focus:ring-sky-200';
+    const statusClass = 'rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600';
     const actionClass =
-        'inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-lightBlue-500 via-indigo-500 to-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-lightBlue-300/50 transition hover:from-lightBlue-400 hover:via-indigo-400 hover:to-blue-500 focus:outline-none focus:ring-2 focus:ring-lightBlue-200 disabled:cursor-not-allowed disabled:opacity-60';
+        'inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 via-indigo-500 to-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-300/50 transition hover:from-sky-400 hover:via-indigo-400 hover:to-blue-500 focus:outline-none focus:ring-2 focus:ring-sky-200 disabled:cursor-not-allowed disabled:opacity-60';
     const spinnerClass = 'h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent';
-    const resultClass = 'space-y-3 rounded-3xl border border-blueGray-200 bg-blueGray-50 p-5';
+    const resultClass = 'space-y-3 rounded-3xl border border-slate-200 bg-slate-50 p-5';
     const resultHeaderClass = 'flex items-center justify-between gap-3';
-    const resultTitleClass = 'text-sm font-semibold text-blueGray-700';
+    const resultTitleClass = 'text-sm font-semibold text-slate-700';
     const resultActionsClass = 'flex gap-2';
     const resultButtonClass =
-        'rounded-xl border border-lightBlue-200 px-3 py-1 text-xs font-semibold text-lightBlue-600 transition hover:bg-lightBlue-500 hover:text-white';
-    const resultContentClass = 'max-h-96 overflow-auto rounded-2xl bg-blueGray-50 p-4 text-xs text-blueGray-600';
-    const placeholderClass = 'rounded-3xl border border-dashed border-blueGray-200 bg-blueGray-50 p-5 text-sm text-blueGray-500';
+        'rounded-xl border border-sky-200 px-3 py-1 text-xs font-semibold text-sky-600 transition hover:bg-sky-500 hover:text-white';
+    const resultContentClass = 'max-h-96 overflow-auto rounded-2xl bg-slate-50 p-4 text-xs text-slate-600';
+    const placeholderClass = 'rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500';
 
     // AWS S3 state
     let awsBucketName = $state('my-secure-logs-bucket');
@@ -262,9 +262,9 @@
 
 <section class="space-y-8">
     <header class="space-y-3">
-        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-blueGray-400">Blueprint Studio</p>
-        <h2 class="text-3xl font-semibold text-blueGray-700">Generate hardened Terraform modules</h2>
-        <p class="max-w-3xl text-sm text-blueGray-500">
+        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Blueprint Studio</p>
+        <h2 class="text-3xl font-semibold text-slate-700">Generate hardened Terraform modules</h2>
+        <p class="max-w-3xl text-sm text-slate-500">
             Select a generator and tailor the inputs to your environment. Generated Terraform can be copied directly into your
             codebase or downloaded as a `.tf` file.
         </p>
@@ -275,8 +275,8 @@
             <button
                 class={`rounded-2xl border px-4 py-2 text-sm font-semibold transition ${
                     activeGenerator === option.id
-                        ? 'border-lightBlue-400 bg-white text-lightBlue-600 shadow-md shadow-lightBlue-200/60'
-                        : 'border-blueGray-200 bg-blueGray-50 text-blueGray-500 hover:border-lightBlue-300 hover:text-lightBlue-600'
+                        ? 'border-sky-400 bg-white text-sky-600 shadow-md shadow-sky-200/60'
+                        : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-sky-300 hover:text-sky-600'
                 }`}
                 type="button"
                 onclick={() => (activeGenerator = option.id)}
@@ -286,33 +286,33 @@
         {/each}
     </nav>
 
-    <p class="text-xs text-blueGray-500">{generators.find((g) => g.id === activeGenerator)?.description}</p>
+    <p class="text-xs text-slate-500">{generators.find((g) => g.id === activeGenerator)?.description}</p>
 
     {#if activeGenerator === 'aws_s3'}
-        <form class="grid gap-6 rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl shadow-blueGray-300/40 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]" onsubmit={handleAwsSubmit}>
+        <form class="grid gap-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]" onsubmit={handleAwsSubmit}>
             <div class="space-y-6">
                 <div class="grid gap-4 md:grid-cols-2">
-                    <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                    <label class="space-y-2 text-sm font-medium text-slate-600">
                         <span>Bucket name</span>
                         <input class={inputClass} type="text" bind:value={awsBucketName} placeholder="my-secure-logs-bucket" />
                     </label>
-                    <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                    <label class="space-y-2 text-sm font-medium text-slate-600">
                         <span>Region</span>
                         <input class={inputClass} type="text" bind:value={awsRegion} placeholder="us-east-1" />
                     </label>
-                    <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                    <label class="space-y-2 text-sm font-medium text-slate-600">
                         <span>Environment</span>
                         <input class={inputClass} type="text" bind:value={awsEnvironment} placeholder="prod" />
                     </label>
-                    <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                    <label class="space-y-2 text-sm font-medium text-slate-600">
                         <span>Owner tag</span>
                         <input class={inputClass} type="text" bind:value={awsOwnerTag} />
                     </label>
-                    <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                    <label class="space-y-2 text-sm font-medium text-slate-600">
                         <span>Cost center tag</span>
                         <input class={inputClass} type="text" bind:value={awsCostCenterTag} />
                     </label>
-                    <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                    <label class="space-y-2 text-sm font-medium text-slate-600">
                         <span>KMS key ARN (optional)</span>
                         <input class={inputClass} type="text" bind:value={awsKmsKeyId} placeholder="arn:aws:kms:..." />
                     </label>
@@ -339,19 +339,19 @@
 
                 {#if awsIncludeBackend}
                     <div class="grid gap-4 md:grid-cols-2">
-                        <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                        <label class="space-y-2 text-sm font-medium text-slate-600">
                             <span>State bucket</span>
                             <input class={inputClass} type="text" bind:value={awsBackendBucket} />
                         </label>
-                        <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                        <label class="space-y-2 text-sm font-medium text-slate-600">
                             <span>State key</span>
                             <input class={inputClass} type="text" bind:value={awsBackendKey} />
                         </label>
-                        <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                        <label class="space-y-2 text-sm font-medium text-slate-600">
                             <span>State region</span>
                             <input class={inputClass} type="text" bind:value={awsBackendRegion} />
                         </label>
-                        <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                        <label class="space-y-2 text-sm font-medium text-slate-600">
                             <span>DynamoDB lock table</span>
                             <input class={inputClass} type="text" bind:value={awsBackendTable} />
                         </label>
@@ -373,9 +373,9 @@
             </div>
 
             <aside class="space-y-4">
-                <div class="rounded-3xl border border-blueGray-200 bg-blueGray-50 p-5">
-                    <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-blueGray-400">Best practice highlights</h3>
-                    <ul class="mt-3 space-y-2 text-xs text-blueGray-500">
+                <div class="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                    <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Best practice highlights</h3>
+                    <ul class="mt-3 space-y-2 text-xs text-slate-500">
                         <li>• Public access block enforced to prevent ACL misconfiguration.</li>
                         <li>• Server-side encryption defaults to AES256 or the supplied KMS key.</li>
                         <li>• Optional TLS-only bucket policy protects against HTTP traffic.</li>
@@ -402,34 +402,34 @@
             </aside>
         </form>
     {:else if activeGenerator === 'azure_storage'}
-        <form class="grid gap-6 rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl shadow-blueGray-300/40 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]" onsubmit={handleAzureSubmit}>
+        <form class="grid gap-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]" onsubmit={handleAzureSubmit}>
             <div class="space-y-6">
                 <div class="grid gap-4 md:grid-cols-2">
-                    <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                    <label class="space-y-2 text-sm font-medium text-slate-600">
                         <span>Resource group name</span>
                         <input class={inputClass} type="text" bind:value={azureRgName} />
                     </label>
-                    <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                    <label class="space-y-2 text-sm font-medium text-slate-600">
                         <span>Storage account name</span>
                         <input class={inputClass} type="text" bind:value={azureSaName} />
                     </label>
-                    <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                    <label class="space-y-2 text-sm font-medium text-slate-600">
                         <span>Location</span>
                         <input class={inputClass} type="text" bind:value={azureLocation} />
                     </label>
-                    <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                    <label class="space-y-2 text-sm font-medium text-slate-600">
                         <span>Environment</span>
                         <input class={inputClass} type="text" bind:value={azureEnvironment} />
                     </label>
-                    <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                    <label class="space-y-2 text-sm font-medium text-slate-600">
                         <span>Replication</span>
                         <input class={inputClass} type="text" bind:value={azureReplication} placeholder="LRS" />
                     </label>
-                    <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                    <label class="space-y-2 text-sm font-medium text-slate-600">
                         <span>Owner tag</span>
                         <input class={inputClass} type="text" bind:value={azureOwnerTag} />
                     </label>
-                    <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                    <label class="space-y-2 text-sm font-medium text-slate-600">
                         <span>Cost center tag</span>
                         <input class={inputClass} type="text" bind:value={azureCostCenterTag} />
                     </label>
@@ -455,7 +455,7 @@
                 </div>
 
                 {#if azureRestrictNetwork}
-                    <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                    <label class="space-y-2 text-sm font-medium text-slate-600">
                         <span>Allowed IPv4 ranges (one per line)</span>
                         <textarea class={`${textareaClass} h-28`} bind:value={azureAllowedIps}></textarea>
                     </label>
@@ -463,19 +463,19 @@
 
                 {#if azureIncludeBackend}
                     <div class="grid gap-4 md:grid-cols-2">
-                        <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                        <label class="space-y-2 text-sm font-medium text-slate-600">
                             <span>State resource group</span>
                             <input class={inputClass} type="text" bind:value={azureBackendRg} />
                         </label>
-                        <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                        <label class="space-y-2 text-sm font-medium text-slate-600">
                             <span>State storage account</span>
                             <input class={inputClass} type="text" bind:value={azureBackendAccount} />
                         </label>
-                        <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                        <label class="space-y-2 text-sm font-medium text-slate-600">
                             <span>State container</span>
                             <input class={inputClass} type="text" bind:value={azureBackendContainer} />
                         </label>
-                        <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                        <label class="space-y-2 text-sm font-medium text-slate-600">
                             <span>State blob key</span>
                             <input class={inputClass} type="text" bind:value={azureBackendKey} />
                         </label>
@@ -484,23 +484,23 @@
 
                 {#if azureIncludePrivateEndpoint}
                     <div class="grid gap-4 md:grid-cols-2">
-                        <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                        <label class="space-y-2 text-sm font-medium text-slate-600">
                             <span>Private endpoint name</span>
                             <input class={inputClass} type="text" bind:value={azurePrivateEndpointName} />
                         </label>
-                        <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                        <label class="space-y-2 text-sm font-medium text-slate-600">
                             <span>Service connection name</span>
                             <input class={inputClass} type="text" bind:value={azurePrivateEndpointConnection} />
                         </label>
-                        <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                        <label class="space-y-2 text-sm font-medium text-slate-600">
                             <span>Subnet ID</span>
                             <input class={inputClass} type="text" bind:value={azurePrivateEndpointSubnet} />
                         </label>
-                        <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                        <label class="space-y-2 text-sm font-medium text-slate-600">
                             <span>Private DNS zone ID (optional)</span>
                             <input class={inputClass} type="text" bind:value={azurePrivateDnsZoneId} />
                         </label>
-                        <label class="space-y-2 text-sm font-medium text-blueGray-600">
+                        <label class="space-y-2 text-sm font-medium text-slate-600">
                             <span>DNS zone group name</span>
                             <input class={inputClass} type="text" bind:value={azurePrivateDnsZoneGroup} />
                         </label>
@@ -522,9 +522,9 @@
             </div>
 
             <aside class="space-y-4">
-                <div class="rounded-3xl border border-blueGray-200 bg-blueGray-50 p-5">
-                    <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-blueGray-400">Best practice highlights</h3>
-                    <ul class="mt-3 space-y-2 text-xs text-blueGray-500">
+                <div class="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                    <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Best practice highlights</h3>
+                    <ul class="mt-3 space-y-2 text-xs text-slate-500">
                         <li>• HTTPS-only and TLS 1.2 enforced by default.</li>
                         <li>• Optional network rules for approved CIDR ranges.</li>
                         <li>• Private endpoint scaffolding with DNS integration support.</li>

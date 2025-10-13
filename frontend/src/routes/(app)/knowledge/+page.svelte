@@ -85,30 +85,30 @@
 
 <section class="space-y-8">
     <header class="space-y-3">
-        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-blueGray-400">Knowledge base</p>
-        <h2 class="text-3xl font-semibold text-blueGray-700">Search internal remediation guides</h2>
-        <p class="max-w-3xl text-sm text-blueGray-500">
+        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Knowledge base</p>
+        <h2 class="text-3xl font-semibold text-slate-700">Search internal remediation guides</h2>
+        <p class="max-w-3xl text-sm text-slate-500">
             Results are served by the Python RAG index (`backend.rag`). Use this tool to surface best practices, remediation
             snippets, and architectural context while triaging reviewer findings.
         </p>
     </header>
 
-    <div class="space-y-6 rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl shadow-blueGray-300/40">
+    <div class="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40">
         <form class="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,220px)]" onsubmit={runSearch}>
-            <label class="block space-y-2 text-sm font-medium text-blueGray-600">
-                <span class="uppercase tracking-[0.3em] text-blueGray-400">Search term</span>
+            <label class="block space-y-2 text-sm font-medium text-slate-600">
+                <span class="uppercase tracking-[0.3em] text-slate-400">Search term</span>
                 <input
-                    class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
+                    class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
                     type="search"
                     placeholder="e.g. AWS S3 encryption, Azure diagnostics"
                     bind:value={query}
                     name="q"
                 />
             </label>
-            <label class="block space-y-2 text-sm font-medium text-blueGray-600">
-                <span class="uppercase tracking-[0.3em] text-blueGray-400">Top results</span>
+            <label class="block space-y-2 text-sm font-medium text-slate-600">
+                <span class="uppercase tracking-[0.3em] text-slate-400">Top results</span>
                 <input
-                    class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
+                    class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
                     type="number"
                     min="1"
                     max="10"
@@ -123,7 +123,7 @@
                     </div>
                 {/if}
                 <button
-                    class="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-lightBlue-500 via-indigo-500 to-blue-600 px-5 py-2 text-sm font-semibold text-white shadow-md shadow-lightBlue-300/50 transition hover:from-lightBlue-400 hover:via-indigo-400 hover:to-blue-500 focus:outline-none focus:ring-2 focus:ring-lightBlue-200 disabled:cursor-not-allowed disabled:opacity-60"
+                    class="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-sky-500 via-indigo-500 to-blue-600 px-5 py-2 text-sm font-semibold text-white shadow-md shadow-sky-300/50 transition hover:from-sky-400 hover:via-indigo-400 hover:to-blue-500 focus:outline-none focus:ring-2 focus:ring-sky-200 disabled:cursor-not-allowed disabled:opacity-60"
                     type="submit"
                     disabled={isSearching}
                 >
@@ -139,8 +139,8 @@
 
         <section class="space-y-4">
             <header class="flex items-center justify-between">
-                <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-blueGray-400">Results</h3>
-                <p class="text-xs text-blueGray-400">Showing {results.length} matched documents.</p>
+                <h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Results</h3>
+                <p class="text-xs text-slate-400">Showing {results.length} matched documents.</p>
             </header>
 
             <KnowledgeResults items={results} error={error} />

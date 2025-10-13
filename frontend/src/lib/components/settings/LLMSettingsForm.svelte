@@ -28,7 +28,7 @@ const isOpenAI = () => provider === 'openai';
 </script>
 
 <form
-	class="space-y-6 rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl shadow-blueGray-300/40"
+	class="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40"
 	oninput={() => dispatch('change')}
 >
 	{#if loadError}
@@ -40,10 +40,10 @@ const isOpenAI = () => provider === 'openai';
 		</div>
 	{/if}
 
-	<label class="block space-y-2 text-sm font-medium text-blueGray-600">
+	<label class="block space-y-2 text-sm font-medium text-slate-600">
 		<span>Provider</span>
 		<select
-			class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
+			class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
 			bind:value={provider}
 		>
 			{#each providers as option}
@@ -52,10 +52,10 @@ const isOpenAI = () => provider === 'openai';
 		</select>
 	</label>
 
-	<label class="block space-y-2 text-sm font-medium text-blueGray-600">
+	<label class="block space-y-2 text-sm font-medium text-slate-600">
 		<span>Model / deployment</span>
 		<input
-			class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200 disabled:cursor-not-allowed disabled:border-blueGray-300 disabled:bg-blueGray-100 disabled:text-blueGray-600"
+			class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200 disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-600"
 			type="text"
 			bind:value={model}
 			placeholder={provider === 'azure' ? 'azure-deployment-name' : 'gpt-4.1-mini'}
@@ -64,27 +64,27 @@ const isOpenAI = () => provider === 'openai';
 	</label>
 
 	<div class="grid gap-4 md:grid-cols-2">
-		<label class="flex items-center gap-3 rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-600">
-			<input class="h-4 w-4 rounded border-blueGray-300 text-sky-400 focus:ring-sky-400/50" type="checkbox" bind:checked={enableExplanations} />
+		<label class="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+			<input class="h-4 w-4 rounded border-slate-300 text-sky-400 focus:ring-sky-400/50" type="checkbox" bind:checked={enableExplanations} />
 			<span class="flex-1">
-				<span class="font-semibold text-blueGray-700">Enable AI explanations</span>
-				<p class="text-xs text-blueGray-500">Show LLM-authored rationale next to reviewer findings.</p>
+				<span class="font-semibold text-slate-700">Enable AI explanations</span>
+				<p class="text-xs text-slate-500">Show LLM-authored rationale next to reviewer findings.</p>
 			</span>
 		</label>
-		<label class="flex items-center gap-3 rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-600">
-			<input class="h-4 w-4 rounded border-blueGray-300 text-sky-400 focus:ring-sky-400/50" type="checkbox" bind:checked={enablePatches} />
+		<label class="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+			<input class="h-4 w-4 rounded border-slate-300 text-sky-400 focus:ring-sky-400/50" type="checkbox" bind:checked={enablePatches} />
 			<span class="flex-1">
-				<span class="font-semibold text-blueGray-700">Enable AI patch suggestions</span>
-				<p class="text-xs text-blueGray-500">Experimental diff guidance that supplements deterministic rules.</p>
+				<span class="font-semibold text-slate-700">Enable AI patch suggestions</span>
+				<p class="text-xs text-slate-500">Experimental diff guidance that supplements deterministic rules.</p>
 			</span>
 		</label>
 	</div>
 
 	{#if isOpenAI()}
-		<label class="block space-y-2 text-sm font-medium text-blueGray-600">
+		<label class="block space-y-2 text-sm font-medium text-slate-600">
 			<span>OpenAI API base (optional)</span>
 			<input
-				class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
+				class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
 				type="text"
 				placeholder="https://api.openai.com/v1"
 				bind:value={apiBase}
@@ -94,28 +94,28 @@ const isOpenAI = () => provider === 'openai';
 
 	{#if isAzure()}
 		<div class="grid gap-4 md:grid-cols-3">
-			<label class="space-y-2 text-sm font-medium text-blueGray-600">
+			<label class="space-y-2 text-sm font-medium text-slate-600">
 				<span>Azure resource URL</span>
 		<input
-			class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
+			class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
 			type="text"
 			placeholder={'https://{resource}.openai.azure.com'}
 			bind:value={apiBase}
 		/>
 			</label>
-			<label class="space-y-2 text-sm font-medium text-blueGray-600">
+			<label class="space-y-2 text-sm font-medium text-slate-600">
 				<span>API version</span>
 				<input
-					class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
+					class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
 					type="text"
 					placeholder="2024-02-15"
 					bind:value={apiVersion}
 				/>
 			</label>
-			<label class="space-y-2 text-sm font-medium text-blueGray-600">
+			<label class="space-y-2 text-sm font-medium text-slate-600">
 				<span>Deployment name</span>
 				<input
-					class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
+					class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
 					type="text"
 					placeholder="gpt-4o-mini"
 					bind:value={deploymentName}
@@ -126,7 +126,7 @@ const isOpenAI = () => provider === 'openai';
 
 	<div class="flex flex-wrap gap-3">
 		<button
-			class="rounded-2xl bg-gradient-to-r from-lightBlue-500 via-indigo-500 to-blue-600 px-5 py-2 text-sm font-semibold text-blueGray-700 shadow-lg shadow-lightBlue-300/50 transition hover:from-lightBlue-400 hover:via-indigo-400 hover:to-blue-500 focus:outline-none focus:ring-2 focus:ring-lightBlue-200 disabled:cursor-not-allowed disabled:opacity-60"
+			class="rounded-2xl bg-gradient-to-r from-sky-500 via-indigo-500 to-blue-600 px-5 py-2 text-sm font-semibold text-slate-700 shadow-lg shadow-sky-300/50 transition hover:from-sky-400 hover:via-indigo-400 hover:to-blue-500 focus:outline-none focus:ring-2 focus:ring-sky-200 disabled:cursor-not-allowed disabled:opacity-60"
 			type="button"
 			onclick={() => dispatch('save')}
 			disabled={isSaving}
@@ -139,7 +139,7 @@ const isOpenAI = () => provider === 'openai';
 			{/if}
 		</button>
 		<button
-			class="rounded-2xl border border-blueGray-200 px-5 py-2 text-sm font-semibold text-blueGray-600 transition hover:bg-lightBlue-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+			class="rounded-2xl border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-600 transition hover:bg-sky-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
 			type="button"
 			onclick={() => dispatch('test', { live: false })}
 			disabled={isTesting}
@@ -147,7 +147,7 @@ const isOpenAI = () => provider === 'openai';
 			Validate configuration
 		</button>
 		<button
-			class="rounded-2xl border border-blueGray-200 px-5 py-2 text-sm font-semibold text-blueGray-600 transition hover:bg-lightBlue-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+			class="rounded-2xl border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-600 transition hover:bg-sky-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
 			type="button"
 			onclick={() => dispatch('test', { live: true })}
 			disabled={isTesting}
@@ -157,16 +157,16 @@ const isOpenAI = () => provider === 'openai';
 	</div>
 
 	{#if saveStatus}
-		<div class="rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-2 text-xs text-blueGray-600">{saveStatus}</div>
+		<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">{saveStatus}</div>
 	{/if}
 	{#if testStatus}
-		<div class="rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-2 text-xs text-blueGray-600">
+		<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
 			Stage <strong>{testStatus.stage}</strong>: {testStatus.message}
 		</div>
 	{/if}
 
-	<div class="rounded-2xl border border-lightBlue-200 bg-lightBlue-50 p-4 text-xs text-lightBlue-600">
-		<p class="font-semibold uppercase tracking-[0.3em] text-lightBlue-600">Operational tips</p>
+	<div class="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-xs text-sky-600">
+		<p class="font-semibold uppercase tracking-[0.3em] text-sky-600">Operational tips</p>
 		<p class="mt-2">
 			Ensure the backend environment exposes the required API keys (OpenAI) or Azure credentials before enabling AI
 			assistance. Deterministic findings remain unaffected when the provider is set to <em>Off</em>.

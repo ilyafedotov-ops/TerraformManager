@@ -10,7 +10,7 @@
     }
 
 	const { title, value, description, accent = 'default' }: Props = $props();
-	let accentClass = $state('border-blueGray-200 bg-blueGray-50 shadow-blueGray-300/40');
+	let accentClass = $state('border-slate-200 bg-slate-50 shadow-slate-300/40');
 
 	$effect(() => {
 		accentClass =
@@ -20,14 +20,14 @@
 					? 'border-amber-200 bg-amber-50 shadow-amber-200/40'
 					: accent === 'danger'
 						? 'border-rose-200 bg-rose-50 shadow-rose-200/40'
-						: 'border-blueGray-200 bg-blueGray-50 shadow-blueGray-300/40';
+						: 'border-slate-200 bg-slate-50 shadow-slate-300/40';
 	});
 </script>
 
 <article class={`rounded-3xl border p-6 shadow-lg transition ${accentClass}`}>
-	<p class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">{title}</p>
-	<p class="mt-4 text-4xl font-semibold text-blueGray-700">{value}</p>
+	<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">{title}</p>
+	<p class="mt-4 text-4xl font-semibold text-slate-700">{value}</p>
 	{#if description}
-		<p class="mt-2 text-sm text-blueGray-500">{description}</p>
+		<p class="mt-2 text-sm text-slate-500">{description}</p>
 	{/if}
 </article>

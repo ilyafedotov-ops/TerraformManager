@@ -48,9 +48,9 @@ const apiBase = (env.PUBLIC_API_BASE ?? 'http://localhost:8890').replace(/\/$/, 
 
 <section class="space-y-8">
 	<header class="space-y-3">
-		<p class="text-xs font-semibold uppercase tracking-[0.35em] text-blueGray-400">Reports</p>
-		<h2 class="text-3xl font-semibold text-blueGray-700">Saved reviewer results</h2>
-		<p class="max-w-3xl text-sm text-blueGray-500">
+		<p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Reports</p>
+		<h2 class="text-3xl font-semibold text-slate-700">Saved reviewer results</h2>
+		<p class="max-w-3xl text-sm text-slate-500">
 			This table will hydrate from the FastAPI `/reports` endpoint and support filtering, export, and direct navigation
 			to the embedded report viewer.
 		</p>
@@ -64,7 +64,7 @@ const apiBase = (env.PUBLIC_API_BASE ?? 'http://localhost:8890').replace(/\/$/, 
 	{/if}
 
 	{#if deleteStatus}
-		<div class="rounded-3xl border border-blueGray-200 bg-blueGray-50 px-6 py-3 text-xs text-blueGray-600">{deleteStatus}</div>
+		<div class="rounded-3xl border border-slate-200 bg-slate-50 px-6 py-3 text-xs text-slate-600">{deleteStatus}</div>
 	{/if}
 
 	{#if reports.length}
@@ -76,8 +76,8 @@ const apiBase = (env.PUBLIC_API_BASE ?? 'http://localhost:8890').replace(/\/$/, 
 			on:delete={(event) => void handleDelete(event.detail.id)}
 		/>
 	{:else if !error}
-		<div class="rounded-3xl border border-blueGray-200 bg-blueGray-50 px-6 py-6 text-sm text-blueGray-500">
-			No reports saved yet. Run <code class="rounded bg-blueGray-50 px-1 py-0.5 text-xs text-blueGray-600">python -m backend.cli scan sample --out tmp/report.json</code> to generate one.
+		<div class="rounded-3xl border border-slate-200 bg-slate-50 px-6 py-6 text-sm text-slate-500">
+			No reports saved yet. Run <code class="rounded bg-slate-50 px-1 py-0.5 text-xs text-slate-600">python -m backend.cli scan sample --out tmp/report.json</code> to generate one.
 		</div>
 	{/if}
 </section>

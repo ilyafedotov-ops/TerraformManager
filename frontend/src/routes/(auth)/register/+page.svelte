@@ -51,8 +51,8 @@
 
 <form class="space-y-8" method="POST" use:enhance>
 	<div class="space-y-2">
-		<h2 class="text-3xl font-semibold text-blueGray-700">Request access</h2>
-		<p class="text-sm text-blueGray-500">
+		<h2 class="text-3xl font-semibold text-slate-700">Request access</h2>
+		<p class="text-sm text-slate-500">
 			Provisioning workflows will integrate with your identity provider in a later milestone. Fill out the request below
 			and we&rsquo;ll notify the platform team to provision your workspace credentials.
 		</p>
@@ -71,10 +71,10 @@
 	{/if}
 
 	<div class="space-y-6">
-		<label class="block space-y-2 text-sm font-medium text-blueGray-600">
+		<label class="block space-y-2 text-sm font-medium text-slate-600">
 			<span>Work email</span>
 			<input
-				class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
+				class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
 				type="email"
 				name="email"
 				placeholder="platform@company.com"
@@ -83,10 +83,10 @@
 			/>
 		</label>
 
-		<label class="block space-y-2 text-sm font-medium text-blueGray-600">
+		<label class="block space-y-2 text-sm font-medium text-slate-600">
 			<span>Team / project</span>
 			<input
-				class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
+				class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
 				type="text"
 				name="team"
 				placeholder="SRE / Terraform Foundations"
@@ -95,10 +95,10 @@
 			/>
 		</label>
 
-		<label class="block space-y-2 text-sm font-medium text-blueGray-600">
+		<label class="block space-y-2 text-sm font-medium text-slate-600">
 			<span>Deployment region</span>
 			<select
-				class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
+				class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
 				name="region"
 				bind:value={region}
 			>
@@ -108,10 +108,10 @@
 			</select>
 		</label>
 
-		<label class="block space-y-2 text-sm font-medium text-blueGray-600">
+		<label class="block space-y-2 text-sm font-medium text-slate-600">
 			<span>Additional context (optional)</span>
 			<textarea
-				class="h-24 w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-sm text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
+				class="h-24 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
 				name="notes"
 				placeholder="Share workloads, compliance context, or preferred onboarding timeline."
 				bind:value={notes}
@@ -126,8 +126,8 @@
 		Request workspace access
 	</button>
 
-	<p class="text-xs text-blueGray-400">
+	<p class="text-xs text-slate-400">
 		Already provisioned?
-		<a class="font-semibold text-lightBlue-600 hover:text-lightBlue-700" href="/login">Return to sign-in</a>
+		<a class="font-semibold text-sky-600 hover:text-sky-700" href="/login">Return to sign-in</a>
 	</p>
 </form>

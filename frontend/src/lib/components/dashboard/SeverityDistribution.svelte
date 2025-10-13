@@ -120,9 +120,9 @@ const widthPercent = (count: number) => Math.min(100, (count / topSeverityCount)
 <section class="space-y-4">
 	<header class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
 		<div>
-			<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-blueGray-400">Severity distribution</h3>
+			<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Severity distribution</h3>
 			{#if aggregatedLabel}
-				<p class="text-xs text-blueGray-500">{aggregatedLabel}</p>
+				<p class="text-xs text-slate-500">{aggregatedLabel}</p>
 			{/if}
 		</div>
 		{#if severityTabs.length > 1}
@@ -137,26 +137,26 @@ const widthPercent = (count: number) => Math.min(100, (count / topSeverityCount)
 	{#if displayedEntries.length}
 		<div class="space-y-3" data-testid="severity-entries">
 			{#each displayedEntries as [severity, count]}
-				<div class="flex items-center gap-4 rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3">
-					<div class="w-32 text-xs font-semibold uppercase tracking-[0.25em] text-blueGray-500">{severity}</div>
-					<div class="relative h-2 flex-1 overflow-hidden rounded-full bg-blueGray-200">
+				<div class="flex items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+					<div class="w-32 text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">{severity}</div>
+					<div class="relative h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
 						<div
 							class="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-sky-500 via-indigo-500 to-blue-600"
 							style={`width: ${widthPercent(count)}%`}
 						></div>
 					</div>
-					<div class="w-12 text-right font-semibold text-blueGray-600">{count}</div>
+					<div class="w-12 text-right font-semibold text-slate-600">{count}</div>
 				</div>
 			{/each}
 		</div>
 	{:else}
-		<div class="rounded-3xl border border-blueGray-200 bg-blueGray-50 px-6 py-6 text-sm text-blueGray-500">
+		<div class="rounded-3xl border border-slate-200 bg-slate-50 px-6 py-6 text-sm text-slate-500">
 			Run your first scan to populate severity trends.
 		</div>
 	{/if}
 
-	<div class="rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl shadow-blueGray-300/40">
-		<h4 class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">{trackerTitle}</h4>
+	<div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40">
+		<h4 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">{trackerTitle}</h4>
 		<div class="mt-4">
 			<TrackerStrip segments={trackerSegments} total={trackerTotal} />
 		</div>

@@ -89,9 +89,9 @@
 
 <section class="space-y-8">
     <header class="space-y-3">
-        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-blueGray-400">Settings</p>
-        <h2 class="text-3xl font-semibold text-blueGray-700">LLM assistance</h2>
-        <p class="max-w-2xl text-sm text-blueGray-500">
+        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Settings</p>
+        <h2 class="text-3xl font-semibold text-slate-700">LLM assistance</h2>
+        <p class="max-w-2xl text-sm text-slate-500">
             Configure optional AI explanations and patch suggestions. The backend stores these preferences in SQLite via
             `/settings/llm` and validates credentials with `/settings/llm/test`.
         </p>

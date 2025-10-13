@@ -117,7 +117,7 @@
 
 {#if $navigationState.commandOpen}
 	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-blueGray-900/40 backdrop-blur-sm"
+		class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm"
 		role="presentation"
 		onclick={(event) => {
 			if (event.target === event.currentTarget) {
@@ -126,7 +126,7 @@
 		}}
 	>
 		<div
-			class="w-full max-w-xl rounded-3xl border border-blueGray-200 bg-white p-6 shadow-2xl shadow-blueGray-900/20"
+			class="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl shadow-slate-900/20"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="command-palette-title"
@@ -139,20 +139,20 @@
 			onkeydown={handleDialogKeydown}
 		>
 			<div class="flex items-center justify-between gap-3">
-				<h2 id="command-palette-title" class="text-sm font-semibold uppercase tracking-[0.3em] text-blueGray-400">
+				<h2 id="command-palette-title" class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">
 					Command palette
 				</h2>
 				<button
 					type="button"
-					class="rounded-xl border border-blueGray-200 px-3 py-1 text-xs font-semibold text-blueGray-500 transition hover:bg-blueGray-50"
+					class="rounded-xl border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-500 transition hover:bg-slate-50"
 					onclick={closeCommandPalette}
 				>
 					Close
 				</button>
 			</div>
-			<div class="mt-4 rounded-2xl border border-blueGray-200 bg-blueGray-50 p-3">
+			<div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
 				<input
-					class="w-full rounded-xl border border-blueGray-200 bg-white px-3 py-2 text-sm text-blueGray-700 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
+					class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
 					type="search"
 					placeholder="Jump to a page…"
 					value={$navigationState.commandQuery}
@@ -161,24 +161,24 @@
 					onkeydown={handleCommandInputKeydown}
 				/>
 			</div>
-			<div class="mt-4 max-h-60 overflow-auto rounded-2xl border border-blueGray-200 bg-white" data-testid="command-results">
+			<div class="mt-4 max-h-60 overflow-auto rounded-2xl border border-slate-200 bg-white" data-testid="command-results">
 				{#if actionableItems.length}
-					<ul class="divide-y divide-blueGray-100 text-sm text-blueGray-600">
+					<ul class="divide-y divide-slate-100 text-sm text-slate-600">
 						{#each actionableItems as item (item.href ?? item.title)}
 							<li>
 								<button
-									class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-lightBlue-50 hover:text-lightBlue-600"
+									class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-sky-50 hover:text-sky-600"
 									type="button"
 									onclick={() => handleCommandSelect(item.href)}
 								>
 									<span class="font-semibold">{item.title}</span>
-									<span class="text-xs uppercase tracking-[0.2em] text-blueGray-400">{item.href}</span>
+									<span class="text-xs uppercase tracking-[0.2em] text-slate-400">{item.href}</span>
 								</button>
 							</li>
 						{/each}
 					</ul>
 				{:else}
-					<p class="px-4 py-6 text-sm text-blueGray-400">No matching destinations.</p>
+					<p class="px-4 py-6 text-sm text-slate-400">No matching destinations.</p>
 				{/if}
 			</div>
 		</div>

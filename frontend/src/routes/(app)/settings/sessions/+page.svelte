@@ -167,9 +167,9 @@
 <section class="space-y-8">
 	<header class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
 		<div class="space-y-3">
-			<p class="text-xs font-semibold uppercase tracking-[0.35em] text-blueGray-400">Security</p>
-			<h2 class="text-3xl font-semibold text-blueGray-700">Active device sessions</h2>
-			<p class="max-w-2xl text-sm text-blueGray-500">
+			<p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Security</p>
+			<h2 class="text-3xl font-semibold text-slate-700">Active device sessions</h2>
+			<p class="max-w-2xl text-sm text-slate-500">
 				Each login issues a refresh session. Revoke entries you do not recognise to immediately sign
 				out those devices and require fresh authentication.
 			</p>
@@ -177,12 +177,12 @@
 		<div class="flex gap-3">
 			<button
 				type="button"
-				class="inline-flex items-center gap-2 rounded-full border border-lightBlue-200 bg-white px-5 py-2 text-sm font-semibold text-lightBlue-600 shadow-sm transition hover:bg-lightBlue-50 disabled:cursor-not-allowed disabled:opacity-70"
+				class="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-white px-5 py-2 text-sm font-semibold text-sky-600 shadow-sm transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-70"
 				onclick={() => void refreshSessions()}
 				disabled={loading || !authToken}
 			>
 				{#if loading}
-					<span class="h-2 w-2 animate-pulse rounded-full bg-lightBlue-400"></span>
+					<span class="h-2 w-2 animate-pulse rounded-full bg-sky-400"></span>
 				{/if}
 				<span>{loading ? 'Refreshing…' : 'Refresh list'}</span>
 			</button>
@@ -202,15 +202,15 @@
 		{/if}
 
 		{#if loading && !sessions.length}
-			<div class="rounded-3xl border border-blueGray-200 bg-blueGray-50 px-6 py-4 text-sm text-blueGray-500">
+			<div class="rounded-3xl border border-slate-200 bg-slate-50 px-6 py-4 text-sm text-slate-500">
 				Loading active sessions…
 			</div>
 		{/if}
 
 		{#if sessions.length}
-			<div class="overflow-hidden rounded-3xl border border-blueGray-100 bg-white shadow-sm">
-				<table class="min-w-full divide-y divide-blueGray-100">
-					<thead class="bg-blueGray-50 text-xs uppercase tracking-[0.25em] text-blueGray-400">
+			<div class="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
+				<table class="min-w-full divide-y divide-slate-100">
+					<thead class="bg-slate-50 text-xs uppercase tracking-[0.25em] text-slate-400">
 						<tr>
 							<th scope="col" class="px-6 py-3 text-left">Device</th>
 							<th scope="col" class="px-6 py-3 text-left">IP address</th>
@@ -220,35 +220,35 @@
 							<th scope="col" class="px-6 py-3 text-right">Actions</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-blueGray-100 text-sm text-blueGray-600">
+					<tbody class="divide-y divide-slate-100 text-sm text-slate-600">
 						{#each sessions as session (session.id)}
-							<tr class={session.is_current ? 'bg-lightBlue-50/60' : ''}>
+							<tr class={session.is_current ? 'bg-sky-50/60' : ''}>
 								<td class="px-6 py-4">
 									<div class="flex flex-col gap-1">
-										<span class="font-semibold text-blueGray-700">{describeAgent(session.user_agent)}</span>
-										<span class="text-xs text-blueGray-400">
+										<span class="font-semibold text-slate-700">{describeAgent(session.user_agent)}</span>
+										<span class="text-xs text-slate-400">
 											Session ID: {session.id}
 										</span>
 										{#if session.is_current}
-											<span class="inline-flex w-fit items-center gap-1 rounded-full bg-lightBlue-500 px-2 py-[2px] text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-white">
+											<span class="inline-flex w-fit items-center gap-1 rounded-full bg-sky-500 px-2 py-[2px] text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-white">
 												This device
 											</span>
 										{/if}
 									</div>
 								</td>
-								<td class="px-6 py-4 text-blueGray-500">
+								<td class="px-6 py-4 text-slate-500">
 									{session.ip_address ?? '—'}
 								</td>
-								<td class="px-6 py-4 text-blueGray-500">
+								<td class="px-6 py-4 text-slate-500">
 									{formatDateTime(session.last_used_at ?? session.created_at)}
 								</td>
-								<td class="px-6 py-4 text-blueGray-500">
+								<td class="px-6 py-4 text-slate-500">
 									{formatDateTime(session.expires_at)}
 								</td>
 								<td class="px-6 py-4">
 									<div class="flex flex-wrap gap-2">
 										{#each session.scopes as scope (scope)}
-											<span class="rounded-full bg-blueGray-100 px-2 py-[2px] text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-blueGray-500">
+											<span class="rounded-full bg-slate-100 px-2 py-[2px] text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-slate-500">
 												{scope}
 											</span>
 										{/each}
@@ -274,7 +274,7 @@
 				</table>
 			</div>
 		{:else if !loading}
-			<div class="rounded-3xl border border-blueGray-200 bg-blueGray-50 px-6 py-6 text-sm text-blueGray-500">
+			<div class="rounded-3xl border border-slate-200 bg-slate-50 px-6 py-6 text-sm text-slate-500">
 				No active sessions found. Log in from another device to see it listed here.
 			</div>
 		{/if}

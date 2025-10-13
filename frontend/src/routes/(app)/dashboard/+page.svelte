@@ -172,9 +172,9 @@ const hasSeverityData = $derived(topSeverityCount > 0);
 
 <section class="space-y-8">
 	<header class="flex flex-col gap-2">
-		<p class="text-xs font-semibold uppercase tracking-[0.35em] text-blueGray-400">Overview</p>
-		<h2 class="text-3xl font-semibold text-blueGray-700">Platform health</h2>
-		<p class="max-w-2xl text-sm text-blueGray-500">
+		<p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Overview</p>
+		<h2 class="text-3xl font-semibold text-slate-700">Platform health</h2>
+		<p class="max-w-2xl text-sm text-slate-500">
 			High-level metrics pulled directly from the FastAPI reviewer. Counts update whenever new reports are stored via the
 			CLI or this SvelteKit interface (the legacy Streamlit UI has been retired).
 		</p>
@@ -216,26 +216,26 @@ const hasSeverityData = $derived(topSeverityCount > 0);
 			/>
 		</div>
 
-		<div class="rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl shadow-blueGray-300/40">
+		<div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40">
 			<StepBar steps={stepItems} />
 		</div>
 
 		<SeverityDistribution stats={stats} recentLimit={5} />
 	{:else if isLoading}
-		<div class="rounded-3xl border border-blueGray-200 bg-blueGray-50 px-6 py-6 text-sm text-blueGray-500">
+		<div class="rounded-3xl border border-slate-200 bg-slate-50 px-6 py-6 text-sm text-slate-500">
 			Fetching report metrics...
 		</div>
 	{:else}
-		<div class="rounded-3xl border border-blueGray-200 bg-blueGray-50 px-6 py-6 text-sm text-blueGray-500">
+		<div class="rounded-3xl border border-slate-200 bg-slate-50 px-6 py-6 text-sm text-slate-500">
 			No dashboard statistics are available yet. Run your first scan to populate this view.
 		</div>
 	{/if}
 
-	<div class="rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl shadow-blueGray-300/40">
+	<div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40">
 		<header class="mb-4 space-y-2">
-			<p class="text-xs font-semibold uppercase tracking-[0.35em] text-blueGray-400">Security</p>
-			<h3 class="text-2xl font-semibold text-blueGray-700">Recent account activity</h3>
-			<p class="text-sm text-blueGray-500">
+			<p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Security</p>
+			<h3 class="text-2xl font-semibold text-slate-700">Recent account activity</h3>
+			<p class="text-sm text-slate-500">
 				Events log authentication activity (login, refresh, session revocation) with IP and user-agent metadata to help
 				triage unusual access patterns.
 			</p>
@@ -251,11 +251,11 @@ const hasSeverityData = $derived(topSeverityCount > 0);
 		{#if authEvents.length}
 			<AuthEventTimeline events={authEvents} />
 		{:else if eventsLoading}
-			<div class="rounded-3xl border border-blueGray-200 bg-blueGray-50 px-6 py-6 text-sm text-blueGray-500">
+			<div class="rounded-3xl border border-slate-200 bg-slate-50 px-6 py-6 text-sm text-slate-500">
 				Loading recent authentication events…
 			</div>
 		{:else}
-			<div class="rounded-3xl border border-blueGray-200 bg-blueGray-50 px-6 py-6 text-sm text-blueGray-500">
+			<div class="rounded-3xl border border-slate-200 bg-slate-50 px-6 py-6 text-sm text-slate-500">
 				No recent authentication events recorded yet. Activity will appear here after sign-ins or session changes.
 			</div>
 		{/if}
