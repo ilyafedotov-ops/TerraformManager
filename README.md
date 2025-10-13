@@ -1,14 +1,14 @@
 # TerraformManager — Wizard + Reviewer (Extended)
 
-TerraformManager combines a SvelteKit dashboard, FastAPI API, and reusable backend engines to help teams generate secure Terraform and review existing infrastructure code with rich context.
+TerraformManager is an IaC co-pilot that pairs a SvelteKit workspace, FastAPI service, and reusable Python engines so teams can generate secure Terraform blueprints, review existing infrastructure, and curate reusable assets with context.
 
 **Core capabilities**
-- Guided Terraform generators and blueprint bundles for AWS, Azure, and Kubernetes workloads.
-- Policy scanning with autofix suggestions, HTML/CSV artifacts, drift summaries, and cost estimates powered by Infracost.
-- Knowledge base search (TF‑IDF RAG), Markdown sync, and optional LLM explanations/patches.
-- Authenticated API with SQL-backed storage for projects, runs, reports, configs, knowledge, and LLM settings.
-- Project workspace UI for creating, editing, and deleting workspaces, browsing run artifacts, and linking reviews with saved reports.
-- Automation-friendly CLI for scans, baselines, docs generation, pre-commit scaffolding, auth, and knowledge reindexing.
+- Opinionated Terraform generators and blueprint bundles for AWS, Azure, and Kubernetes workloads with metadata-aware inputs.
+- Drift, policy, and cost scanning with autofix suggestions, HTML/CSV exports, terraform validate hooks, and Infracost deltas.
+- Knowledge base search (TF‑IDF RAG), Markdown sync from GitHub, and optional LLM-backed explanations or remediation patches.
+- Authenticated API with SQL-backed storage for projects, runs, reports, configs, generator assets, knowledge articles, and LLM settings.
+- Browser workspace for managing projects end-to-end—edit metadata, browse run artifacts, promote outputs into versioned assets, and cross-link reviews with saved reports.
+- Automation-friendly CLI covering scans, baselines, docs generation, blueprint bundles, auth helpers, and knowledge reindexing for CI/CD.
 
 > On‑prem defaults to Kubernetes via the Terraform `kubernetes` provider. Bring your own providers (vSphere, Proxmox, etc.) by extending the generators or policies.
 
@@ -36,6 +36,14 @@ graph TD
   Storage <--> API
   Storage <--> Frontend
 ```
+---
+
+## Tech stack
+
+- **Backend**: Python 3.11+, FastAPI with Uvicorn, Pydantic v2, SQLAlchemy 2.0 (SQLite default), Jinja2 generators, python-jose JWT auth, Passlib (bcrypt), httpx.
+- **Analysis & AI**: python-hcl2 for Terraform parsing, scikit-learn TF-IDF search, pandas/numpy reporting helpers, optional OpenAI/Azure LLM integration with caching.
+- **Frontend**: SvelteKit 2 (Svelte 5 + TypeScript), Tailwind CSS, Vite tooling, Testing Library + Vitest, packaged with PNPM.
+- **Infrastructure & Tooling**: Python CLI + pytest suite, Terraform CLI integrations, Infracost for cost deltas, terraform-docs for generator docs.
 
 ---
 
@@ -72,7 +80,7 @@ pnpm dev -- --open
 
 - Defaults to `http://localhost:5173` and proxies API calls to `http://localhost:8890`; export `VITE_API_BASE` to change.
 - Authenticated routes live under `(app)/` while guest flows live under `(auth)/`; tokens persist via cookies/local storage helpers.
-- The **Projects** workspace lets you create, edit, and delete project folders entirely in the browser, browse recent runs, and download generator/review artifacts without touching the CLI.
+- The **Projects** workspace lets you create, edit, and delete project folders entirely in the browser, browse recent runs, upload or delete artifacts, and download generator/review outputs without touching the CLI. Select a project and scroll to the "Project artifacts" panel to manage files directly from the UI.
 
 ### Authentication Settings
 
@@ -117,7 +125,7 @@ python -m backend.cli docs --out docs/generators --knowledge-out knowledge/gener
 python -m backend.cli auth login --email you@example.com --base-url http://localhost:8890
 ```
 
-> Tip: The Projects UI in the SvelteKit dashboard now covers workspace creation, editing, deletion, and artifact browsing. Reach for the CLI when you want automation, CI integration, or scripted workloads.
+> Tip: The Projects UI in the SvelteKit dashboard now covers workspace creation, editing, deletion, artifact browsing, and uploading new files. Reach for the CLI when you want automation, CI integration, or scripted workloads.
 
 ### CLI commands at a glance
 - `scan` — run the reviewer with optional `terraform fmt`, `terraform validate`, Infracost cost data, drift summary (`--plan-json`), and HTML/patch artifacts.

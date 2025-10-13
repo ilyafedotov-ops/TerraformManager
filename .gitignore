@@ -29,3 +29,4 @@ repo_remote/
 # OS files
 .DS_Store
 Thumbs.db
+data/projects/

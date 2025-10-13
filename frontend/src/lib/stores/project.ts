@@ -1,6 +1,10 @@
 import { derived, writable } from 'svelte/store';
 import {
 	type ArtifactEntry,
+	type GeneratedAssetCreatePayload,
+	type GeneratedAssetRegisterResponse,
+	type GeneratedAssetSummary,
+	type GeneratedAssetVersionCreatePayload,
 	type ProjectCreatePayload,
 	type ProjectDetail,
 	type ProjectRunCreatePayload,
@@ -12,8 +16,16 @@ import {
 	listProjectRuns as apiListProjectRuns,
 	listProjects as apiListProjects,
 	listRunArtifacts as apiListRunArtifacts,
+	uploadRunArtifact as apiUploadRunArtifact,
+	deleteRunArtifact as apiDeleteRunArtifact,
 	updateProject as apiUpdateProject,
-	deleteProject as apiDeleteProject
+	deleteProject as apiDeleteProject,
+	listProjectLibrary as apiListProjectLibrary,
+	registerProjectLibraryAsset as apiRegisterProjectLibraryAsset,
+	addProjectLibraryAssetVersion as apiAddProjectLibraryAssetVersion,
+	deleteProjectLibraryAssetVersion as apiDeleteProjectLibraryAssetVersion,
+	deleteProjectLibraryAsset as apiDeleteProjectLibraryAsset,
+	getProjectLibraryAsset as apiGetProjectLibraryAsset
 } from '$lib/api/client';
 
 type FetchFn = typeof fetch;
@@ -25,11 +37,18 @@ interface ArtifactCacheEntry {
 	fetchedAt: string;
 }
 
+interface ProjectLibraryCacheEntry {
+	assets: GeneratedAssetSummary[];
+	includeVersions: boolean;
+	fetchedAt: string;
+}
+
 interface ProjectState {
 	projects: ProjectSummary[];
 	activeProjectId: string | null;
 	runs: Record<string, ProjectRunSummary[]>;
 	artifacts: Record<string, ArtifactCacheEntry>;
+	library: Record<string, ProjectLibraryCacheEntry>;
 	loading: boolean;
 	error: string | null;
 }
@@ -39,11 +58,32 @@ const initialState: ProjectState = {
 	activeProjectId: null,
 	runs: {},
 	artifacts: {},
+	library: {},
 	loading: false,
 	error: null
 };
 
-const makeArtifactKey = (runId: string, path = ''): string => `${runId}::${path || '.'}`;
+const makeArtifactKey = (runId: string, path = ''): string => {
+	const normalised = !path || path === '.' ? '.' : path.replace(/^(\.\/|\/)+/, '').trim() || '.';
+	return `${runId}::${normalised}`;
+};
+
+const extractDirectory = (path: string): string => {
+	const cleaned = path.replace(/\\/g, '/').replace(/^(\.\/|\/)+/, '');
+	if (!cleaned || cleaned === '.') {
+		return '.';
+	}
+	const segments = cleaned.split('/').filter(Boolean);
+	if (segments.length <= 1) {
+		return '.';
+	}
+	return segments.slice(0, -1).join('/') || '.';
+};
+
+const upsertLibraryAsset = (assets: GeneratedAssetSummary[], asset: GeneratedAssetSummary): GeneratedAssetSummary[] => {
+	const others = assets.filter((item) => item.id !== asset.id);
+	return [asset, ...others];
+};
 
 const normaliseError = (error: unknown): string =>
 	error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error';
@@ -92,9 +132,12 @@ function createProjectStore() {
 				const artifacts = Object.fromEntries(
 					Object.entries(state.artifacts).filter(([, entry]) => !runIds.has(entry.runId))
 				);
+				const library = Object.fromEntries(
+					Object.entries(state.library).filter(([key]) => key !== projectId)
+				);
 				const activeProjectId =
 					state.activeProjectId === projectId ? (projects[0]?.id ?? null) : state.activeProjectId;
-				return { ...state, projects, runs, artifacts, activeProjectId };
+				return { ...state, projects, runs, artifacts, library, activeProjectId };
 			});
 		},
 		setRuns(projectId: string, runs: ProjectRunSummary[]) {
@@ -149,6 +192,19 @@ function createProjectStore() {
 			const key = makeArtifactKey(runId, path);
 			return currentState.artifacts[key] ?? null;
 		},
+		getCachedLibrary(projectId: string) {
+			return currentState.library[projectId] ?? null;
+		},
+		clearLibrary(projectId?: string) {
+			if (!projectId) {
+				update((state) => ({ ...state, library: {} }));
+				return;
+			}
+			update((state) => {
+				const next = Object.fromEntries(Object.entries(state.library).filter(([key]) => key !== projectId));
+				return { ...state, library: next };
+			});
+		},
 		async loadProjects(fetchFn: FetchFn, token: string) {
 			update((state) => ({ ...state, loading: true, error: null }));
 			try {
@@ -166,6 +222,177 @@ function createProjectStore() {
 					};
 				});
 				return projects;
+			} catch (error) {
+				const message = normaliseError(error);
+				update((state) => ({ ...state, loading: false, error: message }));
+				throw error;
+			}
+		},
+		async loadLibrary(fetchFn: FetchFn, token: string, projectId: string, includeVersions = false) {
+			update((state) => ({ ...state, loading: true, error: null }));
+			try {
+				const assets = await apiListProjectLibrary(fetchFn, token, projectId, includeVersions);
+				update((state) => ({
+					...state,
+					library: {
+						...state.library,
+						[projectId]: {
+							assets,
+							includeVersions,
+							fetchedAt: new Date().toISOString()
+						}
+					},
+					loading: false
+				}));
+				return assets;
+			} catch (error) {
+				const message = normaliseError(error);
+				update((state) => ({ ...state, loading: false, error: message }));
+				throw error;
+			}
+		},
+		async registerLibraryAsset(
+			fetchFn: FetchFn,
+			token: string,
+			projectId: string,
+			payload: GeneratedAssetCreatePayload
+		) {
+			update((state) => ({ ...state, loading: true, error: null }));
+			try {
+				const result: GeneratedAssetRegisterResponse = await apiRegisterProjectLibraryAsset(
+					fetchFn,
+					token,
+					projectId,
+					payload
+				);
+				const updated = result.asset;
+				update((state) => {
+					const cache = state.library[projectId];
+					const assets = upsertLibraryAsset(cache?.assets ?? [], updated);
+					return {
+						...state,
+						library: {
+							...state.library,
+							[projectId]: {
+								assets,
+								includeVersions: cache?.includeVersions ?? Boolean(updated.versions?.length),
+								fetchedAt: new Date().toISOString()
+							}
+						},
+						loading: false
+					};
+				});
+				return result;
+			} catch (error) {
+				const message = normaliseError(error);
+				update((state) => ({ ...state, loading: false, error: message }));
+				throw error;
+			}
+		},
+		async addLibraryAssetVersion(
+			fetchFn: FetchFn,
+			token: string,
+			projectId: string,
+			assetId: string,
+			payload: GeneratedAssetVersionCreatePayload
+		) {
+			update((state) => ({ ...state, loading: true, error: null }));
+			try {
+				const result: GeneratedAssetRegisterResponse = await apiAddProjectLibraryAssetVersion(
+					fetchFn,
+					token,
+					projectId,
+					assetId,
+					payload
+				);
+				const updated = result.asset;
+				update((state) => {
+					const cache = state.library[projectId];
+					const assets = upsertLibraryAsset(cache?.assets ?? [], updated);
+					return {
+						...state,
+						library: {
+							...state.library,
+							[projectId]: {
+								assets,
+								includeVersions: true,
+								fetchedAt: new Date().toISOString()
+							}
+						},
+						loading: false
+					};
+				});
+				return result;
+			} catch (error) {
+				const message = normaliseError(error);
+				update((state) => ({ ...state, loading: false, error: message }));
+				throw error;
+			}
+		},
+		async deleteLibraryAssetVersion(
+			fetchFn: FetchFn,
+			token: string,
+			projectId: string,
+			assetId: string,
+			versionId: string,
+			removeFiles = true
+		) {
+			update((state) => ({ ...state, loading: true, error: null }));
+			try {
+				await apiDeleteProjectLibraryAssetVersion(fetchFn, token, projectId, assetId, versionId, removeFiles);
+				const refreshed = await apiGetProjectLibraryAsset(fetchFn, token, projectId, assetId, true);
+				update((state) => {
+					const cache = state.library[projectId];
+					const assets = upsertLibraryAsset(cache?.assets ?? [], refreshed);
+					return {
+						...state,
+						library: {
+							...state.library,
+							[projectId]: {
+								assets,
+								includeVersions: true,
+								fetchedAt: new Date().toISOString()
+							}
+						},
+						loading: false
+					};
+				});
+			} catch (error) {
+				const message = normaliseError(error);
+				update((state) => ({ ...state, loading: false, error: message }));
+				throw error;
+			}
+		},
+		async deleteLibraryAsset(
+			fetchFn: FetchFn,
+			token: string,
+			projectId: string,
+			assetId: string,
+			removeFiles = false
+		) {
+			update((state) => ({ ...state, loading: true, error: null }));
+			try {
+				await apiDeleteProjectLibraryAsset(fetchFn, token, projectId, assetId, removeFiles);
+				update((state) => {
+					const cache = state.library[projectId];
+					if (!cache) {
+						return { ...state, loading: false };
+					}
+					const assets = cache.assets.filter((item) => item.id !== assetId);
+					const nextLibrary = {
+						...state.library,
+						[projectId]: {
+							assets,
+							includeVersions: cache.includeVersions,
+							fetchedAt: new Date().toISOString()
+						}
+					};
+					return {
+						...state,
+						library: nextLibrary,
+						loading: false
+					};
+				});
 			} catch (error) {
 				const message = normaliseError(error);
 				update((state) => ({ ...state, loading: false, error: message }));
@@ -223,6 +450,9 @@ function createProjectStore() {
 				const artifacts = Object.fromEntries(
 					Object.entries(state.artifacts).filter(([, value]) => !projectRunIds.has(value.runId))
 				);
+				const library = Object.fromEntries(
+					Object.entries(state.library).filter(([key]) => key !== projectId)
+				);
 				const activeProjectId =
 					state.activeProjectId === projectId ? (updatedProjects[0]?.id ?? null) : state.activeProjectId;
 				return {
@@ -230,6 +460,7 @@ function createProjectStore() {
 					projects: updatedProjects,
 					runs,
 					artifacts,
+					library,
 					activeProjectId,
 					loading: false
 				};
@@ -290,16 +521,23 @@ function createProjectStore() {
 			runId: string,
 			path: string = '.'
 		) {
+			const targetPath = !path || path === '.' ? '.' : path;
 			update((state) => ({ ...state, loading: true, error: null }));
 			try {
-				const entries = await apiListRunArtifacts(fetchFn, token, projectId, runId, path === '.' ? undefined : path);
+				const entries = await apiListRunArtifacts(
+					fetchFn,
+					token,
+					projectId,
+					runId,
+					targetPath === '.' ? undefined : targetPath
+				);
 				update((state) => ({
 					...state,
 					artifacts: {
 						...state.artifacts,
-						[makeArtifactKey(runId, path)]: {
+						[makeArtifactKey(runId, targetPath)]: {
 							runId,
-							path,
+							path: targetPath,
 							entries,
 							fetchedAt: new Date().toISOString()
 						}
@@ -307,6 +545,85 @@ function createProjectStore() {
 					loading: false
 				}));
 				return entries;
+			} catch (error) {
+				const message = normaliseError(error);
+				update((state) => ({ ...state, loading: false, error: message }));
+				throw error;
+			}
+		},
+		async uploadArtifact(
+			fetchFn: FetchFn,
+			token: string,
+			projectId: string,
+			runId: string,
+			options: { path: string; file: File | Blob; filename?: string; overwrite?: boolean }
+		) {
+			update((state) => ({ ...state, loading: true, error: null }));
+			try {
+				const entry = await apiUploadRunArtifact(fetchFn, token, projectId, runId, options);
+				update((state) => {
+					const directory = extractDirectory(entry.path);
+					const key = makeArtifactKey(runId, directory);
+					const existing = state.artifacts[key];
+					const existingEntries = existing?.entries ?? [];
+					const nextEntries = (() => {
+						const index = existingEntries.findIndex((item) => item.path === entry.path);
+						if (index >= 0) {
+							const copy = [...existingEntries];
+							copy[index] = entry;
+							return copy;
+						}
+						return [...existingEntries, entry];
+					})();
+					const nextArtifacts = {
+						...state.artifacts,
+						[key]: {
+							runId,
+							path: directory,
+							entries: nextEntries,
+							fetchedAt: new Date().toISOString()
+						}
+					};
+					return {
+						...state,
+						artifacts: nextArtifacts,
+						loading: false
+					};
+				});
+				return entry;
+			} catch (error) {
+				const message = normaliseError(error);
+				update((state) => ({ ...state, loading: false, error: message }));
+				throw error;
+			}
+		},
+		async deleteArtifact(fetchFn: FetchFn, token: string, projectId: string, runId: string, path: string) {
+			update((state) => ({ ...state, loading: true, error: null }));
+			try {
+				await apiDeleteRunArtifact(fetchFn, token, projectId, runId, path);
+				update((state) => {
+					const directory = extractDirectory(path);
+					const key = makeArtifactKey(runId, directory);
+					const existing = state.artifacts[key];
+					const entries = existing?.entries ?? [];
+					const nextEntries = entries.filter((item) => item.path !== path);
+					const nextArtifacts = { ...state.artifacts };
+					if (nextEntries.length) {
+						nextArtifacts[key] = {
+							runId,
+							path: directory,
+							entries: nextEntries,
+							fetchedAt: new Date().toISOString()
+						};
+					} else {
+						delete nextArtifacts[key];
+					}
+					return {
+						...state,
+						artifacts: nextArtifacts,
+						loading: false
+					};
+				});
 			} catch (error) {
 				const message = normaliseError(error);
 				update((state) => ({ ...state, loading: false, error: message }));
@@ -324,4 +641,8 @@ export const activeProject = derived(projectState, ($state) =>
 
 export const activeProjectRuns = derived([projectState, activeProject], ([$state, $active]) =>
 	$active ? $state.runs[$active.id] ?? [] : []
+);
+
+export const activeProjectLibrary = derived([projectState, activeProject], ([$state, $active]) =>
+	$active ? $state.library[$active.id]?.assets ?? [] : []
 );

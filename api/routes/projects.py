@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -26,6 +28,15 @@ from backend.storage import (
     save_run_artifact,
     get_run_artifact_path,
     delete_run_artifact,
+    list_generated_assets,
+    get_generated_asset,
+    register_generated_asset,
+    add_generated_asset_version,
+    delete_generated_asset_version,
+    delete_generated_asset,
+    get_generated_asset_version,
+    get_generated_asset_version_path,
+    diff_generated_asset_versions,
     ArtifactPathError,
 )
 
@@ -95,6 +106,78 @@ class ArtifactEntry(BaseModel):
     is_dir: bool
     size: Optional[int] = None
     modified_at: Optional[str] = None
+
+
+class GeneratedAssetVersionSummary(BaseModel):
+    id: str
+    asset_id: str
+    project_id: str
+    run_id: Optional[str] = None
+    report_id: Optional[str] = None
+    storage_path: str
+    display_path: str
+    checksum: Optional[str] = None
+    size_bytes: Optional[int] = None
+    media_type: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class GeneratedAssetSummary(BaseModel):
+    id: str
+    project_id: str
+    name: str
+    description: Optional[str] = None
+    asset_type: str
+    tags: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    latest_version_id: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    versions: Optional[List[GeneratedAssetVersionSummary]] = None
+
+
+class GeneratedAssetCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=160)
+    asset_type: str = Field(..., min_length=1, max_length=48)
+    description: Optional[str] = Field(default=None, max_length=1024)
+    tags: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    run_id: Optional[str] = Field(default=None)
+    report_id: Optional[str] = Field(default=None)
+    artifact_path: Optional[str] = Field(
+        default=None,
+        description="Relative path to a run artifact to promote into the library.",
+    )
+    storage_filename: Optional[str] = Field(default=None, max_length=256)
+    media_type: Optional[str] = Field(default=None, max_length=96)
+    notes: Optional[str] = Field(default=None, max_length=2048)
+    content_base64: Optional[str] = Field(
+        default=None,
+        description="Base64-encoded content for direct uploads.",
+    )
+
+
+class GeneratedAssetRegisterResponse(BaseModel):
+    asset: GeneratedAssetSummary
+    version: GeneratedAssetVersionSummary
+
+
+class GeneratedAssetVersionCreateRequest(BaseModel):
+    run_id: Optional[str] = Field(default=None)
+    report_id: Optional[str] = Field(default=None)
+    artifact_path: Optional[str] = Field(
+        default=None,
+        description="Relative path to a run artifact to promote into this asset.",
+    )
+    storage_filename: Optional[str] = Field(default=None, max_length=256)
+    media_type: Optional[str] = Field(default=None, max_length=96)
+    notes: Optional[str] = Field(default=None, max_length=2048)
+    content_base64: Optional[str] = Field(
+        default=None,
+        description="Base64-encoded content for direct upload.",
+    )
+    promote_latest: bool = Field(default=True)
 
 
 @router.get("/", response_model=List[ProjectBaseResponse])
@@ -358,4 +441,306 @@ def project_run_artifact_delete(
 
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="artifact not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{project_id}/library", response_model=List[GeneratedAssetSummary])
+def project_library_index(
+    project_id: str,
+    include_versions: bool = Query(default=False, description="Include version history for each asset"),
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> List[GeneratedAssetSummary]:
+    project = get_project(project_id=project_id, session=session)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    assets = list_generated_assets(
+        project_id=project_id,
+        include_versions=include_versions,
+        session=session,
+    )
+    return [GeneratedAssetSummary.model_validate(asset) for asset in assets]
+
+
+@router.get("/{project_id}/library/{asset_id}", response_model=GeneratedAssetSummary)
+def project_library_detail(
+    project_id: str,
+    asset_id: str,
+    include_versions: bool = Query(default=True),
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> GeneratedAssetSummary:
+    project = get_project(project_id=project_id, session=session)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    asset = get_generated_asset(
+        asset_id,
+        project_id=project_id,
+        include_versions=include_versions,
+        session=session,
+    )
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
+    return GeneratedAssetSummary.model_validate(asset)
+
+
+@router.post("/{project_id}/library", response_model=GeneratedAssetRegisterResponse, status_code=status.HTTP_201_CREATED)
+def project_library_register(
+    project_id: str,
+    payload: GeneratedAssetCreateRequest,
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> GeneratedAssetRegisterResponse:
+    project = get_project(project_id=project_id, session=session)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+
+    data_bytes: Optional[bytes] = None
+    if payload.content_base64:
+        try:
+            data_bytes = base64.b64decode(payload.content_base64)
+        except binascii.Error as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="content_base64 must be valid base64") from exc
+
+    artifact_source: Path | None = None
+    if payload.artifact_path:
+        if not payload.run_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="run_id is required when artifact_path is supplied",
+            )
+        try:
+            artifact_source = get_run_artifact_path(
+                project_id=project_id,
+                run_id=payload.run_id,
+                path=payload.artifact_path,
+                session=session,
+            )
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project or run not found")
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except ArtifactPathError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if data_bytes is None and artifact_source is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide either content_base64 or artifact_path for asset content.",
+        )
+
+    try:
+        result = register_generated_asset(
+            project_id=project_id,
+            name=payload.name,
+            asset_type=payload.asset_type,
+            description=payload.description,
+            tags=payload.tags,
+            metadata=payload.metadata,
+            run_id=payload.run_id,
+            report_id=payload.report_id,
+            storage_filename=payload.storage_filename,
+            source_path=artifact_source,
+            data=data_bytes,
+            media_type=payload.media_type,
+            notes=payload.notes,
+            session=session,
+        )
+    except (ValueError, FileExistsError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    return GeneratedAssetRegisterResponse.model_validate(result)
+
+
+@router.post(
+    "/{project_id}/library/{asset_id}/versions",
+    response_model=GeneratedAssetRegisterResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def project_library_add_version(
+    project_id: str,
+    asset_id: str,
+    payload: GeneratedAssetVersionCreateRequest,
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> GeneratedAssetRegisterResponse:
+    project = get_project(project_id=project_id, session=session)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+
+    data_bytes: Optional[bytes] = None
+    if payload.content_base64:
+        try:
+            data_bytes = base64.b64decode(payload.content_base64)
+        except binascii.Error as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="content_base64 must be valid base64") from exc
+
+    artifact_source: Path | None = None
+    if payload.artifact_path:
+        if not payload.run_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="run_id is required when artifact_path is supplied",
+            )
+        try:
+            artifact_source = get_run_artifact_path(
+                project_id=project_id,
+                run_id=payload.run_id,
+                path=payload.artifact_path,
+                session=session,
+            )
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project or run not found")
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except ArtifactPathError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if data_bytes is None and artifact_source is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide either content_base64 or artifact_path for asset content.",
+        )
+
+    try:
+        result = add_generated_asset_version(
+            asset_id,
+            project_id=project_id,
+            run_id=payload.run_id,
+            report_id=payload.report_id,
+            storage_filename=payload.storage_filename,
+            source_path=artifact_source,
+            data=data_bytes,
+            media_type=payload.media_type,
+            notes=payload.notes,
+            promote_latest=payload.promote_latest,
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    return GeneratedAssetRegisterResponse.model_validate(result)
+
+
+@router.delete(
+    "/{project_id}/library/{asset_id}/versions/{version_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def project_library_delete_version(
+    project_id: str,
+    asset_id: str,
+    version_id: str,
+    remove_files: bool = True,
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> Response:
+    project = get_project(project_id=project_id, session=session)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+
+    deleted = delete_generated_asset_version(
+        asset_id,
+        version_id,
+        project_id=project_id,
+        remove_files=remove_files,
+        session=session,
+    )
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="version not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{project_id}/library/{asset_id}/versions/{version_id}/download")
+def project_library_version_download(
+    project_id: str,
+    asset_id: str,
+    version_id: str,
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> FileResponse:
+    project = get_project(project_id=project_id, session=session)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    try:
+        version = get_generated_asset_version(
+            asset_id,
+            version_id,
+            project_id=project_id,
+            session=session,
+        )
+        if not version:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="version not found")
+        path = get_generated_asset_version_path(
+            asset_id,
+            version_id,
+            project_id=project_id,
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    filename = version["display_path"] or path.name
+    return FileResponse(path, filename=filename)
+
+
+@router.get("/{project_id}/library/{asset_id}/versions/{version_id}/diff")
+def project_library_version_diff(
+    project_id: str,
+    asset_id: str,
+    version_id: str,
+    against: str = Query(..., description="Version ID to diff against"),
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> Dict[str, Any]:
+    project = get_project(project_id=project_id, session=session)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    if version_id == against:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Versions must be different")
+    try:
+        payload = diff_generated_asset_versions(
+            asset_id,
+            base_version_id=against,
+            compare_version_id=version_id,
+            project_id=project_id,
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return payload
+
+
+@router.delete(
+    "/{project_id}/library/{asset_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def project_library_delete(
+    project_id: str,
+    asset_id: str,
+    remove_files: bool = Query(default=False, description="Remove stored files from disk"),
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> Response:
+    project = get_project(project_id=project_id, session=session)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+
+    deleted = delete_generated_asset(
+        asset_id,
+        project_id=project_id,
+        remove_files=remove_files,
+        session=session,
+    )
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
