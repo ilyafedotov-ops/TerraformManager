@@ -95,6 +95,18 @@
 
 # Current Status Summary
 
+## Initiative – Project Workspace UX (🆕 In Progress)
+- **Backend Domain Model**: add `Project` / `ProjectRun` tables with metadata, run status timestamps, and artifact pointers (`backend/db/models.py`, `backend/storage.py`). Ensure directories live under `data/projects/<slug>` with auto-creation and safe slugging.
+- **REST Surface**: expose project CRUD and run lifecycle endpoints via a new `api/routes/projects.py`, wiring authentication/authorization and using typed Pydantic models for responses. Mount router in `api/main.py` and document via `/docs`.
+- **Storage Helpers**: extend `backend/storage.py` to manage project directories, run artifact folders, and summary persistence. Provide helpers for updating run status/summary and listing runs per project.
+- **CLI/Automation**: add `backend/cli.py project create/list/run` commands to bootstrap folders, invoke generators/reviews in-context, and reuse the storage helpers for consistency (initial scaffold complete).
+- **Testing & State Management**: cover storage/routes with backend API tests (`tests/test_storage.py`, `tests/test_projects_routes.py`) and add Svelte project store + API bindings for dashboard integration.
+- **UI Integration**: surface project context across dashboard, generator/review wizards, and reports (run history, artifact browser, run logging via FastAPI).
+- **Frontend State**: introduce a SvelteKit store for active project context (`frontend/src/lib/stores/project.ts`) plus API client methods for project CRUD/run listing.
+- **Workspace UI**: redesign `(app)` shell with left-hand project navigator, multi-step run wizard (inputs → generated files → review), and accessible tabbed panels per ARIA guidance (`role="tab"` wrappers).
+- **Artifacts & Diffing**: surface generated/reviewed files inline via tree + diff viewer, with download/export actions. Persist run metadata and enable reruns that preload prior parameters.
+- **Validation & Docs**: add backend tests for project/run APIs, frontend Vitest coverage for store/actions, and update `README.md` plus `docs/` to describe project workflow, noting when to reindex knowledge.
+
 ### Frontend Migration (SvelteKit)
 - ✅ Scaffolded SvelteKit workspace with Tailwind + Notus integration and environment-aware token storage synced via cookies/localStorage.
 - ✅ Auth flows (login/register/forgot) now persist API tokens and honour redirect targets supplied by protected routes.
