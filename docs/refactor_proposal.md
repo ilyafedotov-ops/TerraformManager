@@ -5,7 +5,7 @@ Goal: keep the deterministic scanner and generators in `backend/`, but replace t
 ## Summary
 - Backend stays: `backend/scanner.py`, policies, utils, and generators unchanged.
 - New API: FastAPI (small, typed, async-ready) served by Uvicorn.
-- Storage: SQLite (stdlib `sqlite3`), no ORM, single file `data/app.db`.
+- Storage: SQLite (via SQLAlchemy ORM), single file `data/app.db`.
 - Embeddings: in-process TF‑IDF via scikit‑learn; no vector DB.
 - UI: small HTMX-powered HTML from the API root (`/`) to avoid SPA frameworks.
 - Knowledge: add a GitHub sync to pull Markdown from policy repos and index them.
@@ -22,9 +22,9 @@ Goal: keep the deterministic scanner and generators in `backend/`, but replace t
   - `POST /knowledge/sync` – pull Markdown docs from GitHub
   - `GET /` – minimal HTMX UI for quick usage
 
-- `backend/storage.py`: minimal SQLite helpers
-  - Tables: `configs(name, kind, payload, created_at, updated_at)` and `reports(id, summary, report, created_at)`
-  - No ORM; JSON payloads stored as text.
+- `backend/storage.py`: SQLAlchemy-backed repositories
+  - Tables: `configs(name, kind, payload, created_at, updated_at)`, `reports(id, summary, report, created_at)`, and `settings(key, value, updated_at)`
+  - JSON payloads stored as text with helper accessors.
 
 - `backend/knowledge_sync.py`: fetches GitHub repo as a zip via `codeload.github.com`, extracts Markdown to `knowledge/external/<repo>`.
 
@@ -46,16 +46,16 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 # Start API + minimal UI
-uvicorn api.main:app --reload --port 8787
+uvicorn api.main:app --reload --port 8890
 
 # Quick smoke (from another shell)
-curl -s http://localhost:8787/health
-curl -s -X POST http://localhost:8787/scan -H 'content-type: application/json' \
+curl -s http://localhost:8890/health
+curl -s -X POST http://localhost:8890/scan -H 'content-type: application/json' \
   -d '{"paths":["sample"],"terraform_validate":false,"save":true}' | jq .id
-curl -s http://localhost:8787/reports | jq .
+curl -s http://localhost:8890/reports | jq .
 
 # Sync knowledge from GitHub
-curl -s -X POST http://localhost:8787/knowledge/sync | jq .
+curl -s -X POST http://localhost:8890/knowledge/sync | jq .
 ```
 
 ## Migration Strategy

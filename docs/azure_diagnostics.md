@@ -34,13 +34,14 @@ These outputs make it easier to link additional automation (e.g., private endpoi
 
 Enable **Create Log Analytics ingestion health alert** in the wizard to provision an `azurerm_monitor_metric_alert` that watches the workspace `SearchServiceAvailability` metric and pages your action groups if availability drops. The reviewer enforces this alert via rule `AZ-LAW-HEALTH-ALERT`, and the generator exposes the alert ID for downstream wiring. See `sample/azure_diagnostics_health_alert.tf` for a minimal example you can adapt to existing environments.
 
-## Example command
+## Example workflow
 
 ```bash
-streamlit run app.py  # open the wizard
+python -m api                     # start FastAPI backend on http://localhost:8890
+cd frontend && pnpm dev -- --open # launch the SvelteKit dashboard
 ```
 
-In the Diagnostics Baseline form:
+In the Diagnostics Baseline generator:
 
 1. Supply the resource group and workspace details.
 2. Paste any additional resource IDs that need coverage.

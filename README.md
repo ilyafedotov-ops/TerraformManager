@@ -15,35 +15,71 @@ This project is a **RAG/LLM‑friendly** GUI + CLI for:
 ```bash
 python -m venv .venv && source .venv/bin/activate      # (Windows) .venv\Scripts\activate
 pip install -r requirements.txt
-python -m api  # runs uvicorn api.main:app --reload --port 8787
+python -m api  # runs uvicorn api.main:app --reload --port 8890
 ```
 
-- Open http://localhost:8787 for a minimal HTMX UI.
+- Open http://localhost:8890 for a minimal HTMX UI.
 - Save and list reports via `/scan` and `/reports`.
 - Store review configs in SQLite with `/configs` endpoints.
 - Sync docs from GitHub with `POST /knowledge/sync`.
+- Set `TFM_SQL_ECHO=1` (or `SQLALCHEMY_ECHO=1`) to log SQL emitted by the new SQLAlchemy storage layer.
+
+Read `docs/authentication.md` for a full walkthrough of the password + refresh-token flow and environment controls.
 
 To require a token for all endpoints, set `TFM_API_TOKEN=...` and pass either header `X-API-Token: ...` or `Authorization: Bearer ...`. Set a custom port with `TFM_PORT` or `PORT`.
 
-## Streamlit GUI (optional)
+## Web Frontend (SvelteKit)
 
 ```bash
-streamlit run app.py
+cd frontend
+pnpm install
+pnpm dev -- --open
 ```
 
-- Generate, Review, Knowledge tabs remain available for interactive use.
+- Defaults to `http://localhost:5173` and proxies API calls to `http://localhost:8890`; export `VITE_API_BASE` to change.
+- Authenticated routes live under `(app)/` while guest flows live under `(auth)/`; tokens persist via cookies/local storage helpers.
+
+### Authentication Settings
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `TFM_API_TOKEN` / `API_TOKEN` | `local-dev` | Legacy single-user password required for login. |
+| `TFM_JWT_SECRET` | `dev-secret-change-me` | Symmetric signing key for access tokens. |
+| `TFM_REFRESH_SECRET` | falls back to `TFM_JWT_SECRET` | Optional distinct secret for refresh tokens. |
+| `TFM_ACCESS_TOKEN_MINUTES` | `30` | Access token lifetime (minutes). |
+| `TFM_REFRESH_TOKEN_MINUTES` | `10080` (7 days) | Refresh token lifetime (minutes). |
+| `TFM_COOKIE_SECURE` | `false` | Set `true`/`1` in production to emit `Secure` cookies. |
+| `TFM_COOKIE_DOMAIN` | unset | Optional domain attribute for cookie scope. |
+| `TFM_COOKIE_SAMESITE` | `lax` | SameSite mode for refresh cookies (`lax`, `strict`, `none`). |
+| `TFM_AUTH_REFRESH_COOKIE` | `tm_refresh_token` | Cookie name that stores the refresh token. |
+
+Login issues a short-lived access token and a `tm_refresh_token` HttpOnly cookie. Clients must echo the refresh cookie alongside the `X-Refresh-Token-CSRF` header (returned after login/refresh) when calling `/auth/refresh`.
 
 ## CLI (for CI or local)
 
 ```bash
-python -m backend.cli scan --path . --out report.json
-# optional: --terraform-validate (uses local terraform if available)
+# Policy scan with formatting, validate, cost, and plan drift awareness
+python -m backend.cli scan --path . --out report.json \
+  --terraform-fmt \
+  --terraform-validate \
+  --cost \
+  --cost-usage-file infracost-usage.yml \
+  --plan-json plan.json
 
 # Capture autofixable diffs alongside the JSON report
 python -m backend.cli scan --path . --out report.json --patch-out autofix.patch
 
 # Generate a baseline waiver file (YAML)
 python -m backend.cli baseline --path .
+
+# Scaffold pre-commit hooks (fmt/validate/tflint/checkov/infracost/docs)
+python -m backend.cli precommit --out .pre-commit-config.yaml
+
+# Generate template documentation (mirrors into docs/ and knowledge/)
+python -m backend.cli docs --out docs/generators --knowledge-out knowledge/generated
+
+# Authenticate against running API (stores access/refresh data in tm_auth.json)
+python -m backend.cli auth login --email you@example.com --base-url http://localhost:8890
 ```
 
 To run template smoke tests with `terraform validate`, export `TFM_RUN_TERRAFORM_VALIDATE=1` before executing `python -m unittest` or the new pytest-based smoke test (`TFM_RUN_TERRAFORM_VALIDATE=1 pytest tests/test_terraform_validate_smoke.py`). Terraform must be on `PATH`; tests fall back gracefully if it is absent.
@@ -57,9 +93,10 @@ To run template smoke tests with `terraform validate`, export `TFM_RUN_TERRAFORM
 
 ## What’s included
 
-- `app.py` — Streamlit GUI with 3 tabs (Generate / Review / Knowledge)
+- `frontend/` — SvelteKit dashboard for generator, reviewer, and knowledge workflows (reviewer view now surfaces cost & drift summaries)
 - `backend/cli.py` — CLI to scan paths and write a JSON report
 - `backend/scanner.py` — Static checks for AWS, Azure, K8s; syntax/HCL parse checker; optional terraform validate hook
+- `backend/db/` — SQLAlchemy engine/session helpers plus ORM definitions for configs, reports, and settings
 - `backend/rag.py` — Local TF‑IDF retrieval over `knowledge/`
 - `backend/validators.py` — Optional helpers for `terraform fmt` / `validate`
 - `backend/utils/diff.py` — helper for unified diffs
@@ -118,15 +155,15 @@ Build and run the API + UI without installing dependencies locally:
 
 ```bash
 docker build -t terraform-manager:local .
-docker run --rm -p 8787:8787 \
-  -e TFM_PORT=8787 \
+docker run --rm -p 8890:8890 \
+  -e TFM_PORT=8890 \
   -e TFM_API_TOKEN=changeme \
   -v "$(pwd)/knowledge:/app/knowledge" \
   -v "$(pwd)/data:/app/data" \
   terraform-manager:local
 ```
 
-Open http://localhost:8787. To customize port, change `-p` and `TFM_PORT`.
+Open http://localhost:8890. To customize port, change `-p` and `TFM_PORT`.
 
 ### Docker Compose
 
@@ -134,7 +171,7 @@ Open http://localhost:8787. To customize port, change `-p` and `TFM_PORT`.
 docker compose up --build
 ```
 
-This mounts `knowledge/` and `data/` for persistence and serves on port 8787.
+This mounts `knowledge/` and `data/` for persistence and serves on port 8890.
 
 ### AWS ALB logging tips
 - When generating the ALB baseline, toggle **Enable ALB access logging** to create a hardened logging bucket automatically.

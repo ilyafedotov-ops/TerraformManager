@@ -74,7 +74,7 @@
 - Consider future enhancement: cookie-based session or OAuth if backend evolves.
 
 ### Integration with Python Services
-- Development: run `npm run dev -- --open` (frontend) alongside `python -m api --reload` on port 8787. Configure Vite proxy to forward `/api/*` or call absolute URLs.
+- Development: run `npm run dev -- --open` (frontend) alongside `python -m api --reload` on port 8890. Configure Vite proxy to forward `/api/*` or call absolute URLs.
 - Production: generate static build (`npm run build`) and either:
   1. Serve built assets via FastAPI’s StaticFiles mount; or
   2. Deploy separately behind a reverse proxy (document trade-offs).
