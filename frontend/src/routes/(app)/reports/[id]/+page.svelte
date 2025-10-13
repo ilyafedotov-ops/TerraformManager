@@ -3,6 +3,7 @@
 import { deleteReport, type ReportDetail, ApiError } from '$lib/api/client';
 import ReportActions from '$lib/components/reports/ReportActions.svelte';
 import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
+import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBanner.svelte';
 	import { notifyError, notifySuccess } from '$lib/stores/notifications';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
@@ -114,6 +115,8 @@ const displayedFindings = findings.slice(0, 50);
 			<span class="ml-2 text-rose-600">{error}</span>
 		</div>
 	{/if}
+
+	<ProjectWorkspaceBanner context="Correlate this report with workspace runs to access linked artifacts and history." />
 
 	{#if report}
 		<div class="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40">

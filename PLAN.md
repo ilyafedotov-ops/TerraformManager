@@ -105,6 +105,7 @@
 - **Frontend State**: introduce a SvelteKit store for active project context (`frontend/src/lib/stores/project.ts`) plus API client methods for project CRUD/run listing.
 - **Workspace UI**: redesign `(app)` shell with left-hand project navigator, multi-step run wizard (inputs → generated files → review), and accessible tabbed panels per ARIA guidance (`role="tab"` wrappers).
 - **Artifacts & Diffing**: surface generated/reviewed files inline via tree + diff viewer, with download/export actions. Persist run metadata and enable reruns that preload prior parameters.
+- ✅ Added inline workspace selector banners across generator/review/report flows, artifact upload & delete controls, and inline previews with previous-run context.
 - **Validation & Docs**: add backend tests for project/run APIs, frontend Vitest coverage for store/actions, and update `README.md` plus `docs/` to describe project workflow, noting when to reindex knowledge.
 
 ### Frontend Migration (SvelteKit)

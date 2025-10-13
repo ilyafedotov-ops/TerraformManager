@@ -3,6 +3,7 @@ import { env } from '$env/dynamic/public';
 import { deleteReport, ApiError, type ReportSummary } from '$lib/api/client';
 import ReportTable from '$lib/components/reports/ReportTable.svelte';
 import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
+import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBanner.svelte';
 import { browser } from '$app/environment';
 
 	const { data } = $props();
@@ -48,6 +49,8 @@ const apiBase = (env.PUBLIC_API_BASE ?? 'http://localhost:8890').replace(/\/$/, 
 </script>
 
 <section class="space-y-8">
+	<ProjectWorkspaceBanner context="Select a workspace to filter artifacts and contextualize saved reports." />
+
 	<RunArtifactsPanel
 		token={token}
 		title="Project artifacts"

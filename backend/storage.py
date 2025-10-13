@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import difflib
 import json
 import re
 from contextlib import contextmanager
@@ -7,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 from uuid import uuid4
+import shutil
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -17,12 +20,15 @@ from backend.db.models import (
     Setting,
     Project,
     ProjectRun,
+    GeneratedAsset,
+    GeneratedAssetVersion,
     format_timestamp,
 )
 from backend.db.session import DEFAULT_DB_PATH as _DEFAULT_DB_PATH, init_models, session_scope
 
 DEFAULT_DB_PATH = _DEFAULT_DB_PATH
 DEFAULT_PROJECTS_ROOT = Path("data/projects")
+MAX_VERSION_TEXT_BYTES = 512 * 1024
 
 
 class ProjectNotFoundError(Exception):
@@ -76,15 +82,20 @@ def _get_project_and_run_or_raise(db: Session, project_id: str, run_id: str) -> 
     return project, run
 
 
+def _resolve_project_root(project: Project, projects_root: Path | None = None) -> Path:
+    root_base = get_projects_root(projects_root)
+    project_root = Path(project.root_path) if project.root_path else root_base / project.slug
+    project_root.mkdir(parents=True, exist_ok=True)
+    return project_root
+
+
 def _ensure_run_directory(
     db: Session,
     project: Project,
     run: ProjectRun,
     projects_root: Path | None = None,
 ) -> Path:
-    root_base = get_projects_root(projects_root)
-    project_root = Path(project.root_path) if project.root_path else root_base / project.slug
-    project_root.mkdir(parents=True, exist_ok=True)
+    project_root = _resolve_project_root(project, projects_root)
     runs_root = project_root / "runs"
     runs_root.mkdir(parents=True, exist_ok=True)
 
@@ -120,6 +131,115 @@ def _resolve_artifact_path(run_dir: Path, relative_path: str | None) -> Path:
     except ValueError as exc:
         raise ArtifactPathError("artifact path escapes run directory") from exc
     return candidate
+
+
+def _normalise_tags(values: Optional[List[str]]) -> List[str]:
+    if not values:
+        return []
+    normalised: List[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        if raw is None:
+            continue
+        cleaned = raw.strip()
+        if not cleaned or cleaned in seen:
+            continue
+        normalised.append(cleaned)
+        seen.add(cleaned)
+    return normalised
+
+
+def _sanitize_storage_name(value: str) -> str:
+    candidate = Path(value).name
+    if not candidate:
+        raise ValueError("storage filename cannot be empty")
+    return candidate
+
+
+def _resolve_asset_bytes(source_path: Path | None, data: bytes | None) -> bytes:
+    if data is not None:
+        return data
+    if source_path is None:
+        raise ValueError("either 'data' or 'source_path' must be provided")
+    resolved = source_path.expanduser()
+    if not resolved.exists() or not resolved.is_file():
+        raise FileNotFoundError(str(resolved))
+    return resolved.read_bytes()
+
+
+def _create_asset_version(
+    db: Session,
+    project: Project,
+    asset: GeneratedAsset,
+    *,
+    run: ProjectRun | None,
+    report: Report | None,
+    storage_name: str,
+    content_bytes: bytes,
+    media_type: str | None,
+    notes: str | None,
+    projects_root: Path | None,
+) -> GeneratedAssetVersion:
+    version_id = str(uuid4())
+    library_dir = _ensure_library_directory(project, asset.id, version_id, projects_root)
+    destination = library_dir / storage_name
+    if destination.exists():
+        raise FileExistsError(str(destination))
+
+    checksum = hashlib.sha256(content_bytes).hexdigest()
+    with open(destination, "wb") as handle:
+        handle.write(content_bytes)
+
+    version = GeneratedAssetVersion(
+        id=version_id,
+        asset_id=asset.id,
+        project_id=project.id,
+        run_id=run.id if run else None,
+        report_id=report.id if report else None,
+        storage_path=str(destination),
+        display_path=storage_name,
+        checksum=checksum,
+        size_bytes=len(content_bytes),
+        media_type=media_type,
+        notes=notes,
+    )
+    db.add(version)
+    db.flush()
+    return version
+
+
+def _read_text_file(path: Path, *, max_bytes: int = MAX_VERSION_TEXT_BYTES) -> str:
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(str(path))
+    size = path.stat().st_size
+    if size > max_bytes:
+        raise ValueError("file too large for text preview")
+    data = path.read_bytes()
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("file is not valid UTF-8 text") from exc
+
+
+def _ensure_library_directory(
+    project: Project,
+    asset_id: str,
+    version_id: str,
+    projects_root: Path | None = None,
+) -> Path:
+    project_root = _resolve_project_root(project, projects_root)
+    library_root = project_root / "library" / asset_id / version_id
+    library_root.mkdir(parents=True, exist_ok=True)
+    return library_root
+
+
+def _get_asset_library_root(
+    project: Project,
+    asset_id: str,
+    projects_root: Path | None = None,
+) -> Path:
+    project_root = _resolve_project_root(project, projects_root)
+    return project_root / "library" / asset_id
 
 
 def create_project(
@@ -508,6 +628,388 @@ def delete_run_artifact(
         run.updated_at = datetime.now(tz=timezone.utc)
         db.flush()
         return True
+
+
+def list_generated_assets(
+    project_id: str,
+    *,
+    limit: int = 200,
+    include_versions: bool = False,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> List[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        stmt = (
+            select(GeneratedAsset)
+            .where(GeneratedAsset.project_id == project_id)
+            .order_by(GeneratedAsset.updated_at.desc())
+            .limit(limit)
+        )
+        assets = db.execute(stmt).scalars().all()
+        return [asset.to_dict(include_versions=include_versions) for asset in assets]
+
+
+def get_generated_asset(
+    asset_id: str,
+    *,
+    project_id: str | None = None,
+    include_versions: bool = True,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Optional[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        asset = db.get(GeneratedAsset, asset_id)
+        if not asset:
+            return None
+        if project_id and asset.project_id != project_id:
+            return None
+        return asset.to_dict(include_versions=include_versions)
+
+
+def register_generated_asset(
+    project_id: str,
+    *,
+    name: str,
+    asset_type: str,
+    description: str | None = None,
+    tags: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    run_id: str | None = None,
+    report_id: str | None = None,
+    storage_filename: str | None = None,
+    source_path: Path | str | None = None,
+    data: bytes | None = None,
+    media_type: str | None = None,
+    notes: str | None = None,
+    projects_root: Path | None = None,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Dict[str, Any]:
+    cleaned_name = name.strip()
+    if not cleaned_name:
+        raise ValueError("asset name cannot be empty")
+
+    cleaned_type = asset_type.strip()
+    if not cleaned_type:
+        raise ValueError("asset type cannot be empty")
+
+    tags_value = _normalise_tags(tags)
+    metadata_value = dict(metadata or {})
+    source_path_obj = Path(source_path).expanduser() if source_path else None
+
+    with _get_session(session, db_path) as db:
+        project = _get_project_or_raise(db, project_id)
+        run: ProjectRun | None = None
+        if run_id:
+            run = db.get(ProjectRun, run_id)
+            if not run or run.project_id != project.id:
+                raise ValueError(f"run '{run_id}' not found for project '{project_id}'")
+        report: Report | None = None
+        if report_id:
+            report = db.get(Report, report_id)
+            if not report:
+                raise ValueError(f"report '{report_id}' not found")
+
+        existing = db.execute(
+            select(GeneratedAsset).where(
+                GeneratedAsset.project_id == project.id,
+                GeneratedAsset.name == cleaned_name,
+            )
+        ).scalar_one_or_none()
+        if existing:
+            raise ValueError(f"asset '{cleaned_name}' already exists in project '{project_id}'")
+
+        asset = GeneratedAsset(
+            project_id=project.id,
+            name=cleaned_name,
+            description=description.strip() if description else None,
+            asset_type=cleaned_type,
+            tags=tags_value,
+            metadata=metadata_value,
+        )
+        db.add(asset)
+        db.flush()  # ensure asset.id is available
+
+        resolved_storage_name = storage_filename
+        if not resolved_storage_name:
+            if source_path_obj:
+                resolved_storage_name = source_path_obj.name
+            else:
+                resolved_storage_name = f"{_slugify(cleaned_name)}.txt"
+        storage_name = _sanitize_storage_name(resolved_storage_name)
+
+        content_bytes = _resolve_asset_bytes(source_path_obj, data)
+        version = _create_asset_version(
+            db,
+            project,
+            asset,
+            run=run,
+            report=report,
+            storage_name=storage_name,
+            content_bytes=content_bytes,
+            media_type=media_type,
+            notes=notes,
+            projects_root=projects_root,
+        )
+
+        asset.latest_version_id = version.id
+        db.flush()
+
+        payload = asset.to_dict(include_versions=True)
+        return {
+            "asset": payload,
+            "version": version.to_dict(include_blob=False),
+        }
+
+
+def add_generated_asset_version(
+    asset_id: str,
+    *,
+    project_id: str | None = None,
+    run_id: str | None = None,
+    report_id: str | None = None,
+    storage_filename: str | None = None,
+    source_path: Path | str | None = None,
+    data: bytes | None = None,
+    media_type: str | None = None,
+    notes: str | None = None,
+    promote_latest: bool = True,
+    projects_root: Path | None = None,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Dict[str, Any]:
+    source_path_obj = Path(source_path).expanduser() if source_path else None
+
+    with _get_session(session, db_path) as db:
+        asset = db.get(GeneratedAsset, asset_id)
+        if not asset:
+            raise ValueError(f"asset '{asset_id}' not found")
+        if project_id and asset.project_id != project_id:
+            raise ValueError("asset does not belong to the specified project")
+
+        project = db.get(Project, asset.project_id)
+        if not project:
+            raise ProjectNotFoundError(asset.project_id)
+
+        run: ProjectRun | None = None
+        if run_id:
+            run = db.get(ProjectRun, run_id)
+            if not run or run.project_id != project.id:
+                raise ValueError(f"run '{run_id}' not found for project '{project.id}'")
+        report: Report | None = None
+        if report_id:
+            report = db.get(Report, report_id)
+            if not report:
+                raise ValueError(f"report '{report_id}' not found")
+
+        resolved_storage_name = storage_filename
+        if not resolved_storage_name:
+            if source_path_obj:
+                resolved_storage_name = source_path_obj.name
+            elif media_type:
+                resolved_storage_name = f"{asset.id}-{uuid4().hex}"
+            else:
+                resolved_storage_name = f"{asset.id}-{uuid4().hex}.txt"
+        storage_name = _sanitize_storage_name(resolved_storage_name)
+
+        content_bytes = _resolve_asset_bytes(source_path_obj, data)
+        version = _create_asset_version(
+            db,
+            project,
+            asset,
+            run=run,
+            report=report,
+            storage_name=storage_name,
+            content_bytes=content_bytes,
+            media_type=media_type,
+            notes=notes,
+            projects_root=projects_root,
+        )
+
+        if promote_latest or not asset.latest_version_id:
+            asset.latest_version_id = version.id
+        db.flush()
+
+        payload = asset.to_dict(include_versions=True)
+        return {
+            "asset": payload,
+            "version": version.to_dict(include_blob=False),
+        }
+
+
+def delete_generated_asset_version(
+    asset_id: str,
+    version_id: str,
+    *,
+    project_id: str | None = None,
+    remove_files: bool = True,
+    projects_root: Path | None = None,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> bool:
+    with _get_session(session, db_path) as db:
+        version = db.get(GeneratedAssetVersion, version_id)
+        if not version or version.asset_id != asset_id:
+            return False
+
+        asset = db.get(GeneratedAsset, asset_id)
+        if not asset:
+            return False
+        if project_id and asset.project_id != project_id:
+            return False
+
+        project = db.get(Project, asset.project_id)
+        if not project:
+            raise ProjectNotFoundError(asset.project_id)
+
+        if remove_files and version.storage_path:
+            file_path = Path(version.storage_path).expanduser()
+            if file_path.exists():
+                file_path.unlink()
+                # remove empty parent directory (version folder)
+                try:
+                    parent_dir = file_path.parent
+                    if parent_dir.is_dir() and not any(parent_dir.iterdir()):
+                        parent_dir.rmdir()
+                except OSError:
+                    pass
+
+        db.delete(version)
+        db.flush()
+
+        if asset.latest_version_id == version_id:
+            next_version = (
+                db.execute(
+                    select(GeneratedAssetVersion)
+                    .where(GeneratedAssetVersion.asset_id == asset.id)
+                    .order_by(GeneratedAssetVersion.created_at.desc())
+                )
+                .scalars()
+                .first()
+            )
+            asset.latest_version_id = next_version.id if next_version else None
+        db.flush()
+        return True
+
+
+def delete_generated_asset(
+    asset_id: str,
+    *,
+    project_id: str | None = None,
+    remove_files: bool = False,
+    projects_root: Path | None = None,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> bool:
+    with _get_session(session, db_path) as db:
+        asset = db.get(GeneratedAsset, asset_id)
+        if not asset:
+            return False
+
+        if project_id and asset.project_id != project_id:
+            return False
+
+        project = db.get(Project, asset.project_id)
+        if not project:
+            raise ProjectNotFoundError(asset.project_id)
+
+        if remove_files:
+            asset_root = _get_asset_library_root(project, asset.id, projects_root)
+            if asset_root.exists():
+                shutil.rmtree(asset_root, ignore_errors=True)
+
+        db.delete(asset)
+        db.flush()
+        return True
+
+
+def get_generated_asset_version(
+    asset_id: str,
+    version_id: str,
+    *,
+    project_id: str | None = None,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Optional[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        asset = db.get(GeneratedAsset, asset_id)
+        if not asset:
+            return None
+        if project_id and asset.project_id != project_id:
+            return None
+        version = db.get(GeneratedAssetVersion, version_id)
+        if not version or version.asset_id != asset_id:
+            return None
+        return version.to_dict(include_blob=False)
+
+
+def get_generated_asset_version_path(
+    asset_id: str,
+    version_id: str,
+    *,
+    project_id: str | None = None,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Path:
+    with _get_session(session, db_path) as db:
+        asset = db.get(GeneratedAsset, asset_id)
+        if not asset:
+            raise ValueError("asset not found")
+        if project_id and asset.project_id != project_id:
+            raise ValueError("asset does not belong to the specified project")
+        version = db.get(GeneratedAssetVersion, version_id)
+        if not version or version.asset_id != asset_id:
+            raise ValueError("version not found for asset")
+        path = Path(version.storage_path).expanduser()
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(str(path))
+        return path
+
+
+def diff_generated_asset_versions(
+    asset_id: str,
+    base_version_id: str,
+    compare_version_id: str,
+    *,
+    project_id: str | None = None,
+    max_bytes: int = MAX_VERSION_TEXT_BYTES,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Dict[str, Any]:
+    with _get_session(session, db_path) as db:
+        asset = db.get(GeneratedAsset, asset_id)
+        if not asset:
+            raise ValueError("asset not found")
+        if project_id and asset.project_id != project_id:
+            raise ValueError("asset does not belong to the specified project")
+        base_version = db.get(GeneratedAssetVersion, base_version_id)
+        compare_version = db.get(GeneratedAssetVersion, compare_version_id)
+        if not base_version or base_version.asset_id != asset_id:
+            raise ValueError("base version not found for asset")
+        if not compare_version or compare_version.asset_id != asset_id:
+            raise ValueError("compare version not found for asset")
+
+        base_path = Path(base_version.storage_path).expanduser()
+        compare_path = Path(compare_version.storage_path).expanduser()
+        base_text = _read_text_file(base_path, max_bytes=max_bytes)
+        compare_text = _read_text_file(compare_path, max_bytes=max_bytes)
+
+        base_lines = base_text.splitlines()
+        compare_lines = compare_text.splitlines()
+        diff_lines = difflib.unified_diff(
+            base_lines,
+            compare_lines,
+            fromfile=base_version.display_path,
+            tofile=compare_version.display_path,
+            lineterm="",
+        )
+        diff_text = "\n".join(diff_lines)
+
+        return {
+            "base": base_version.to_dict(include_blob=False),
+            "compare": compare_version.to_dict(include_blob=False),
+            "diff": diff_text,
+        }
 
 
 def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:

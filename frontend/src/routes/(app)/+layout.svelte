@@ -351,32 +351,11 @@
 				</p>
 			{/if}
 
-			{#if $activeProjectRuns.length}
-				<div class="space-y-2">
-					<p class="font-semibold uppercase tracking-[0.25em] text-slate-400">Recent runs</p>
-					<ul class="space-y-1">
-						{#each $activeProjectRuns.slice(0, 5) as run (run.id)}
-							<li class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[0.7rem] leading-relaxed text-slate-600">
-								<span class="font-semibold text-slate-700">{run.label}</span>
-								<span class="ml-2 inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-[1px] text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-slate-500">
-									{run.status}
-								</span>
-								{#if run.created_at}
-									<span class="ml-1 text-slate-400">• {run.created_at}</span>
-								{/if}
-							</li>
-						{/each}
-					</ul>
-				</div>
-			{:else if $activeProject}
-				<p class="rounded-xl bg-white px-3 py-2 text-xs text-slate-500">
-					No runs yet. Start a generator or review to create the first run.
-				</p>
-{:else if $projectState.projects.length === 0 && !$projectState.loading}
-		<p class="rounded-xl bg-white px-3 py-2 text-xs text-slate-500">
-			Use the Projects page to create a workspace and start tracking runs.
-		</p>
-{/if}
+				{#if $projectState.projects.length === 0 && !$projectState.loading}
+					<p class="rounded-xl bg-white px-3 py-2 text-xs text-slate-500">
+						Use the Projects page to create a workspace and start tracking runs.
+					</p>
+				{/if}
 		</div>
 
 		<MainNav

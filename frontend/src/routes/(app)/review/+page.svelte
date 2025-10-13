@@ -6,6 +6,7 @@
     import { activeProject, projectState } from '$lib/stores/project';
     import { notifyError, notifySuccess } from '$lib/stores/notifications';
     import { onDestroy } from 'svelte';
+    import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBanner.svelte';
 
     const { data } = $props();
     const token = data.token as string | null;
@@ -149,24 +150,24 @@
         return steps;
     };
 
-    const buildRunSummary = (scanResult: Record<string, unknown> | null) => {
-        if (!scanResult) return null;
-        const summary = (scanResult.summary ?? null) as Record<string, unknown> | null;
-        if (!summary) return null;
-        const severity = summary?.severity_counts ?? null;
-        const issues = summary?.issues_found ?? null;
-        return {
-            issues_found: issues,
-            severity_counts: severity,
-            saved_report_id: scanResult.id ?? null
-        };
-    };
+	const buildRunSummary = (scanResult: Record<string, unknown> | null) => {
+		if (!scanResult) return null;
+		const summary = (scanResult.summary ?? null) as Record<string, unknown> | null;
+		if (!summary) return null;
+		const severity = summary?.severity_counts ?? null;
+		const issues = summary?.issues_found ?? null;
+		return {
+			issues_found: issues,
+			severity_counts: severity,
+			saved_report_id: scanResult.id ?? null
+		};
+	};
 
-    const recordReviewRun = async (
-        parameters: Record<string, unknown>,
-        scanResult: Record<string, unknown> | null
-    ) => {
-        if (!browser) {
+	const recordReviewRun = async (
+		parameters: Record<string, unknown>,
+		scanResult: Record<string, unknown> | null
+	) => {
+		if (!browser) {
             return;
         }
         if (!activeProjectValue) {
@@ -191,35 +192,37 @@
                 return;
             }
             const summary = buildRunSummary(scanResult);
-            const updatePayload: ProjectRunUpdatePayload = {
-                status: 'completed',
-                finished_at: new Date().toISOString(),
-                summary: summary ?? undefined
-            };
-            try {
-                const updated = await updateProjectRun(fetch, token, activeProjectValue.id, run.id, updatePayload);
-                projectState.upsertRun(activeProjectValue.id, updated);
-                notifySuccess('Review run recorded.');
-            } catch (updateError) {
-                console.warn('Failed to update review run status', updateError);
-            }
-        } catch (error) {
+			const updatePayload: ProjectRunUpdatePayload = {
+				status: 'completed',
+				finished_at: new Date().toISOString(),
+				summary: summary ?? undefined
+			};
+			try {
+				const updated = await updateProjectRun(fetch, token, activeProjectValue.id, run.id, updatePayload);
+				projectState.upsertRun(activeProjectValue.id, updated);
+				notifySuccess('Review run recorded.');
+			} catch (updateError) {
+				console.warn('Failed to update review run status', updateError);
+			}
+		} catch (error) {
             console.warn('Unable to record review run', error);
         }
     };
 </script>
 
 <section class="space-y-8">
-    <header class="space-y-3">
-        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Reviewer</p>
-        <h2 class="text-3xl font-semibold text-slate-700">Upload Terraform for analysis</h2>
-        <p class="max-w-3xl text-sm text-slate-500">
-            Drop one or more Terraform modules (individual <code class="rounded bg-slate-50 px-1 py-0.5 text-xs text-slate-600">.tf</code> files or zipped directories).
-            The backend will unpack archives, apply the configured review rules, and optionally persist the report for later lookup.
-        </p>
-    </header>
+	<header class="space-y-3">
+		<p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Reviewer</p>
+		<h2 class="text-3xl font-semibold text-slate-700">Upload Terraform for analysis</h2>
+		<p class="max-w-3xl text-sm text-slate-500">
+			Drop one or more Terraform modules (individual <code class="rounded bg-slate-50 px-1 py-0.5 text-xs text-slate-600">.tf</code> files or zipped directories).
+			The backend will unpack archives, apply the configured review rules, and optionally persist the report for later lookup.
+		</p>
+	</header>
 
-    <ScanForm
+	<ProjectWorkspaceBanner context="Review runs are logged to your active workspace alongside generator history and artifacts." />
+
+	<ScanForm
         steps={getSteps()}
         bind:files
         bind:terraformValidate

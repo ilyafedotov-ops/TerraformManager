@@ -28,6 +28,7 @@
     import type { ServiceBusPreset } from '$lib/components/generate/models';
     import { token as authTokenStore } from '$lib/stores/auth';
     import { activeProject, projectState } from '$lib/stores/project';
+    import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBanner.svelte';
     import type { PageData } from './$types';
 
     const { data } = $props<{ data: PageData }>();
@@ -1057,6 +1058,8 @@
             codebase or downloaded as a `.tf` file.
         </p>
     </header>
+
+    <ProjectWorkspaceBanner context="Generator runs and artifacts from this page are recorded under your active workspace." />
 
     <ol class="grid gap-3 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-300/20" aria-label="Terraform generation steps">
         {#each wizardSteps as step, index}

@@ -8,11 +8,13 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Integer,
     JSON,
     String,
     Text,
     func,
     Index,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -224,6 +226,11 @@ class Project(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    assets: Mapped[List["GeneratedAsset"]] = relationship(  # type: ignore[name-defined]
+        back_populates="project",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     def to_dict(self, include_metadata: bool = True) -> Dict[str, Any]:
         payload = dict(self.project_metadata or {}) if include_metadata else None
@@ -284,6 +291,108 @@ class ProjectRun(Base):
             "finished_at": format_timestamp(self.finished_at),
         }
 
+
+class GeneratedAsset(Base):
+    __tablename__ = "generated_assets"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    asset_type: Mapped[str] = mapped_column(String(48), nullable=False, default="artifact")
+    tags: Mapped[List[str]] = mapped_column(JSON, nullable=False, default=list)
+    metadata: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    latest_version_id: Mapped[str | None] = mapped_column(String, ForeignKey("generated_asset_versions.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+        server_onupdate=func.current_timestamp(),
+    )
+
+    project: Mapped[Project] = relationship(back_populates="assets")
+    versions: Mapped[List["GeneratedAssetVersion"]] = relationship(  # type: ignore[name-defined]
+        back_populates="asset",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="GeneratedAssetVersion.created_at.desc()",
+    )
+    latest_version: Mapped["GeneratedAssetVersion | None"] = relationship(  # type: ignore[name-defined]
+        back_populates="asset_latest",
+        foreign_keys="GeneratedAsset.latest_version_id",
+        post_update=True,
+        uselist=False,
+    )
+
+    __table_args__ = (UniqueConstraint("project_id", "name", name="uq_generated_asset_project_name"),)
+
+    def to_dict(self, include_versions: bool = False) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "id": self.id,
+            "project_id": self.project_id,
+            "name": self.name,
+            "description": self.description,
+            "asset_type": self.asset_type,
+            "tags": list(self.tags or []),
+            "metadata": dict(self.metadata or {}),
+            "latest_version_id": self.latest_version_id,
+            "created_at": format_timestamp(self.created_at),
+            "updated_at": format_timestamp(self.updated_at),
+        }
+        if include_versions:
+            payload["versions"] = [version.to_dict(include_blob=False) for version in self.versions]
+        return payload
+
+
+class GeneratedAssetVersion(Base):
+    __tablename__ = "generated_asset_versions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    asset_id: Mapped[str] = mapped_column(String, ForeignKey("generated_assets.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str | None] = mapped_column(String, ForeignKey("project_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    report_id: Mapped[str | None] = mapped_column(String, ForeignKey("reports.id", ondelete="SET NULL"), nullable=True, index=True)
+    storage_path: Mapped[str] = mapped_column(String, nullable=False)
+    display_path: Mapped[str] = mapped_column(String, nullable=False)
+    checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    media_type: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+    )
+
+    asset: Mapped[GeneratedAsset] = relationship(back_populates="versions")
+    asset_latest: Mapped[GeneratedAsset] = relationship(back_populates="latest_version", foreign_keys="GeneratedAsset.latest_version_id")
+    project: Mapped[Project] = relationship()
+    run: Mapped[ProjectRun | None] = relationship()
+    report: Mapped[Report | None] = relationship()
+
+    def to_dict(self, include_blob: bool = False) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "id": self.id,
+            "asset_id": self.asset_id,
+            "project_id": self.project_id,
+            "run_id": self.run_id,
+            "report_id": self.report_id,
+            "storage_path": self.storage_path,
+            "display_path": self.display_path,
+            "checksum": self.checksum,
+            "size_bytes": self.size_bytes,
+            "media_type": self.media_type,
+            "notes": self.notes,
+            "created_at": format_timestamp(self.created_at),
+        }
+        if include_blob:
+            payload["content"] = None
+        return payload
 
 
 def format_timestamp(value: Optional[datetime]) -> Optional[str]:

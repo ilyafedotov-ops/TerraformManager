@@ -148,6 +148,72 @@ export interface ArtifactEntry {
 	modified_at?: string | null;
 }
 
+export interface GeneratedAssetVersionSummary {
+	id: string;
+	asset_id: string;
+	project_id: string;
+	run_id?: string | null;
+	report_id?: string | null;
+	storage_path: string;
+	display_path: string;
+	checksum?: string | null;
+	size_bytes?: number | null;
+	media_type?: string | null;
+	notes?: string | null;
+	created_at?: string | null;
+}
+
+export interface GeneratedAssetSummary {
+	id: string;
+	project_id: string;
+	name: string;
+	description?: string | null;
+	asset_type: string;
+	tags: string[];
+	metadata: Record<string, unknown>;
+	latest_version_id?: string | null;
+	created_at?: string | null;
+	updated_at?: string | null;
+	versions?: GeneratedAssetVersionSummary[] | null;
+}
+
+export interface GeneratedAssetRegisterResponse {
+	asset: GeneratedAssetSummary;
+	version: GeneratedAssetVersionSummary;
+}
+
+export interface GeneratedAssetDiffResponse {
+	base: GeneratedAssetVersionSummary;
+	compare: GeneratedAssetVersionSummary;
+	diff: string;
+}
+
+export interface GeneratedAssetCreatePayload {
+	name: string;
+	asset_type: string;
+	description?: string | null;
+	tags?: string[];
+	metadata?: Record<string, unknown>;
+	run_id?: string | null;
+	report_id?: string | null;
+	artifact_path?: string | null;
+	storage_filename?: string | null;
+	media_type?: string | null;
+	notes?: string | null;
+	content_base64?: string | null;
+}
+
+export interface GeneratedAssetVersionCreatePayload {
+	run_id?: string | null;
+	report_id?: string | null;
+	artifact_path?: string | null;
+	storage_filename?: string | null;
+	media_type?: string | null;
+	notes?: string | null;
+	content_base64?: string | null;
+	promote_latest?: boolean;
+}
+
 function buildUrl(path: string, searchParams?: ApiRequestOptions['searchParams']): string {
     const url = new URL(path.startsWith('/') ? path : `/${path}`, API_BASE);
 	if (searchParams) {
@@ -880,6 +946,122 @@ export async function downloadRunArtifact(
 		throw new ApiError(`Failed to download artifact (${response.status})`, response.status, detail);
 	}
 	return response;
+}
+
+export async function listProjectLibrary(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	includeVersions = false
+): Promise<GeneratedAssetSummary[]> {
+	return apiFetch(fetchFn, `/projects/${projectId}/library`, {
+		token,
+		searchParams: includeVersions ? { include_versions: 'true' } : undefined
+	});
+}
+
+export async function getProjectLibraryAsset(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	assetId: string,
+	includeVersions = true
+): Promise<GeneratedAssetSummary> {
+	return apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}`, {
+		token,
+		searchParams: includeVersions ? { include_versions: 'true' } : undefined
+	});
+}
+
+export async function registerProjectLibraryAsset(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	payload: GeneratedAssetCreatePayload
+): Promise<GeneratedAssetRegisterResponse> {
+	return apiFetch(fetchFn, `/projects/${projectId}/library`, {
+		method: 'POST',
+		token,
+		body: payload
+	});
+}
+
+export async function addProjectLibraryAssetVersion(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	assetId: string,
+	payload: GeneratedAssetVersionCreatePayload
+): Promise<GeneratedAssetRegisterResponse> {
+	return apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}/versions`, {
+		method: 'POST',
+		token,
+		body: payload
+	});
+}
+
+export async function deleteProjectLibraryAssetVersion(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	assetId: string,
+	versionId: string,
+	removeFiles = true
+): Promise<void> {
+	await apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}/versions/${versionId}`, {
+		method: 'DELETE',
+		token,
+		searchParams: removeFiles ? { remove_files: 'true' } : undefined
+	});
+}
+
+export async function deleteProjectLibraryAsset(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	assetId: string,
+	removeFiles = false
+): Promise<void> {
+	await apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}`, {
+		method: 'DELETE',
+		token,
+		searchParams: removeFiles ? { remove_files: 'true' } : undefined
+	});
+}
+
+export async function downloadProjectLibraryAssetVersion(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	assetId: string,
+	versionId: string
+): Promise<Response> {
+	const url = new URL(`/projects/${projectId}/library/${assetId}/versions/${versionId}/download`, API_BASE);
+	const response = await fetchFn(url.toString(), {
+		method: 'GET',
+		headers: {
+			Authorization: `Bearer ${token}`
+		}
+	});
+	if (!response.ok) {
+		const detail = await response.text();
+		throw new ApiError(`Failed to download library asset version (${response.status})`, response.status, detail);
+	}
+	return response;
+}
+
+export async function diffProjectLibraryAssetVersions(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	assetId: string,
+	versionId: string,
+	againstVersionId: string
+): Promise<GeneratedAssetDiffResponse> {
+	return apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}/versions/${versionId}/diff`, {
+		token,
+		searchParams: { against: againstVersionId }
+	});
 }
 
 export interface ConfigPreviewPayload {
