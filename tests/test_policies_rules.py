@@ -37,6 +37,14 @@ from backend.policies.azure import (
     check_key_vault_network,
     check_diagnostic_settings,
     check_backend_azurerm_state,
+    check_servicebus_identity,
+    check_servicebus_diagnostics,
+    check_servicebus_private_endpoint,
+    check_function_app_https,
+    check_function_app_ftps_disabled,
+    check_function_app_diagnostics,
+    check_api_management_tls,
+    check_api_management_private_network,
 )
 from backend.policies.k8s import (
     check_image_not_latest,
@@ -178,6 +186,239 @@ class PolicyRuleTests(unittest.TestCase):
             """
         )
         findings = check_backend_azurerm_state(Path("backend.tf"), text)
+        self.assertEqual(len(findings), 0)
+
+    def test_servicebus_identity_missing(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_servicebus_namespace" "sb" {
+              name = "sb-prod"
+            }
+            """
+        )
+        findings = check_servicebus_identity(Path("servicebus.tf"), text)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["rule_id"], "AZ-SERVICEBUS-IDENTITY")
+
+    def test_servicebus_identity_present(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_servicebus_namespace" "sb" {
+              name = "sb-prod"
+
+              identity {
+                type = "SystemAssigned"
+              }
+            }
+            """
+        )
+        findings = check_servicebus_identity(Path("servicebus.tf"), text)
+        self.assertEqual(len(findings), 0)
+
+    def test_servicebus_diagnostics_missing(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_servicebus_namespace" "sb" {
+              name = "sb-prod"
+            }
+            """
+        )
+        findings = check_servicebus_diagnostics(Path("servicebus.tf"), text)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["rule_id"], "AZ-SERVICEBUS-DIAGNOSTICS")
+
+    def test_servicebus_diagnostics_present(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_servicebus_namespace" "sb" {
+              name = "sb-prod"
+            }
+
+            resource "azurerm_monitor_diagnostic_setting" "sb_diag" {
+              target_resource_id         = azurerm_servicebus_namespace.sb.id
+              log_analytics_workspace_id = "workspace-id"
+            }
+            """
+        )
+        findings = check_servicebus_diagnostics(Path("servicebus.tf"), text)
+        self.assertEqual(len(findings), 0)
+
+    def test_servicebus_private_endpoint_missing(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_servicebus_namespace" "sb" {
+              name = "sb-prod"
+            }
+            """
+        )
+        findings = check_servicebus_private_endpoint(Path("servicebus.tf"), text)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["rule_id"], "AZ-SERVICEBUS-PRIVATE-ENDPOINT")
+
+    def test_servicebus_private_endpoint_present(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_servicebus_namespace" "sb" {
+              name = "sb-prod"
+            }
+
+            resource "azurerm_private_endpoint" "sb_pe" {
+              private_service_connection {
+                private_connection_resource_id = azurerm_servicebus_namespace.sb.id
+              }
+            }
+            """
+        )
+        findings = check_servicebus_private_endpoint(Path("servicebus.tf"), text)
+        self.assertEqual(len(findings), 0)
+
+    def test_function_app_https_missing(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_linux_function_app" "app" {
+              name = "app-prod"
+              site_config {}
+            }
+            """
+        )
+        findings = check_function_app_https(Path("function.tf"), text)
+        self.assertEqual(len(findings), 1)
+        finding = findings[0]
+        self.assertEqual(finding["rule_id"], "AZ-FUNCTION-HTTPS")
+        self.assertIn("https_only", finding["context"]["missing"])
+
+    def test_function_app_https_enforced(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_linux_function_app" "app" {
+              name       = "app-prod"
+              https_only = true
+
+              site_config {
+                minimum_tls_version = "1.2"
+              }
+            }
+            """
+        )
+        findings = check_function_app_https(Path("function.tf"), text)
+        self.assertEqual(len(findings), 0)
+
+    def test_function_app_ftps_disabled_missing(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_linux_function_app" "app" {
+              name       = "app-prod"
+              https_only = true
+
+              site_config {
+                ftps_state = "AllAllowed"
+                minimum_tls_version = "1.2"
+              }
+            }
+            """
+        )
+        findings = check_function_app_ftps_disabled(Path("function.tf"), text)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["rule_id"], "AZ-FUNCTION-FTPS-DISABLED")
+
+    def test_function_app_ftps_disabled_ok(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_linux_function_app" "app" {
+              name       = "app-prod"
+              https_only = true
+
+              site_config {
+                minimum_tls_version = "1.2"
+                ftps_state          = "Disabled"
+              }
+            }
+            """
+        )
+        findings = check_function_app_ftps_disabled(Path("function.tf"), text)
+        self.assertEqual(len(findings), 0)
+
+    def test_function_app_diagnostics_missing(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_linux_function_app" "app" {
+              name = "app-prod"
+            }
+            """
+        )
+        findings = check_function_app_diagnostics(Path("function.tf"), text)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["rule_id"], "AZ-FUNCTION-DIAGNOSTICS")
+
+    def test_function_app_diagnostics_present(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_linux_function_app" "app" {
+              name = "app-prod"
+            }
+
+            resource "azurerm_monitor_diagnostic_setting" "app_diag" {
+              name                       = "app-prod-diag"
+              target_resource_id         = azurerm_linux_function_app.app.id
+              log_analytics_workspace_id = "workspace-id"
+            }
+            """
+        )
+        findings = check_function_app_diagnostics(Path("function.tf"), text)
+        self.assertEqual(len(findings), 0)
+
+    def test_api_management_tls_missing(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_api_management" "apim" {
+              name = "apim-prod"
+            }
+            """
+        )
+        findings = check_api_management_tls(Path("apim.tf"), text)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["rule_id"], "AZ-APIM-TLS12")
+
+    def test_api_management_tls_present(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_api_management" "apim" {
+              name = "apim-prod"
+
+              custom_properties = {
+                "Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Protocols.Tls10" = "false"
+                "Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Protocols.Tls11" = "false"
+              }
+            }
+            """
+        )
+        findings = check_api_management_tls(Path("apim.tf"), text)
+        self.assertEqual(len(findings), 0)
+
+    def test_api_management_private_network_missing(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_api_management" "apim" {
+              name                = "apim-prod"
+              virtual_network_type = "None"
+            }
+            """
+        )
+        findings = check_api_management_private_network(Path("apim.tf"), text)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["rule_id"], "AZ-APIM-PRIVATE-NETWORK")
+
+    def test_api_management_private_network_present(self) -> None:
+        text = textwrap.dedent(
+            """
+            resource "azurerm_api_management" "apim" {
+              name                 = "apim-prod"
+              virtual_network_type = "Internal"
+              subnet_id            = "/subscriptions/example/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet/subnets/apim"
+            }
+            """
+        )
+        findings = check_api_management_private_network(Path("apim.tf"), text)
         self.assertEqual(len(findings), 0)
 
     def test_cloudwatch_log_group_retention_missing(self) -> None:

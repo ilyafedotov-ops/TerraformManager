@@ -461,6 +461,321 @@ def check_diagnostic_settings(file: Path, text: str) -> List[Dict[str, Any]]:
     return findings
 
 
+def check_servicebus_identity(file: Path, text: str) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    for match in re.finditer(r'resource\s+"azurerm_servicebus_namespace"\s+"([^"]+)"\s*{', text):
+        name = match.group(1)
+        block = text[match.start(): match.start() + 4000]
+        identity = re.search(r'identity\s*{[^}]*type\s*=\s*"([^"]+)"', block, re.DOTALL)
+        if not identity:
+            findings.append(
+                make_candidate(
+                    "AZ-SERVICEBUS-IDENTITY",
+                    file,
+                    line=find_line_number(text, match.group(0)),
+                    context={"resource": name},
+                    snippet=block[:200],
+                    suggested_fix_snippet='identity {\n  type = "SystemAssigned"\n}\n',
+                    unique_id=f"AZ-SERVICEBUS-IDENTITY::{name}",
+                )
+            )
+            continue
+        identity_type = identity.group(1).strip().lower()
+        if identity_type == "none":
+            findings.append(
+                make_candidate(
+                    "AZ-SERVICEBUS-IDENTITY",
+                    file,
+                    line=find_line_number(text, identity.group(0)),
+                    context={"resource": name},
+                    snippet=identity.group(0),
+                    suggested_fix_snippet='identity {\n  type = "SystemAssigned"\n}\n',
+                    unique_id=f"AZ-SERVICEBUS-IDENTITY::{name}",
+                )
+            )
+    return findings
+
+
+def check_servicebus_diagnostics(file: Path, text: str) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    namespaces = [match.group(1) for match in re.finditer(r'resource\s+"azurerm_servicebus_namespace"\s+"([^"]+)"\s*{', text)]
+    if not namespaces:
+        return findings
+
+    covered: Set[str] = set()
+    for match in re.finditer(r'resource\s+"azurerm_monitor_diagnostic_setting"\s+"([^"]+)"\s*{', text):
+        block = text[match.start(): match.start() + 4000]
+        target = re.search(r'target_resource_id\s*=\s*azurerm_servicebus_namespace\.([A-Za-z0-9_]+)\.id', block)
+        has_workspace = re.search(r'log_analytics_workspace_id\s*=\s*', block)
+        if target and has_workspace:
+            covered.add(target.group(1))
+
+    for name in namespaces:
+        if name in covered:
+            continue
+        snippet_match = re.search(rf'resource\s+"azurerm_servicebus_namespace"\s+"{re.escape(name)}"\s*{{', text)
+        snippet = snippet_match.group(0) if snippet_match else ""
+        findings.append(
+            make_candidate(
+                "AZ-SERVICEBUS-DIAGNOSTICS",
+                file,
+                line=find_line_number(text, snippet) if snippet else 1,
+                context={"resource": name},
+                snippet=snippet,
+                suggested_fix_snippet=f'resource "azurerm_monitor_diagnostic_setting" "{name}_diag" {{\n  target_resource_id         = azurerm_servicebus_namespace.{name}.id\n  log_analytics_workspace_id = azurerm_log_analytics_workspace.example.id\n}}\n',
+                unique_id=f"AZ-SERVICEBUS-DIAGNOSTICS::{name}",
+            )
+        )
+    return findings
+
+
+def check_servicebus_private_endpoint(file: Path, text: str) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    namespaces = [match.group(1) for match in re.finditer(r'resource\s+"azurerm_servicebus_namespace"\s+"([^"]+)"\s*{', text)]
+    if not namespaces:
+        return findings
+
+    namespaces_with_private_endpoint: Set[str] = set()
+    for match in re.finditer(r'resource\s+"azurerm_private_endpoint"\s+"([^"]+)"\s*{', text):
+        block = text[match.start(): match.start() + 4000]
+        target = re.search(r'private_connection_resource_id\s*=\s*azurerm_servicebus_namespace\.([A-Za-z0-9_]+)\.id', block)
+        if target:
+            namespaces_with_private_endpoint.add(target.group(1))
+
+    for name in namespaces:
+        if name in namespaces_with_private_endpoint:
+            continue
+        namespace_match = re.search(rf'resource\s+"azurerm_servicebus_namespace"\s+"{re.escape(name)}"\s*{{', text)
+        snippet = namespace_match.group(0) if namespace_match else ""
+        findings.append(
+            make_candidate(
+                "AZ-SERVICEBUS-PRIVATE-ENDPOINT",
+                file,
+                line=find_line_number(text, snippet) if snippet else 1,
+                context={"resource": name},
+                snippet=snippet,
+                suggested_fix_snippet=f'resource "azurerm_private_endpoint" "{name}_pe" {{\n  private_service_connection {{\n    private_connection_resource_id = azurerm_servicebus_namespace.{name}.id\n    subresource_names              = ["namespace"]\n  }}\n}}\n',
+                unique_id=f"AZ-SERVICEBUS-PRIVATE-ENDPOINT::{name}",
+            )
+        )
+    return findings
+
+
+FUNCTION_APP_PATTERN = re.compile(r'resource\s+"azurerm_(linux_)?function_app"\s+"([^"]+)"\s*{')
+
+
+def _function_app_blocks(text: str) -> List[Dict[str, Any]]:
+    blocks: List[Dict[str, Any]] = []
+    for match in FUNCTION_APP_PATTERN.finditer(text):
+        resource_type = "azurerm_linux_function_app" if match.group(1) else "azurerm_function_app"
+        name = match.group(2)
+        brace_index = text.find("{", match.start())
+        if brace_index == -1:
+            continue
+        block = extract_block(text, brace_index)
+        blocks.append(
+            {
+                "resource_type": resource_type,
+                "name": name,
+                "block": block,
+                "match": match,
+            }
+        )
+    return blocks
+
+
+def check_function_app_https(file: Path, text: str) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    for item in _function_app_blocks(text):
+        block = item["block"]
+        name = item["name"]
+        resource_type = item["resource_type"]
+        https_only = re.search(r'https_only\s*=\s*(true|false)', block)
+        https_ok = https_only and https_only.group(1) == "true"
+
+        site_config_match = re.search(r'site_config\s*{', block)
+        tls_ok = False
+        if site_config_match:
+            site_block = extract_block(block, site_config_match.end() - 1)
+            tls_match = re.search(r'minimum_tls_version\s*=\s*"([^"]+)"', site_block)
+            if tls_match and tls_match.group(1) in {"1.2", "1.3"}:
+                tls_ok = True
+
+        if https_ok and tls_ok:
+            continue
+
+        snippet = block[:200]
+        missing_parts = []
+        if not https_ok:
+            missing_parts.append("https_only")
+        if not tls_ok:
+            missing_parts.append("minimum_tls_version")
+
+        findings.append(
+            make_candidate(
+                "AZ-FUNCTION-HTTPS",
+                file,
+                line=find_line_number(text, item["match"].group(0)),
+                context={"resource": name, "resource_type": resource_type, "missing": ", ".join(missing_parts)},
+                snippet=snippet,
+                suggested_fix_snippet='https_only = true\nsite_config {\n  minimum_tls_version = "1.2"\n}\n',
+                unique_id=f"AZ-FUNCTION-HTTPS::{name}",
+            )
+        )
+    return findings
+
+
+def check_function_app_ftps_disabled(file: Path, text: str) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    for item in _function_app_blocks(text):
+        block = item["block"]
+        name = item["name"]
+        resource_type = item["resource_type"]
+
+        site_config_match = re.search(r'site_config\s*{', block)
+        if not site_config_match:
+            findings.append(
+                make_candidate(
+                    "AZ-FUNCTION-FTPS-DISABLED",
+                    file,
+                    line=find_line_number(text, item["match"].group(0)),
+                    context={"resource": name, "resource_type": resource_type, "missing": "site_config/ftps_state"},
+                    snippet=block[:200],
+                    suggested_fix_snippet='site_config {\n  ftps_state = "Disabled"\n}\n',
+                    unique_id=f"AZ-FUNCTION-FTPS-DISABLED::{name}",
+                )
+            )
+            continue
+
+        site_block = extract_block(block, site_config_match.end() - 1)
+        ftps_match = re.search(r'ftps_state\s*=\s*"([^"]+)"', site_block)
+        if ftps_match and ftps_match.group(1).lower() == "disabled":
+            continue
+
+        snippet = site_block[:200]
+        findings.append(
+            make_candidate(
+                "AZ-FUNCTION-FTPS-DISABLED",
+                file,
+                line=find_line_number(text, site_config_match.group(0)),
+                context={"resource": name, "resource_type": resource_type},
+                snippet=snippet,
+                suggested_fix_snippet='ftps_state = "Disabled"\n',
+                unique_id=f"AZ-FUNCTION-FTPS-DISABLED::{name}",
+            )
+        )
+    return findings
+
+
+def check_function_app_diagnostics(file: Path, text: str) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    function_apps = {item["name"]: item for item in _function_app_blocks(text)}
+    if not function_apps:
+        return findings
+
+    covered: Set[str] = set()
+    for match in re.finditer(r'resource\s+"azurerm_monitor_diagnostic_setting"\s+"([^"]+)"\s*{', text):
+        block = text[match.start(): match.start() + 4000]
+        target = re.search(r'target_resource_id\s*=\s*azurerm_(?:linux_)?function_app\.([A-Za-z0-9_]+)\.id', block)
+        has_workspace = "log_analytics_workspace_id" in block
+        if target and has_workspace:
+            covered.add(target.group(1))
+
+    for name, item in function_apps.items():
+        if name in covered:
+            continue
+        resource_type = item["resource_type"]
+        snippet = item["block"][:160]
+        findings.append(
+            make_candidate(
+                "AZ-FUNCTION-DIAGNOSTICS",
+                file,
+                line=find_line_number(text, item["match"].group(0)),
+                context={"resource": name},
+                snippet=snippet,
+                suggested_fix_snippet=f'resource "azurerm_monitor_diagnostic_setting" "{name}_diag" {{\n  target_resource_id         = {resource_type}.{name}.id\n  log_analytics_workspace_id = azurerm_log_analytics_workspace.example.id\n}}\n',
+                unique_id=f"AZ-FUNCTION-DIAGNOSTICS::{name}",
+            )
+        )
+    return findings
+
+
+def check_api_management_tls(file: Path, text: str) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    for match in re.finditer(r'resource\s+"azurerm_api_management"\s+"([^"]+)"\s*{', text):
+        name = match.group(1)
+        brace_index = text.find("{", match.start())
+        if brace_index == -1:
+            continue
+        block = extract_block(text, brace_index)
+        properties_match = re.search(r'custom_properties\s*=\s*{', block)
+        tls10 = tls11 = False
+        if properties_match:
+            properties_block = extract_block(block, properties_match.end() - 1)
+            tls10_match = re.search(
+                r'"Microsoft\.WindowsAzure\.ApiManagement\.Gateway\.Security\.Protocols\.Tls10"\s*=\s*"([^"]+)"',
+                properties_block,
+            )
+            tls11_match = re.search(
+                r'"Microsoft\.WindowsAzure\.ApiManagement\.Gateway\.Security\.Protocols\.Tls11"\s*=\s*"([^"]+)"',
+                properties_block,
+            )
+            tls10 = bool(tls10_match and tls10_match.group(1).lower() == "false")
+            tls11 = bool(tls11_match and tls11_match.group(1).lower() == "false")
+        if tls10 and tls11:
+            continue
+        snippet = block[:200]
+        findings.append(
+            make_candidate(
+                "AZ-APIM-TLS12",
+                file,
+                line=find_line_number(text, match.group(0)),
+                context={"resource": name},
+                snippet=snippet,
+                suggested_fix_snippet='custom_properties = {\n  "Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Protocols.Tls10" = "false"\n  "Microsoft.WindowsAzure.ApiManagement.Gateway.Security.Protocols.Tls11" = "false"\n}\n',
+                unique_id=f"AZ-APIM-TLS12::{name}",
+            )
+        )
+    return findings
+
+
+def check_api_management_private_network(file: Path, text: str) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    for match in re.finditer(r'resource\s+"azurerm_api_management"\s+"([^"]+)"\s*{', text):
+        name = match.group(1)
+        brace_index = text.find("{", match.start())
+        if brace_index == -1:
+            continue
+        block = extract_block(text, brace_index)
+        vnet_type_match = re.search(r'virtual_network_type\s*=\s*"([^"]+)"', block)
+        vnet_type = vnet_type_match.group(1) if vnet_type_match else None
+        subnet_match = re.search(r'subnet_id\s*=\s*"([^"]+)"', block)
+        private_enabled = vnet_type and vnet_type not in {"None", "none"}
+        subnet_present = subnet_match and subnet_match.group(1).strip()
+        if private_enabled and subnet_present:
+            continue
+
+        snippet = block[:200]
+        missing = []
+        if not private_enabled:
+            missing.append("virtual_network_type")
+        if private_enabled and not subnet_present:
+            missing.append("subnet_id")
+
+        findings.append(
+            make_candidate(
+                "AZ-APIM-PRIVATE-NETWORK",
+                file,
+                line=find_line_number(text, match.group(0)),
+                context={"resource": name, "missing": ", ".join(missing) if missing else "virtual network configuration"},
+                snippet=snippet,
+                suggested_fix_snippet='virtual_network_type = "Internal"\nvirtual_network_configuration {\n  subnet_id = "/subscriptions/.../subnets/apim-private"\n}\n',
+                unique_id=f"AZ-APIM-PRIVATE-NETWORK::{name}",
+            )
+        )
+    return findings
+
+
 CHECKS = [
     check_storage_https,
     check_storage_blob_public,
@@ -476,4 +791,12 @@ CHECKS = [
     check_key_vault_purge_protection,
     check_key_vault_network,
     check_diagnostic_settings,
+    check_servicebus_identity,
+    check_servicebus_diagnostics,
+    check_servicebus_private_endpoint,
+    check_function_app_https,
+    check_function_app_ftps_disabled,
+    check_function_app_diagnostics,
+    check_api_management_tls,
+    check_api_management_private_network,
 ]

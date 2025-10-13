@@ -266,7 +266,11 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 									{#each driftResourceChanges as change}
 										<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
 											<p class="font-semibold text-slate-700">{(change?.address as string) ?? 'Unknown resource'}</p>
-											<p class="text-slate-500">Action: {(change?.action as string) ?? (change?.actions?.join(', ') ?? '—')}</p>
+											<p class="text-slate-500">
+												Action:
+												{change?.action ??
+												(Array.isArray(change?.actions) ? change.actions.join(', ') : '—')}
+											</p>
 										</div>
 									{/each}
 								</div>
@@ -280,13 +284,15 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 									{#each driftOutputChanges as output}
 										<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
 											<p class="font-semibold text-slate-700">{output?.name ?? 'output'}</p>
-											<p class="text-slate-500">Actions: {(output?.actions as string[] | undefined)?.join(', ') ?? '—'}</p>
+											<p class="text-slate-500">
+												Actions:
+												{Array.isArray(output?.actions) ? output.actions.join(', ') : '—'}
+											</p>
 										</div>
 									{/each}
 								</div>
 							</details>
 						{/if}
-					{/else}
 				{/if}
 			</section>
 			{/if}
@@ -295,9 +301,7 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 				<p class="font-medium text-slate-700">Findings preview</p>
 				{#if findingCount}
 					<p class="mt-2">
-						Inline filtering and diff previews will surface here. In the interim, use the HTML button above or call
-						<code class="rounded bg-slate-50 px-1 py-0.5 text-xs text-slate-600">GET /ui/reports/{params.id}/viewer</code> to interact with the
-						legacy viewer.
+						Inline filtering and diff previews will surface here. The retired FastAPI viewer has been replaced by direct exports, so use the JSON/CSV/HTML buttons above until the Svelte findings grid lands.
 					</p>
 				{:else}
 					<p class="mt-2">Great news—no active findings recorded for this run.</p>

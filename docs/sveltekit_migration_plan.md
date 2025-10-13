@@ -1,6 +1,7 @@
 # SvelteKit + TypeScript Migration Plan
 
 ## Goals and Guardrails
+- Update (2024-XX-XX): The legacy FastAPI/Jinja UI has been fully decommissioned; SvelteKit now owns the interactive surface. The remaining sections outline historical context and migration checkpoints.
 - Replace the Streamlit UI (`app.py`) and FastAPI/Jinja HTML (`api/ui.py`, `ui/templates/…`) with a single SvelteKit + TypeScript front end while retaining the existing Python backend.
 - Preserve feature parity for the Generate, Review, Knowledge, Reports, Configs, Settings, and new Auth pages documented in `README.md` and required for future enhancements.
 - Adopt the [Notus Svelte](https://www.creative-tim.com/learning-lab/svelte/overview/notus) design system as the baseline theme for page layouts, navigation, typography, and form components. Customize tokens minimally to align with existing TerraformManager branding.
@@ -15,14 +16,14 @@
 - Review tab persists uploaded files under `.uploads/`, optionally shells out to `terraform validate`, and renders findings with remediation/AI details.
 - Knowledge tab performs local TF-IDF retrieval (`backend.rag.retrieve`) and renders results inline.
 
-### FastAPI + Jinja (`api/ui.py`, `ui/templates/…`)
+### FastAPI + Jinja (`api/ui.py`, `ui/templates/…`) _(retired)_
 - Routes for dashboard, scan workflow, configs, reports, report viewer, knowledge sync, and LLM settings—all rendered server-side with HTMX enhancements.
-- Uses shared CSS (`ui/static/app.css`) and Tailwind-inspired utility classes embedded in templates.
+- Used shared CSS (`ui/static/app.css`) and Tailwind-inspired utility classes embedded in templates.
 - Javascript snippets trigger `/scan`, `/configs/*`, `/knowledge/sync`, etc., via fetch/HTMX calls to FastAPI JSON endpoints (`api/main.py`).
 - Authentication (optional API token) is handled manually via localStorage -> Authorization header for HTMX/fetch requests.
 
 ### Shared Assets
-- Icons, logos, and styling tokens under `ui/static/`.
+- (Legacy) Icons, logos, and styling tokens formerly stored under `ui/static/`.
 - Markdown knowledge articles (`knowledge/`) indexed by Python services.
 - Sample Terraform fixtures under `sample/` used both in Streamlit and API flows.
 

@@ -202,7 +202,11 @@ const driftHasChanges = Boolean((driftSummary as { has_changes?: boolean } | nul
                             {#each driftResourceChanges as change}
                                 <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
                                     <p class="font-semibold text-slate-700">{(change?.address as string) ?? 'Unknown resource'}</p>
-                                    <p class="text-slate-500">Action: {(change?.action as string) ?? (change?.actions?.join(', ') ?? '—')}</p>
+                                    <p class="text-slate-500">
+                                        Action:
+                                        {change?.action ??
+                                        (Array.isArray(change?.actions) ? change.actions.join(', ') : '—')}
+                                    </p>
                                 </div>
                             {/each}
                         </div>

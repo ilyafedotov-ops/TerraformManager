@@ -10,7 +10,9 @@ terraform {
 }
 {% endif %}
 
-provider "azurerm" { features {} }
+provider "azurerm" {
+  features {}
+}
 
 resource "azurerm_resource_group" "{{ rg_name }}" {
   name     = "{{ rg_actual_name }}"
