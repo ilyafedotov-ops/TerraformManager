@@ -6,7 +6,8 @@ TerraformManager combines a SvelteKit dashboard, FastAPI API, and reusable backe
 - Guided Terraform generators and blueprint bundles for AWS, Azure, and Kubernetes workloads.
 - Policy scanning with autofix suggestions, HTML/CSV artifacts, drift summaries, and cost estimates powered by Infracost.
 - Knowledge base search (TF‑IDF RAG), Markdown sync, and optional LLM explanations/patches.
-- Authenticated API with SQL-backed storage for reports, configs, knowledge, and LLM settings.
+- Authenticated API with SQL-backed storage for projects, runs, reports, configs, knowledge, and LLM settings.
+- Project workspace UI for creating, editing, and deleting workspaces, browsing run artifacts, and linking reviews with saved reports.
 - Automation-friendly CLI for scans, baselines, docs generation, pre-commit scaffolding, auth, and knowledge reindexing.
 
 > On‑prem defaults to Kubernetes via the Terraform `kubernetes` provider. Bring your own providers (vSphere, Proxmox, etc.) by extending the generators or policies.
@@ -71,6 +72,7 @@ pnpm dev -- --open
 
 - Defaults to `http://localhost:5173` and proxies API calls to `http://localhost:8890`; export `VITE_API_BASE` to change.
 - Authenticated routes live under `(app)/` while guest flows live under `(auth)/`; tokens persist via cookies/local storage helpers.
+- The **Projects** workspace lets you create, edit, and delete project folders entirely in the browser, browse recent runs, and download generator/review artifacts without touching the CLI.
 
 ### Authentication Settings
 
@@ -114,6 +116,8 @@ python -m backend.cli docs --out docs/generators --knowledge-out knowledge/gener
 # Authenticate against running API (stores access/refresh data in tm_auth.json)
 python -m backend.cli auth login --email you@example.com --base-url http://localhost:8890
 ```
+
+> Tip: The Projects UI in the SvelteKit dashboard now covers workspace creation, editing, deletion, and artifact browsing. Reach for the CLI when you want automation, CI integration, or scripted workloads.
 
 ### CLI commands at a glance
 - `scan` — run the reviewer with optional `terraform fmt`, `terraform validate`, Infracost cost data, drift summary (`--plan-json`), and HTML/patch artifacts.
@@ -190,6 +194,7 @@ To run template smoke tests with `terraform validate`, export `TFM_RUN_TERRAFORM
 - Configs & waivers: GET `/configs`, POST `/configs`, GET `/configs/{name}`, DELETE `/configs/{name}`, POST `/preview/config-application`, GET `/preview/config-application/html`.
 - Knowledge: POST `/knowledge/sync`, GET `/knowledge/search`, GET `/knowledge/doc`.
 - Generators: GET `/generators/metadata`, POST `/generators/blueprints`, POST `/generators/aws/s3`, POST `/generators/azure/storage-account`, POST `/generators/azure/servicebus`, POST `/generators/azure/function-app`, POST `/generators/azure/api-management`.
+- Projects & runs: GET `/projects`, POST `/projects`, GET/PATCH `/projects/{id}`, DELETE `/projects/{id}`, GET `/projects/{id}/runs`, POST `/projects/{id}/runs`, PATCH `/projects/{id}/runs/{run_id}`, artifact list/upload/download/delete under `/projects/{id}/runs/{run_id}/artifacts`.
 - LLM settings: GET `/settings/llm`, POST `/settings/llm`, POST `/settings/llm/test`.
 - Auth: `/auth/token`, `/auth/refresh`, `/auth/logout`, `/auth/me`, `/auth/sessions`, `/auth/sessions/{id}`, `/auth/events`, `/auth/register`, `/auth/recover` (see `api/routes/auth.py` for scope handling).
 - Root & docs: GET `/` (API metadata), static docs served under `/docs`.
