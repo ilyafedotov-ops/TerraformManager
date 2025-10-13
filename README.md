@@ -19,12 +19,12 @@ graph TD
     CLI[CLI Commands<br/>python -m backend.cli]
   end
 
-  Frontend -->|REST/HTMX| API(FastAPI Service<br/>api/main.py)
+  Frontend -->|REST| API(FastAPI Service<br/>api/main.py)
   CLI -->|direct modules / REST| API
   CLI --> Scanner
 
   API -->|invokes| Scanner[Scanner & Generators<br/>backend/scanner.py<br/>backend/generators/]
-  API -->|serves| UIStatic[HTMX UI & Docs<br/>ui/ , docs/]
+  API -->|serves| DocsStatic[API Reference<br/>docs/]
 
   Scanner --> Policies[Policy Registry<br/>backend/policies/]
   Scanner --> Knowledge[Knowledge Search<br/>backend/rag.py]
@@ -51,7 +51,7 @@ python -m api  # runs uvicorn api.main:app --reload --port 8890
   - [Infracost](https://www.infracost.io/docs/integrations/cli/) for cost estimation.
   - [`terraform-docs`](https://terraform-docs.io/) for generator documentation mirroring.
 
-- Open http://localhost:8890 for a minimal HTMX UI.
+- API available at http://localhost:8890 (SvelteKit frontend served separately via `frontend/`).
 - Save and list reports via `/scan` and `/reports`.
 - Store review configs in SQLite with `/configs` endpoints.
 - Sync docs from GitHub with `POST /knowledge/sync`.
@@ -135,7 +135,7 @@ To run template smoke tests with `terraform validate`, export `TFM_RUN_TERRAFORM
 ## What’s included
 
 - `frontend/` — SvelteKit dashboard for generator, reviewer, and knowledge workflows (reviewer view now surfaces cost & drift summaries)
-- `api/` — FastAPI surface (`api/main.py`) with HTMX UI mounts, auth routes, generator/knowledge endpoints, and static doc serving
+- `api/` — FastAPI surface (`api/main.py`) exposing auth, scan/report, generator, blueprint, and knowledge endpoints; static docs served under `/docs`
 - `backend/cli.py` — CLI to scan paths and write a JSON report
 - `backend/scanner.py` — Static checks for AWS, Azure, K8s; syntax/HCL parse checker; optional terraform validate hook
 - `backend/policies/` — Provider-specific rule registries, metadata, and helpers powering the reviewer
@@ -160,7 +160,11 @@ To run template smoke tests with `terraform validate`, export `TFM_RUN_TERRAFORM
   - `azure_aks_cluster.tf.j2`
   - `azure_key_vault.tf.j2`
   - `azure_diagnostics_baseline.tf.j2`
+  - `azure_servicebus_namespace.tf.j2`
+  - `azure_function_app.tf.j2`
+  - `azure_api_management.tf.j2`
   - `azure_storage_account.tf.j2`
+  - `azure_servicebus_namespace.tf.j2`
   - `azure_vnet_baseline.tf.j2`
     - Auto-suggests diagnostics for VNets/Subnets/NSGs and emits helper outputs for private endpoints/logging.
   - `k8s_deployment.tf.j2` (On‑Prem default)
@@ -182,13 +186,13 @@ To run template smoke tests with `terraform validate`, export `TFM_RUN_TERRAFORM
 
 - Health: GET `/health`.
 - Scans: POST `/scan`, POST `/scan/upload` (multipart uploads with optional plan/cost artifacts).
-- Reports: GET `/reports`, GET `/reports/{id}`, GET `/reports/{id}/html`, GET `/reports/{id}/csv`, DELETE `/reports/{id}`, GET `/ui/reports/export-zip`.
+- Reports: GET `/reports`, GET `/reports/{id}`, GET `/reports/{id}/html`, GET `/reports/{id}/csv`, DELETE `/reports/{id}`.
 - Configs & waivers: GET `/configs`, POST `/configs`, GET `/configs/{name}`, DELETE `/configs/{name}`, POST `/preview/config-application`, GET `/preview/config-application/html`.
 - Knowledge: POST `/knowledge/sync`, GET `/knowledge/search`, GET `/knowledge/doc`.
-- Generators: GET `/generators/metadata`, POST `/generators/blueprints`, POST `/generators/aws/s3`, POST `/generators/azure/storage-account`.
+- Generators: GET `/generators/metadata`, POST `/generators/blueprints`, POST `/generators/aws/s3`, POST `/generators/azure/storage-account`, POST `/generators/azure/servicebus`, POST `/generators/azure/function-app`, POST `/generators/azure/api-management`.
 - LLM settings: GET `/settings/llm`, POST `/settings/llm`, POST `/settings/llm/test`.
 - Auth: `/auth/token`, `/auth/refresh`, `/auth/logout`, `/auth/me`, `/auth/sessions`, `/auth/sessions/{id}`, `/auth/events`, `/auth/register`, `/auth/recover` (see `api/routes/auth.py` for scope handling).
-- UI & docs: GET `/`, GET `/ui/*` (HTMX views), static docs served under `/docs`.
+- Root & docs: GET `/` (API metadata), static docs served under `/docs`.
 
 ## Docker
 

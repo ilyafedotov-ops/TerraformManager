@@ -2,7 +2,7 @@
 
 ## Repository Layout
 - `frontend/` — SvelteKit dashboard; rely on `src/lib/api` for typed clients and `src/routes/(app)` for authenticated flows.
-- `api/` — FastAPI entrypoint (`api/main.py`) with auth router, generator metadata, blueprint bundler, `/scan/upload`, and HTMX UI mounts under `ui/`.
+- `api/` — FastAPI entrypoint (`api/main.py`) exposing auth, scan/report, generator metadata, blueprint bundling, and knowledge endpoints (docs served under `/docs`).
 - `backend/cli.py` — Multi-command CLI (scan, baseline, precommit, docs, auth login, reindex).
 - `backend/scanner.py` & `backend/policies/` — Provider-specific rule engines with metadata registry, knowledge linking, and severity gating.
 - `backend/costs/` & `backend/drift/` — Infracost wrappers and Terraform plan JSON summarisation feeding report `summary.cost` / `summary.drift`.

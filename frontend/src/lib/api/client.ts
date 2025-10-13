@@ -468,6 +468,143 @@ export async function generateAzureStorageAccount(
     });
 }
 
+export interface AzureFunctionAppGeneratorPayload {
+    resource_group_name: string;
+    function_app_name: string;
+    storage_account_name: string;
+    app_service_plan_name: string;
+    location: string;
+    environment: string;
+    runtime: string;
+    runtime_version: string;
+    app_service_plan_sku: string;
+    storage_replication: string;
+    enable_vnet_integration: boolean;
+    vnet_subnet_id?: string | null;
+    enable_application_insights: boolean;
+    application_insights_name: string;
+    diagnostics?: {
+        workspace_resource_id: string;
+        log_categories?: string[];
+        metric_categories?: string[];
+    } | null;
+    owner_tag: string;
+    cost_center_tag: string;
+}
+
+export interface AzureApiManagementGeneratorPayload {
+    resource_group_name: string;
+    name: string;
+    location: string;
+    environment: string;
+    publisher_name: string;
+    publisher_email: string;
+    sku_name: string;
+    capacity?: number | null;
+    zones: string[];
+    virtual_network_type: string;
+    subnet_id?: string | null;
+    identity_type: string;
+    custom_properties: Record<string, string>;
+    diagnostics?: {
+        workspace_resource_id: string;
+        log_categories?: string[];
+        metric_categories?: string[];
+    } | null;
+    owner_tag: string;
+    cost_center_tag: string;
+}
+
+export async function generateAzureFunctionApp(
+    fetchFn: typeof fetch,
+    payload: AzureFunctionAppGeneratorPayload
+): Promise<GeneratorResult> {
+    return apiFetch(fetchFn, '/generators/azure/function-app', {
+        method: 'POST',
+        body: payload
+    });
+}
+
+export async function generateAzureApiManagement(
+    fetchFn: typeof fetch,
+    payload: AzureApiManagementGeneratorPayload
+): Promise<GeneratorResult> {
+    return apiFetch(fetchFn, '/generators/azure/api-management', {
+        method: 'POST',
+        body: payload
+    });
+}
+
+export interface AzureServiceBusGeneratorPayload {
+    resource_group_name: string;
+    namespace_name: string;
+    location: string;
+    environment: string;
+    sku: string;
+    capacity?: number | null;
+    zone_redundant: boolean;
+    owner_tag: string;
+    cost_center_tag: string;
+    restrict_network: boolean;
+    identity?: {
+        type: string;
+        user_assigned_identity_ids?: string[];
+    };
+    customer_managed_key?: {
+        key_vault_key_id: string;
+        user_assigned_identity_id?: string | null;
+    } | null;
+    private_endpoint?: {
+        name: string;
+        subnet_id: string;
+        group_ids?: string[];
+        private_dns_zone_ids?: string[];
+    } | null;
+    diagnostics?: {
+        workspace_resource_id: string;
+        log_categories?: string[];
+        metric_categories?: string[];
+    } | null;
+    queues: Array<{
+        name: string;
+        enable_partitioning: boolean;
+        lock_duration: string;
+        max_delivery_count: number;
+        requires_duplicate_detection: boolean;
+        duplicate_detection_history_time_window: string;
+    }>;
+    topics: Array<{
+        name: string;
+        enable_partitioning: boolean;
+        default_message_ttl: string;
+        requires_duplicate_detection: boolean;
+        duplicate_detection_history_time_window: string;
+        subscriptions: Array<{
+            name: string;
+            requires_session: boolean;
+            lock_duration: string;
+            max_delivery_count: number;
+            forward_to?: string | null;
+        }>;
+    }>;
+    backend?: {
+        resource_group: string;
+        storage_account: string;
+        container: string;
+        key: string;
+    } | null;
+}
+
+export async function generateAzureServiceBus(
+    fetchFn: typeof fetch,
+    payload: AzureServiceBusGeneratorPayload
+): Promise<GeneratorResult> {
+    return apiFetch(fetchFn, '/generators/azure/servicebus', {
+        method: 'POST',
+        body: payload
+    });
+}
+
 export interface KnowledgeSyncResult {
     source: string;
     dest_dir: string;

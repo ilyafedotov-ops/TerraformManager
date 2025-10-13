@@ -1,5 +1,4 @@
 formatter: markdown table
-header-from: ""
 recursive:
   enabled: false
 sections:

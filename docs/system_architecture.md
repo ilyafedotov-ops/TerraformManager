@@ -15,12 +15,12 @@ graph TD
     CLI[CLI Commands<br/>python -m backend.cli]
   end
 
-  Frontend -->|REST/HTMX| API(FastAPI Service<br/>api/main.py)
+  Frontend -->|REST| API(FastAPI Service<br/>api/main.py)
   CLI -->|direct modules / REST| API
   CLI --> Scanner
 
   API -->|invokes| Scanner[Scanner & Generators<br/>backend/scanner.py<br/>backend/generators/]
-  API -->|serves| UIStatic[HTMX UI & Docs<br/>ui/ , docs/]
+  API -->|serves| DocsStatic[API Reference<br/>docs/]
 
   Scanner --> Policies[Policy Registry<br/>backend/policies/]
   Scanner --> Knowledge[Knowledge Search<br/>backend/rag.py]

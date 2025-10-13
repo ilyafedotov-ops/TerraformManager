@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 _S3_BUCKET_PATTERN = re.compile(r"^[a-z0-9][a-z0-9\-.]{1,61}[a-z0-9]$")
 _AZURE_STORAGE_PATTERN = re.compile(r"^[a-z0-9]{3,24}$")
+_AZURE_SERVICEBUS_NAMESPACE_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9-]{5,49}$")
+_AZURE_SERVICEBUS_CHILD_NAME_PATTERN = re.compile(r"^[A-Za-z0-9-_.]{1,260}$")
 
 
 def _strip_or_none(value: Optional[str]) -> Optional[str]:
@@ -318,6 +320,600 @@ class AzureStorageGeneratorPayload(BaseModel):
         return values
 
 
+class AzureServiceBusQueueSettings(BaseModel):
+    name: str = Field(
+        ...,
+        description="Queue name (1-260 characters, letters/numbers/hyphen/underscore/period).",
+        examples=["orders"],
+    )
+    enable_partitioning: bool = Field(
+        True,
+        description="Enable partitioning to increase throughput.",
+    )
+    lock_duration: str = Field(
+        "PT1M",
+        description="ISO8601 duration for message lock (e.g., PT1M).",
+    )
+    max_delivery_count: int = Field(
+        10,
+        ge=1,
+        le=100,
+        description="Maximum delivery attempts before moving message to the dead-letter queue.",
+    )
+    requires_duplicate_detection: bool = Field(
+        False,
+        description="Enable duplicate detection for queue messages.",
+    )
+    duplicate_detection_history_time_window: str = Field(
+        "PT10M",
+        description="Window for duplicate detection (ISO8601 duration).",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        candidate = value.strip()
+        if not _AZURE_SERVICEBUS_CHILD_NAME_PATTERN.match(candidate):
+            raise ValueError(
+                "Queue name must be 1-260 characters and may include letters, numbers, hyphen, underscore, or period."
+            )
+        return candidate
+
+
+class AzureServiceBusSubscriptionSettings(BaseModel):
+    name: str = Field(
+        ...,
+        description="Subscription name (1-260 characters).",
+        examples=["critical"],
+    )
+    requires_session: bool = Field(
+        False,
+        description="Enable sessions for ordered message processing.",
+    )
+    lock_duration: str = Field(
+        "PT1M",
+        description="Message lock duration (ISO8601).",
+    )
+    max_delivery_count: int = Field(
+        10,
+        ge=1,
+        le=100,
+        description="Maximum delivery attempts before dead-lettering.",
+    )
+    forward_to: Optional[str] = Field(
+        None,
+        description="Optional queue or topic name for auto-forwarding.",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        candidate = value.strip()
+        if not _AZURE_SERVICEBUS_CHILD_NAME_PATTERN.match(candidate):
+            raise ValueError(
+                "Subscription name must be 1-260 characters and may include letters, numbers, hyphen, underscore, or period."
+            )
+        return candidate
+
+    @field_validator("forward_to")
+    @classmethod
+    def validate_forward_to(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        candidate = value.strip()
+        if not _AZURE_SERVICEBUS_CHILD_NAME_PATTERN.match(candidate):
+            raise ValueError("forward_to must match Azure Service Bus entity naming rules.")
+        return candidate
+
+
+class AzureServiceBusTopicSettings(BaseModel):
+    name: str = Field(
+        ...,
+        description="Topic name (1-260 characters).",
+        examples=["events"],
+    )
+    enable_partitioning: bool = Field(
+        True,
+        description="Enable partitioning for the topic.",
+    )
+    default_message_ttl: str = Field(
+        "P7D",
+        description="Default message time-to-live (ISO8601).",
+    )
+    subscriptions: List[AzureServiceBusSubscriptionSettings] = Field(
+        default_factory=list,
+        description="Subscriptions to provision for this topic.",
+    )
+    requires_duplicate_detection: bool = Field(
+        False,
+        description="Enable duplicate detection for the topic.",
+    )
+    duplicate_detection_history_time_window: str = Field(
+        "PT10M",
+        description="Window for duplicate detection (ISO8601 duration).",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        candidate = value.strip()
+        if not _AZURE_SERVICEBUS_CHILD_NAME_PATTERN.match(candidate):
+            raise ValueError(
+                "Topic name must be 1-260 characters and may include letters, numbers, hyphen, underscore, or period."
+            )
+        return candidate
+
+
+class AzureServiceBusPrivateEndpointSettings(BaseModel):
+    name: str = Field(
+        ...,
+        description="Private endpoint resource name.",
+        examples=["sb-namespace-pe"],
+    )
+    subnet_id: str = Field(
+        ...,
+        description="Subnet resource ID for the private endpoint.",
+    )
+    group_ids: List[str] = Field(
+        default_factory=lambda: ["namespace"],
+        description="Service Bus subresource group IDs (default: namespace).",
+    )
+    private_dns_zone_ids: List[str] = Field(
+        default_factory=list,
+        description="Optional private DNS zone resource IDs.",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def ensure_name(cls, value: str) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError("name cannot be empty.")
+        return candidate
+
+    @field_validator("group_ids", "private_dns_zone_ids")
+    @classmethod
+    def clean_list(cls, values: List[str]) -> List[str]:
+        cleaned = []
+        for entry in values or []:
+            candidate = (entry or "").strip()
+            if candidate:
+                cleaned.append(candidate)
+        return cleaned
+
+
+class AzureServiceBusDiagnosticSettings(BaseModel):
+    workspace_resource_id: str = Field(
+        ...,
+        description="Log Analytics workspace resource ID.",
+    )
+    log_categories: List[str] = Field(
+        default_factory=lambda: ["OperationalLogs"],
+        description="Log categories to enable (defaults to OperationalLogs).",
+    )
+    metric_categories: List[str] = Field(
+        default_factory=lambda: ["AllMetrics"],
+        description="Metric categories to emit (defaults to AllMetrics).",
+    )
+
+    @field_validator("workspace_resource_id")
+    @classmethod
+    def ensure_workspace(cls, value: str) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError("workspace_resource_id cannot be empty.")
+        return candidate
+
+    @field_validator("log_categories", "metric_categories")
+    @classmethod
+    def clean_categories(cls, values: List[str]) -> List[str]:
+        cleaned = []
+        for entry in values or []:
+            candidate = (entry or "").strip()
+            if candidate:
+                cleaned.append(candidate)
+        return cleaned
+
+
+class AzureServiceBusIdentitySettings(BaseModel):
+    type: Literal["SystemAssigned", "UserAssigned", "SystemAssigned, UserAssigned"] = Field(
+        "SystemAssigned",
+        description="Managed identity type.",
+    )
+    user_assigned_identity_ids: List[str] = Field(
+        default_factory=list,
+        description="User-assigned identity resource IDs when using user-assigned identities.",
+    )
+
+    @field_validator("user_assigned_identity_ids")
+    @classmethod
+    def clean_id_list(cls, values: List[str]) -> List[str]:
+        cleaned = []
+        for entry in values or []:
+            candidate = (entry or "").strip()
+            if candidate:
+                cleaned.append(candidate)
+        return cleaned
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, value: str, info: ValidationInfo) -> str:
+        normalized = value.strip()
+        if normalized in {"UserAssigned", "SystemAssigned, UserAssigned"} and not info.data.get("user_assigned_identity_ids"):
+            raise ValueError("user_assigned_identity_ids must be provided when using user-assigned identities.")
+        return normalized
+
+
+class AzureServiceBusCustomerManagedKeySettings(BaseModel):
+    key_vault_key_id: str = Field(
+        ...,
+        description="Key Vault key ID for customer-managed key encryption.",
+    )
+    user_assigned_identity_id: Optional[str] = Field(
+        None,
+        description="Identity ID that has access to the Key Vault key.",
+    )
+
+    @field_validator("key_vault_key_id")
+    @classmethod
+    def ensure_key(cls, value: str) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError("key_vault_key_id cannot be empty.")
+        return candidate
+
+    @field_validator("user_assigned_identity_id")
+    @classmethod
+    def normalize_identity(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError("user_assigned_identity_id cannot be empty when provided.")
+        return candidate
+
+
+class AzureServiceBusGeneratorPayload(BaseModel):
+    resource_group_name: str = Field(
+        ...,
+        description="Resource group that will host the namespace.",
+        examples=["rg-integration"],
+    )
+    namespace_name: str = Field(
+        ...,
+        description="Service Bus namespace name (6-50 chars, letters/numbers/hyphen).",
+        examples=["sb-platform-dev"],
+    )
+    location: str = Field(
+        ...,
+        description="Azure region for the namespace.",
+        examples=["eastus2"],
+    )
+    environment: str = Field(
+        "prod",
+        description="Environment tag applied to created resources.",
+        examples=["dev", "test", "prod"],
+    )
+    sku: str = Field(
+        "Premium",
+        description="Service Bus SKU (Basic, Standard, Premium).",
+        examples=["Premium"],
+    )
+    capacity: Optional[int] = Field(
+        None,
+        description="Optional messaging units (required for Premium availability zones).",
+    )
+    zone_redundant: bool = Field(
+        True,
+        description="Enable zone redundancy where supported.",
+    )
+    owner_tag: str = Field(
+        "platform-team",
+        description="Owner tag value for traceability.",
+        examples=["platform-team"],
+    )
+    cost_center_tag: str = Field(
+        "ENG-SRE",
+        description="Cost center tag value for showback/chargeback.",
+        examples=["ENG-SRE"],
+    )
+    restrict_network: bool = Field(
+        True,
+        description="Disable public network access and rely on private endpoints.",
+    )
+    identity: AzureServiceBusIdentitySettings = Field(
+        default_factory=AzureServiceBusIdentitySettings,
+        description="Managed identity configuration.",
+    )
+    customer_managed_key: Optional[AzureServiceBusCustomerManagedKeySettings] = Field(
+        None,
+        description="Optional customer-managed key configuration.",
+    )
+    private_endpoint: Optional[AzureServiceBusPrivateEndpointSettings] = Field(
+        None,
+        description="Optional private endpoint configuration.",
+    )
+    diagnostics: Optional[AzureServiceBusDiagnosticSettings] = Field(
+        None,
+        description="Optional diagnostic settings forwarding logs to Log Analytics.",
+    )
+    queues: List[AzureServiceBusQueueSettings] = Field(
+        default_factory=list,
+        description="Queues to create inside the namespace.",
+    )
+    topics: List[AzureServiceBusTopicSettings] = Field(
+        default_factory=list,
+        description="Topics (and optional subscriptions) to create inside the namespace.",
+    )
+    backend: Optional[AzureStorageBackendSettings] = Field(
+        None,
+        description="Optional remote state backend configuration.",
+    )
+
+    @field_validator("resource_group_name", "location", "environment", "owner_tag", "cost_center_tag", "sku")
+    @classmethod
+    def ensure_trimmed(cls, value: str, info: ValidationInfo) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError(f"{info.field_name} cannot be empty.")
+        return candidate
+
+    @field_validator("namespace_name", mode="before")
+    @classmethod
+    def validate_namespace_name(cls, value: str) -> str:
+        candidate = value.strip()
+        if not _AZURE_SERVICEBUS_NAMESPACE_PATTERN.match(candidate):
+            raise ValueError(
+                "Namespace name must be 6-50 characters, start with a letter, and may contain letters, numbers, or hyphen."
+            )
+        return candidate
+
+    @field_validator("capacity")
+    @classmethod
+    def validate_capacity(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return None
+        if value < 1:
+            raise ValueError("capacity must be a positive integer when provided.")
+        return value
+
+
+class AzureFunctionAppDiagnosticsSettings(BaseModel):
+    workspace_resource_id: str = Field(
+        ...,
+        description="Log Analytics workspace to receive Function App diagnostics.",
+    )
+    log_categories: List[str] = Field(
+        default_factory=lambda: ["FunctionAppLogs"],
+        description="Diagnostic log categories.",
+    )
+    metric_categories: List[str] = Field(
+        default_factory=lambda: ["AllMetrics"],
+        description="Diagnostic metric categories.",
+    )
+
+    @field_validator("workspace_resource_id")
+    @classmethod
+    def ensure_workspace(cls, value: str) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError("workspace_resource_id cannot be empty.")
+        return candidate
+
+    @field_validator("log_categories", "metric_categories")
+    @classmethod
+    def clean_categories(cls, values: List[str]) -> List[str]:
+        cleaned = []
+        for entry in values or []:
+            candidate = (entry or "").strip()
+            if candidate:
+                cleaned.append(candidate)
+        return cleaned
+
+
+class AzureFunctionAppGeneratorPayload(BaseModel):
+    resource_group_name: str = Field(..., description="Resource group for the Function App.")
+    function_app_name: str = Field(..., description="Function App name (globally unique).")
+    storage_account_name: str = Field(..., description="Storage account for Function runtime artifacts.")
+    app_service_plan_name: str = Field(..., description="App Service plan name backing the Function App.")
+    location: str = Field(..., description="Azure region.")
+    environment: str = Field("prod", description="Environment tag applied to all resources.")
+    runtime: str = Field("dotnet", description="Functions worker runtime (dotnet, node, python).")
+    runtime_version: str = Field("8", description="Runtime version (e.g. 8, 20, 3.11).")
+    app_service_plan_sku: str = Field("EP1", description="App Service plan SKU (e.g. EP1, P1v3).")
+    storage_replication: str = Field("LRS", description="Storage account replication.")
+    enable_vnet_integration: bool = Field(False, description="Enable VNet integration for outbound traffic.")
+    vnet_subnet_id: Optional[str] = Field(
+        None,
+        description="Subnet resource ID used for VNet integration (required when enable_vnet_integration is true).",
+    )
+    enable_application_insights: bool = Field(True, description="Provision Application Insights for telemetry.")
+    application_insights_name: str = Field(
+        "func-ai",
+        description="Application Insights component name (used when enable_application_insights is true).",
+    )
+    diagnostics: Optional[AzureFunctionAppDiagnosticsSettings] = Field(
+        None,
+        description="Optional diagnostic settings forwarding logs/metrics to Log Analytics.",
+    )
+    owner_tag: str = Field("platform-team", description="Owner tag value.")
+    cost_center_tag: str = Field("ENG-SRE", description="Cost center tag value.")
+
+    @field_validator(
+        "resource_group_name",
+        "function_app_name",
+        "storage_account_name",
+        "app_service_plan_name",
+        "location",
+        "environment",
+        "runtime",
+        "runtime_version",
+        "app_service_plan_sku",
+        "storage_replication",
+        "application_insights_name",
+        "owner_tag",
+        "cost_center_tag",
+    )
+    @classmethod
+    def ensure_trimmed(cls, value: str, info: ValidationInfo) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError(f"{info.field_name} cannot be empty.")
+        return candidate
+
+    @field_validator("storage_account_name", mode="before")
+    @classmethod
+    def validate_storage_name(cls, value: str) -> str:
+        candidate = value.strip().lower()
+        if not _AZURE_STORAGE_PATTERN.match(candidate):
+            raise ValueError("Storage account names must be lowercase alphanumeric, 3-24 characters.")
+        return candidate
+
+    @field_validator("function_app_name")
+    @classmethod
+    def validate_function_name(cls, value: str) -> str:
+        candidate = value.strip()
+        if not re.fullmatch(r"[A-Za-z0-9\-]{2,60}", candidate):
+            raise ValueError("Function App name must be 2-60 characters and alphanumeric with optional hyphen.")
+        return candidate
+
+    @field_validator("vnet_subnet_id")
+    @classmethod
+    def validate_subnet(cls, value: Optional[str], info: ValidationInfo) -> Optional[str]:
+        if info.data.get("enable_vnet_integration") and not (value or "").strip():
+            raise ValueError("vnet_subnet_id is required when enable_vnet_integration is true.")
+        return value.strip() if value else None
+
+
+class AzureApiManagementDiagnostics(BaseModel):
+    workspace_resource_id: str = Field(
+        ...,
+        description="Log Analytics workspace resource ID for diagnostics.",
+    )
+    log_categories: List[str] = Field(
+        default_factory=lambda: ["GatewayLogs"],
+        description="Diagnostic log categories.",
+    )
+    metric_categories: List[str] = Field(
+        default_factory=lambda: ["AllMetrics"],
+        description="Diagnostic metric categories.",
+    )
+
+    @field_validator("workspace_resource_id")
+    @classmethod
+    def ensure_workspace(cls, value: str) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError("workspace_resource_id cannot be empty.")
+        return candidate
+
+    @field_validator("log_categories", "metric_categories")
+    @classmethod
+    def clean_categories(cls, values: List[str]) -> List[str]:
+        cleaned = []
+        for entry in values or []:
+            candidate = (entry or "").strip()
+            if candidate:
+                cleaned.append(candidate)
+        return cleaned
+
+
+class AzureApiManagementGeneratorPayload(BaseModel):
+    resource_group_name: str = Field(..., description="Resource group for API Management.")
+    name: str = Field(..., description="API Management service name.")
+    location: str = Field(..., description="Azure region.")
+    environment: str = Field("prod", description="Environment tag applied to resources.")
+    publisher_name: str = Field(..., description="Publisher display name.")
+    publisher_email: str = Field(..., description="Publisher contact email.")
+    sku_name: str = Field("Premium_1", description="API Management SKU (e.g., Developer_1, Premium_1).")
+    capacity: Optional[int] = Field(None, description="Optional capacity override (Premium/Isolated tiers).")
+    zones: List[str] = Field(default_factory=list, description="Optional availability zones (Premium tier).")
+    virtual_network_type: str = Field(
+        "None",
+        description="Virtual network type (None, External, Internal).",
+    )
+    subnet_id: Optional[str] = Field(
+        None,
+        description="Subnet resource ID required when virtual_network_type != None.",
+    )
+    identity_type: Literal["SystemAssigned", "UserAssigned", "SystemAssigned, UserAssigned"] = Field(
+        "SystemAssigned",
+        description="Managed identity configuration.",
+    )
+    custom_properties: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Optional custom properties applied to the service.",
+    )
+    diagnostics: Optional[AzureApiManagementDiagnostics] = Field(
+        None,
+        description="Optional diagnostic settings streaming to Log Analytics.",
+    )
+    owner_tag: str = Field("platform-team", description="Owner tag value.")
+    cost_center_tag: str = Field("ENG-SRE", description="Cost center tag value.")
+
+    @field_validator(
+        "resource_group_name",
+        "name",
+        "location",
+        "environment",
+        "publisher_name",
+        "publisher_email",
+        "sku_name",
+        "owner_tag",
+        "cost_center_tag",
+    )
+    @classmethod
+    def ensure_trimmed(cls, value: str, info: ValidationInfo) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError(f"{info.field_name} cannot be empty.")
+        return candidate
+
+    @field_validator("publisher_email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        candidate = value.strip()
+        if "@" not in candidate:
+            raise ValueError("publisher_email must be a valid email address.")
+        return candidate
+
+    @field_validator("name")
+    @classmethod
+    def validate_apim_name(cls, value: str) -> str:
+        candidate = value.strip()
+        if not re.fullmatch(r"[A-Za-z0-9\-]{2,50}", candidate):
+            raise ValueError("API Management name must be 2-50 characters and alphanumeric with optional hyphen.")
+        return candidate
+
+    @field_validator("capacity")
+    @classmethod
+    def validate_capacity(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return None
+        if value < 1:
+            raise ValueError("capacity must be at least 1 when provided.")
+        return value
+
+    @field_validator("zones", mode="before")
+    @classmethod
+    def clean_zones(cls, values: List[str]) -> List[str]:
+        if not values:
+            return []
+        cleaned = []
+        for entry in values:
+            if entry:
+                cleaned.append(entry.strip())
+        return cleaned
+
+    @field_validator("subnet_id")
+    @classmethod
+    def validate_subnet(cls, value: Optional[str], info: ValidationInfo) -> Optional[str]:
+        vnet_type = info.data.get("virtual_network_type", "None")
+        if vnet_type.lower() != "none" and not (value or "").strip():
+            raise ValueError("subnet_id is required when virtual_network_type is External or Internal.")
+        return value.strip() if value else None
+
+
 class BlueprintComponent(BaseModel):
     slug: str = Field(..., description="Registered generator slug (e.g., aws/s3-secure-bucket).")
     payload: Dict[str, Any] = Field(default_factory=dict, description="Generator payload (supports {env} placeholders).")
@@ -412,6 +1008,18 @@ __all__ = [
     "AwsS3GeneratorPayload",
     "AzureStorageBackendSettings",
     "AzureStorageGeneratorPayload",
+    "AzureServiceBusQueueSettings",
+    "AzureServiceBusSubscriptionSettings",
+    "AzureServiceBusTopicSettings",
+    "AzureServiceBusPrivateEndpointSettings",
+    "AzureServiceBusDiagnosticSettings",
+    "AzureServiceBusIdentitySettings",
+    "AzureServiceBusCustomerManagedKeySettings",
+    "AzureServiceBusGeneratorPayload",
+    "AzureFunctionAppDiagnosticsSettings",
+    "AzureFunctionAppGeneratorPayload",
+    "AzureApiManagementDiagnostics",
+    "AzureApiManagementGeneratorPayload",
     "AzureStoragePrivateEndpointSettings",
     "BlueprintComponent",
     "BlueprintRemoteStateConfig",

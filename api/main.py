@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Depends, Header, UploadFile, File, Form, Response, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -43,11 +43,17 @@ from backend.storage import (
 from backend.preview_html import render_preview_html
 from backend.report_csv import render_csv_report
 from fastapi.staticfiles import StaticFiles
-from api import ui as ui_routes
 from backend.version import __version__
 from backend.llm_service import validate_provider_config, live_ping
 from backend.generators.blueprints import render_blueprint_bundle
-from backend.generators.models import BlueprintRequest, AwsS3GeneratorPayload, AzureStorageGeneratorPayload
+from backend.generators.models import (
+    BlueprintRequest,
+    AwsS3GeneratorPayload,
+    AzureApiManagementGeneratorPayload,
+    AzureFunctionAppGeneratorPayload,
+    AzureServiceBusGeneratorPayload,
+    AzureStorageGeneratorPayload,
+)
 from backend.generators.registry import get_generator_definition, list_generator_metadata
 from api.routes import auth as auth_routes
 
@@ -141,8 +147,6 @@ def require_current_user(
 
 app = FastAPI(title="Terraform Manager API", version=__version__)
 app.include_router(auth_routes.router)
-app.mount("/static", StaticFiles(directory="ui/static"), name="static")
-app.include_router(ui_routes.router, prefix="/ui")
 app.mount("/docs", StaticFiles(directory="docs"), name="docs")
 app.add_middleware(
     CORSMiddleware,
@@ -563,6 +567,8 @@ class GeneratorMetadataResponse(BaseModel):
     features: Dict[str, Any]
     outputs: List[GeneratorOutputMetadata]
     schema: Dict[str, Any]
+    example_payload: Dict[str, Any]
+    presets: List[Dict[str, Any]] = []
 
 
 class BlueprintFile(BaseModel):
@@ -605,6 +611,36 @@ def generate_aws_s3(payload: AwsS3GeneratorPayload) -> GeneratorResponse:
 @app.post("/generators/azure/storage-account", response_model=GeneratorResponse)
 def generate_azure_storage(payload: AzureStorageGeneratorPayload) -> GeneratorResponse:
     generator = get_generator_definition("azure/storage-secure-account")
+    try:
+        output = generator.render(payload)
+        return GeneratorResponse(**output)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/generators/azure/servicebus", response_model=GeneratorResponse)
+def generate_azure_servicebus(payload: AzureServiceBusGeneratorPayload) -> GeneratorResponse:
+    generator = get_generator_definition("azure/servicebus-namespace")
+    try:
+        output = generator.render(payload)
+        return GeneratorResponse(**output)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/generators/azure/function-app", response_model=GeneratorResponse)
+def generate_azure_function_app(payload: AzureFunctionAppGeneratorPayload) -> GeneratorResponse:
+    generator = get_generator_definition("azure/function-app")
+    try:
+        output = generator.render(payload)
+        return GeneratorResponse(**output)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/generators/azure/api-management", response_model=GeneratorResponse)
+def generate_azure_api_management(payload: AzureApiManagementGeneratorPayload) -> GeneratorResponse:
+    generator = get_generator_definition("azure/api-management")
     try:
         output = generator.render(payload)
         return GeneratorResponse(**output)
@@ -660,73 +696,12 @@ def test_llm_settings_api(
     return {"ok": True, "stage": "ping", "response": probe.get("response")}
 
 
-# Minimal HTML endpoint to keep things simple without a heavy frontend stack
-INDEX_HTML = """
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Terraform Manager</title>
-    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-    <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
-      input, button { padding: 0.5rem; margin: 0.25rem; }
-      pre { background: #111827; color: #e5e7eb; padding: 1rem; border-radius: 6px; overflow:auto; }
-      .muted { color: #666; }
-    </style>
-  </head>
-  <body>
-    <h2>Terraform Manager (API-driven)</h2>
-    <div>
-      <form hx-post="/scan" hx-target="#scan-result" hx-encoding="json">
-        <label>Paths (comma-separated):</label>
-        <input type="text" name="paths" oninput="this.value=this.value" value="sample" />
-        <input type="hidden" name="terraform_validate" value="false" />
-        <input type="hidden" name="save" value="true" />
-        <button type="submit" onclick="event.preventDefault(); this.closest('form').dispatchEvent(new Event('submit',{cancelable:true}));">Scan</button>
-        <script>
-          document.querySelector('form').addEventListener('htmx:configRequest', function(evt) {
-            const form = evt.detail.elt;
-            const paths = (form.querySelector('input[name=paths]').value || '').split(',').map(s => s.trim()).filter(Boolean);
-            const payload = { paths, terraform_validate: false, save: true };
-            evt.detail.headers['Content-Type'] = 'application/json';
-            evt.detail.parameters = {};
-            evt.detail.fetchOpts = { method: 'POST', body: JSON.stringify(payload) };
-          });
-        </script>
-      </form>
-      <div id="scan-result" class="muted">Scan results will appear here.</div>
-    </div>
-
-    <h3>Recent Reports</h3>
-    <button hx-get="/reports" hx-target="#reports">Refresh</button>
-    <div id="reports"></div>
-
-    <script>
-      document.body.addEventListener('htmx:afterOnLoad', function(ev) {
-        if (ev.target.id === 'scan-result') {
-          try {
-            const data = JSON.parse(ev.detail.xhr.responseText);
-            ev.target.innerHTML = `<p>Report ID: ${data.id || '(not saved)'} | Issues: ${data.summary?.issues_found}</p>` +
-              `<pre>${JSON.stringify(data.summary, null, 2)}</pre>`;
-          } catch (e) { ev.target.textContent = 'Scan done.'; }
-        }
-        if (ev.target.id === 'reports') {
-          try {
-            const items = JSON.parse(ev.detail.xhr.responseText);
-            ev.target.innerHTML = items.map(it => `<div><a href="/reports/${it.id}/html" target="_blank">${it.id}</a> — ${new Date(it.created_at).toLocaleString()}</div>`).join('');
-          } catch (e) { ev.target.textContent = 'No reports'; }
-        }
-      });
-    </script>
-  </body>
-</html>
-"""
-
-
 @app.get("/")
-def index_redirect() -> RedirectResponse:
-    return RedirectResponse("/ui/dashboard")
+def index_root() -> Dict[str, str]:
+    return {
+        "message": "Terraform Manager API. The HTML dashboard has been retired; use the SvelteKit frontend or integrate directly with these endpoints.",
+        "docs": "/docs",
+    }
 
 
 @app.get("/reports/{report_id}/csv")
