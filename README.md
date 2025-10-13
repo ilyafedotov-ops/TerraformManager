@@ -1,12 +1,40 @@
 # TerraformManager — Wizard + Reviewer (Extended)
 
-This project is a **RAG/LLM‑friendly** GUI + CLI for:
-1) **Generate Terraform** via wizard (AWS, Azure, On‑Prem/Kubernetes).
-2) **Review** `.tf` files for best practices/security and produce a **fix report** with explanations.
-3) **Validate syntax** (HCL parse) and optionally shell out to `terraform fmt` / `terraform validate` when available.
-4) **CI pipeline** that runs the reviewer and uploads a JSON artifact.
+TerraformManager combines a SvelteKit dashboard, FastAPI API, and reusable backend engines to help teams generate secure Terraform and review existing infrastructure code with rich context.
 
-> On‑Prem **default** is Kubernetes via the Terraform `kubernetes` provider. You can add vSphere, Proxmox, etc.
+**Core capabilities**
+- Guided Terraform generators and blueprint bundles for AWS, Azure, and Kubernetes workloads.
+- Policy scanning with autofix suggestions, HTML/CSV artifacts, drift summaries, and cost estimates powered by Infracost.
+- Knowledge base search (TF‑IDF RAG), Markdown sync, and optional LLM explanations/patches.
+- Authenticated API with SQL-backed storage for reports, configs, knowledge, and LLM settings.
+- Automation-friendly CLI for scans, baselines, docs generation, pre-commit scaffolding, auth, and knowledge reindexing.
+
+> On‑prem defaults to Kubernetes via the Terraform `kubernetes` provider. Bring your own providers (vSphere, Proxmox, etc.) by extending the generators or policies.
+
+## Architecture at a glance
+```mermaid
+graph TD
+  subgraph Clients
+    Frontend[SvelteKit Dashboard<br/>frontend/]
+    CLI[CLI Commands<br/>python -m backend.cli]
+  end
+
+  Frontend -->|REST/HTMX| API(FastAPI Service<br/>api/main.py)
+  CLI -->|direct modules / REST| API
+  CLI --> Scanner
+
+  API -->|invokes| Scanner[Scanner & Generators<br/>backend/scanner.py<br/>backend/generators/]
+  API -->|serves| UIStatic[HTMX UI & Docs<br/>ui/ , docs/]
+
+  Scanner --> Policies[Policy Registry<br/>backend/policies/]
+  Scanner --> Knowledge[Knowledge Search<br/>backend/rag.py]
+  Scanner --> Storage[(SQLAlchemy Storage<br/>backend/db/ , backend/storage.py)]
+  Scanner --> External[(Terraform CLI / Infracost / terraform-docs)]
+
+  Knowledge --> KnowledgeDocs[Markdown Knowledge<br/>knowledge/]
+  Storage <--> API
+  Storage <--> Frontend
+```
 
 ---
 
@@ -18,6 +46,11 @@ pip install -r requirements.txt
 python -m api  # runs uvicorn api.main:app --reload --port 8890
 ```
 
+- Optional tooling unlocks extra features:
+  - [Terraform CLI](https://developer.hashicorp.com/terraform/cli) for `fmt` / `validate` integrations.
+  - [Infracost](https://www.infracost.io/docs/integrations/cli/) for cost estimation.
+  - [`terraform-docs`](https://terraform-docs.io/) for generator documentation mirroring.
+
 - Open http://localhost:8890 for a minimal HTMX UI.
 - Save and list reports via `/scan` and `/reports`.
 - Store review configs in SQLite with `/configs` endpoints.
@@ -26,7 +59,7 @@ python -m api  # runs uvicorn api.main:app --reload --port 8890
 
 Read `docs/authentication.md` for a full walkthrough of the password + refresh-token flow and environment controls.
 
-To require a token for all endpoints, set `TFM_API_TOKEN=...` and pass either header `X-API-Token: ...` or `Authorization: Bearer ...`. Set a custom port with `TFM_PORT` or `PORT`.
+To require a token for all endpoints, set `TFM_API_TOKEN=...` and pass either header `X-API-Token: ...` or `Authorization: Bearer ...`. The value seeds an always-active service user (`TFM_SERVICE_USER_EMAIL`, default `service@local`). Set a custom port with `TFM_PORT` or `PORT`.
 
 ## Web Frontend (SvelteKit)
 
@@ -82,6 +115,14 @@ python -m backend.cli docs --out docs/generators --knowledge-out knowledge/gener
 python -m backend.cli auth login --email you@example.com --base-url http://localhost:8890
 ```
 
+### CLI commands at a glance
+- `scan` — run the reviewer with optional `terraform fmt`, `terraform validate`, Infracost cost data, drift summary (`--plan-json`), and HTML/patch artifacts.
+- `baseline` — snapshot current findings into YAML/JSON for waivers.
+- `precommit` — scaffold a Terraform-focused `.pre-commit-config.yaml`.
+- `docs` — render Terraform-docs output for registered generators and mirror Markdown into `knowledge/` (reindexes RAG by default).
+- `auth login` — capture access/refresh tokens for automation workflows (`tm_auth.json`).
+- `reindex` — warm the TF-IDF knowledge index if you add Markdown outside the docs command.
+
 To run template smoke tests with `terraform validate`, export `TFM_RUN_TERRAFORM_VALIDATE=1` before executing `python -m unittest` or the new pytest-based smoke test (`TFM_RUN_TERRAFORM_VALIDATE=1 pytest tests/test_terraform_validate_smoke.py`). Terraform must be on `PATH`; tests fall back gracefully if it is absent.
 
 ## CI (GitHub Actions)
@@ -94,13 +135,19 @@ To run template smoke tests with `terraform validate`, export `TFM_RUN_TERRAFORM
 ## What’s included
 
 - `frontend/` — SvelteKit dashboard for generator, reviewer, and knowledge workflows (reviewer view now surfaces cost & drift summaries)
+- `api/` — FastAPI surface (`api/main.py`) with HTMX UI mounts, auth routes, generator/knowledge endpoints, and static doc serving
 - `backend/cli.py` — CLI to scan paths and write a JSON report
 - `backend/scanner.py` — Static checks for AWS, Azure, K8s; syntax/HCL parse checker; optional terraform validate hook
+- `backend/policies/` — Provider-specific rule registries, metadata, and helpers powering the reviewer
+- `backend/costs/` — Infracost integration for monthly/hourly estimates across multiple roots
+- `backend/drift/` — Terraform plan JSON parsing/summaries exposed in CLI/API reports
 - `backend/db/` — SQLAlchemy engine/session helpers plus ORM definitions for configs, reports, and settings
-- `backend/rag.py` — Local TF‑IDF retrieval over `knowledge/`
+- `backend/storage.py` — High-level helpers to persist configs, reports, and LLM settings (used by CLI & API)
+- `backend/rag.py` & `backend/knowledge_sync.py` — Local TF‑IDF retrieval over `knowledge/` plus GitHub Markdown sync tooling
 - `backend/validators.py` — Optional helpers for `terraform fmt` / `validate`
 - `backend/utils/diff.py` — helper for unified diffs
-- `backend/generators/` — Jinja templates:
+- `backend/llm_service.py` — provider validation, caching, and response coercion for OpenAI/Azure-backed explanations/patches
+- `backend/generators/` — Jinja templates, registry, docs automation, and blueprint bundler:
   - `aws_s3_bucket.tf.j2`
   - `aws_observability_baseline.tf.j2`
   - `aws_alb_waf.tf.j2`
@@ -110,6 +157,7 @@ To run template smoke tests with `terraform validate`, export `TFM_RUN_TERRAFORM
   - `aws_rds_baseline.tf.j2`
   - `aws_rds_multi_region.tf.j2`
   - `aws_vpc_networking.tf.j2`
+  - `azure_aks_cluster.tf.j2`
   - `azure_key_vault.tf.j2`
   - `azure_diagnostics_baseline.tf.j2`
   - `azure_storage_account.tf.j2`
@@ -132,22 +180,15 @@ To run template smoke tests with `terraform validate`, export `TFM_RUN_TERRAFORM
 
 ## FastAPI endpoints (summary)
 
-- GET `/health` — liveness
-- POST `/scan` — run & save a report
-- GET `/reports` — list recent reports
-- GET `/reports/{id}` — report JSON
-- GET `/reports/{id}/html` — report HTML
-- GET `/reports/{id}/csv` — findings as CSV
-- DELETE `/reports/{id}` — delete a report
-- GET `/ui/reports/{id}/viewer` — inline report viewer with filters
-- GET `/ui/reports/{id}/viewer/csv` — filtered CSV export (viewer filters)
-- GET `/ui/reports/export-zip?ids=<id1,id2,...>` — bulk export selected reports as a ZIP (HTML + CSV + JSON)
-- GET `/` — minimal HTMX UI
-- GET `/configs`, POST `/configs`, GET `/configs/{name}` — config storage
-- DELETE `/configs/{name}` — delete a config
-- POST `/preview/config-application` — JSON preview of waivers/thresholds
-- GET `/preview/config-application/html` — HTML preview of waivers/thresholds
-- POST `/knowledge/sync` — sync Markdown from GitHub (default HashiCorp Azure Storage policy library)
+- Health: GET `/health`.
+- Scans: POST `/scan`, POST `/scan/upload` (multipart uploads with optional plan/cost artifacts).
+- Reports: GET `/reports`, GET `/reports/{id}`, GET `/reports/{id}/html`, GET `/reports/{id}/csv`, DELETE `/reports/{id}`, GET `/ui/reports/export-zip`.
+- Configs & waivers: GET `/configs`, POST `/configs`, GET `/configs/{name}`, DELETE `/configs/{name}`, POST `/preview/config-application`, GET `/preview/config-application/html`.
+- Knowledge: POST `/knowledge/sync`, GET `/knowledge/search`, GET `/knowledge/doc`.
+- Generators: GET `/generators/metadata`, POST `/generators/blueprints`, POST `/generators/aws/s3`, POST `/generators/azure/storage-account`.
+- LLM settings: GET `/settings/llm`, POST `/settings/llm`, POST `/settings/llm/test`.
+- Auth: `/auth/token`, `/auth/refresh`, `/auth/logout`, `/auth/me`, `/auth/sessions`, `/auth/sessions/{id}`, `/auth/events`, `/auth/register`, `/auth/recover` (see `api/routes/auth.py` for scope handling).
+- UI & docs: GET `/`, GET `/ui/*` (HTMX views), static docs served under `/docs`.
 
 ## Docker
 
@@ -172,6 +213,12 @@ docker compose up --build
 ```
 
 This mounts `knowledge/` and `data/` for persistence and serves on port 8890.
+
+### Blueprint bundles
+- POST `/generators/blueprints` accepts a `BlueprintRequest` (see `backend/generators/models.py`) to stitch multiple registered generator components per environment.
+- Payloads support `{env}` placeholders, optional Azure or S3 remote-state backends, and a configurable README/variables stub.
+- Responses embed the rendered files plus a base64 ZIP archive; the SvelteKit UI streams the same structure for downloads.
+- Components reuse generator slugs from `/generators/metadata`; extend the registry in `backend/generators/registry.py` when adding new templates.
 
 ### AWS ALB logging tips
 - When generating the ALB baseline, toggle **Enable ALB access logging** to create a hardened logging bucket automatically.
@@ -201,6 +248,11 @@ This mounts `knowledge/` and `data/` for persistence and serves on port 8890.
 ### HTML Reporting
 - `backend.cli scan` supports `--html-out report.html` to render findings, severities, and thresholds as a self-contained HTML summary.
 - Combine with `--patch-out` to ship both a human-friendly report and ready-to-apply diffs in CI artifacts.
+
+### LLM assistance
+- Configure providers via `/settings/llm` (UI) or CLI flags (`--llm`, `--llm-model`, `--llm-explanations`, `--llm-patches`); settings persist in SQLite.
+- `backend.llm_service` validates environment hints (OpenAI or Azure), reuses a file-backed cache (`LLM_CACHE_DIR`), and extracts JSON payloads from model responses.
+- Explanations and patch proposals are optional—keep `enable_explanations`/`enable_patches` off when running in air-gapped mode.
 
 ---
 
