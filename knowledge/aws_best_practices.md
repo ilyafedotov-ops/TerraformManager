@@ -5,4 +5,5 @@
 - S3: configure account-level public access blocks (all four flags set to `true`).
 - IAM: avoid `*` in Action/Resource; use least privilege.
 - SG: avoid `0.0.0.0/0` on sensitive ports (22, 3389, 5432, etc.).
+- CloudWatch Logs: set `retention_in_days` on log groups to enforce lifecycle and control storage costs.
 - RDS: require deletion protection, enable Enhanced Monitoring (`monitoring_interval` > 0), and pair critical workloads with cross-region read replicas plus AWS Backup copy actions.

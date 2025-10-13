@@ -67,6 +67,160 @@
         }
       }
     }
+,
+    "costSummary": {
+      "type": "object",
+      "properties": {
+        "currency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "total_monthly_cost": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "total_hourly_cost": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "diff_monthly_cost": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "diff_hourly_cost": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "costProject": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "monthly_cost": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "hourly_cost": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "diff_monthly_cost": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "diff_hourly_cost": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "driftCounts": {
+      "type": "object",
+      "properties": {
+        "create": {
+          "type": "integer"
+        },
+        "update": {
+          "type": "integer"
+        },
+        "delete": {
+          "type": "integer"
+        },
+        "replace": {
+          "type": "integer"
+        },
+        "no-op": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true
+    },
+    "driftChange": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "module_address": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "action": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    }
   },
   "properties": {
     "summary": {
@@ -77,6 +231,24 @@
         },
         "issues_found": {
           "type": "integer"
+        },
+        "cost": {
+          "$ref": "#/definitions/costSummary"
+        },
+        "drift": {
+          "type": "object",
+          "properties": {
+            "has_changes": {
+              "type": "boolean"
+            },
+            "total_changes": {
+              "type": "integer"
+            },
+            "counts": {
+              "$ref": "#/definitions/driftCounts"
+            }
+          },
+          "additionalProperties": true
         }
       },
       "required": [
@@ -198,6 +370,94 @@
           "description"
         ]
       }
+    },
+    "cost": {
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string"
+        },
+        "currency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "$ref": "#/definitions/costSummary"
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/costProject"
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "drift": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "counts": {
+          "$ref": "#/definitions/driftCounts"
+        },
+        "total_changes": {
+          "type": "integer"
+        },
+        "has_changes": {
+          "type": "boolean"
+        },
+        "resource_changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/driftChange"
+          }
+        },
+        "output_changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "before": {},
+              "after": {}
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
     }
   },
   "required": [

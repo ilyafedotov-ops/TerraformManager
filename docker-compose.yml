@@ -4,10 +4,10 @@ services:
     build: .
     image: terraform-manager:local
     environment:
-      - TFM_PORT=8787
+      - TFM_PORT=8890
       # - TFM_API_TOKEN=changeme  # uncomment to require API token for JSON endpoints
     ports:
-      - "8787:8787"
+      - "8890:8890"
     volumes:
       - ./knowledge:/app/knowledge
       - ./data:/app/data

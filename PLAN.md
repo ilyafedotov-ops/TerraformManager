@@ -17,7 +17,7 @@
 - [x] Seed knowledge base + link explanations in findings.
 
 ### Deliverables
-- Streamlit wizard with AWS/Azure/K8s flows.
+- SvelteKit wizard with AWS/Azure/K8s flows wired to FastAPI endpoints.
 - CLI with Terraform validate integration.
 - Initial policy coverage (S3 HTTPS/SSE, storage HTTPS, kube runAsNonRoot, etc.).
 - Optional terraform validation in tests/CI via `TFM_RUN_TERRAFORM_VALIDATE`.
@@ -78,7 +78,7 @@
 
 ## Phase C – Developer Experience & CI Controls (📝 Planned)
 - PR comment bot / GitHub App that surfaces top findings with permalinks.
-- ✅ Surface severity gating outcomes from `tfreview.yaml` in Streamlit Review tab.
+- ✅ Surface severity gating outcomes from `tfreview.yaml` in SvelteKit Review tab.
 - ✅ Baseline file generation to suppress legacy noise.
 - ✅ `.patch` output for autofixable findings (S3 policies, ALB redirect snippets, etc.).
 - ✅ Enhanced reporting (HTML summary) for CI artifacts (trend metrics still pending).
@@ -171,3 +171,74 @@
 - AWS regional guardrails (config conformance packs) and extended ALB logging scenarios.
 - Kubernetes PodSecurity admission baseline for multiple namespaces.
 - Phase C/D items: PR comment bot, severity gating, embedding-based RAG, diff-only scanning.
+
+---
+
+## Frontend Migration Roadmap (SvelteKit + FastAPI Integration)
+
+### 1. Layout & Navigation Baseline (🎨 Theming)
+- Align root `+layout.svelte` with Notus Svelte shell (header, sidebar, responsive grid) and populate shared nav state via `+layout.server.ts` load functions, following the SvelteKit layout data flow (`/sveltejs/kit` routing docs).
+- Establish protected layout wrapper that redirects unauthenticated users pre-render using typed `LayoutServerLoad` guards; ensure tokens persist in cookies/localStorage hybrid store.
+- Draft initial Notus-based designs for Login, Register, Forgot Password, Settings, Dashboard, Review, Knowledge, and Generator screens with consistent spacing/typography tokens.
+
+### 2. Auth & Session Wiring (🔐 FastAPI)
+- Extend FastAPI auth handlers to return OAuth2-compliant tokens and reuse shared dependencies (`Security`, `SecurityScopes`) for role-based gating per FastAPI security docs.
+- Implement refresh-token rotation and background activity logging leveraging FastAPI `BackgroundTasks` for audit trails.
+- Wire SvelteKit form actions to `/auth/*` endpoints with optimistic UI states and error surfaces aligned to Notus alerts.
+
+### 3. App Shell Features (🧭 UX Consistency)
+- Centralize page breadcrumbs, tab descriptors, and action buttons through layout-level data stores to minimize per-page duplication (per SvelteKit `load` inheritance guidance).
+- Add global toast/notification bus and surface asynchronous job states (e.g., `/knowledge/sync` status) with focus on keyboard accessibility.
+- Provide skeleton/loading states using Notus components while server `load` functions resolve.
+
+### 4. Generator Flows (⚙️ Templates)
+- Complete Kubernetes generator wiring inside `frontend/src/routes/(app)/generate/+page.svelte` once backend renderer lands; extend `generators` array with K8s metadata and dynamic form sections.
+- Support multi-step wizard pattern (source, options, review) using SvelteKit progressive enhancement: `+page.server.ts` actions to call FastAPI generator endpoints and stream Terraform artifacts.
+- Validate generated bundles by piping FastAPI responses through Terraform CLI smoke tests; apply `moved` blocks in Terraform modules when refactoring template directories to preserve state (`/hashicorp/terraform` planning docs).
+
+### 5. Knowledge Management UX (📚 RAG Enhancements)
+- Surface `/knowledge/sync` completion as success/error toasts and log raw sync results in activity history.
+- Introduce Markdown preview modal for search hits, loading content via SvelteKit server load and caching in the store for offline-friendly behavior.
+- Extend upload pipeline with drag-and-drop dropzone, progress indicators, and FastAPI background indexing feedback.
+
+### 6. Review & Reporting (🛡️ Scan Experience)
+- Migrate scan upload flow to SvelteKit form actions with streaming progress feedback; confirm FastAPI dependencies enforce CORS and token scopes.
+- Embed findings tables with column grouping (severity/resource/rule) and link to knowledge docs; cache recent uploads in IndexedDB for quick revisit.
+- Provide diff viewer component using existing backend diff utilities and align styles with Notus code blocks.
+
+### 7. Settings & Admin (⚙️ Control Plane)
+- Build settings subsections (LLM config, tokens, Terraform hooks) using nested routes under `/settings` with layout-supplied section metadata.
+- Integrate feature flags for beta generators; guard via FastAPI role-based dependencies and expose toggles in UI.
+- Add webhook/API key management page, ensuring secrets masked client-side and retrieved from FastAPI only when necessary.
+
+### 8. Testing & Quality Gates (✅ Confidence)
+- Author Playwright flows covering auth, generator submissions (AWS, Azure, K8s), and knowledge sync; run in CI alongside backend tests.
+- Create contract tests for FastAPI endpoints (auth, generators, knowledge) verifying scope requirements, leveraging dependency override patterns.
+- Maintain Terraform regression safety net by running `python -m backend.cli scan sample --out tmp/report.json` plus targeted `terraform validate` runs after template updates.
+
+### 9. Documentation & Enablement (📝 Change Management)
+- Update README/docs with SvelteKit setup, Notus theme usage, auth flow diagrams, and generator walkthroughs; include screenshots from new pages.
+- Add knowledge base articles covering Azure generator usage and new workflows; reindex via `python -m backend.cli reindex`.
+- Publish migration guide outlining the Streamlit ➜ SvelteKit decommission, deployment steps, and testing expectations for contributors.
+
+---
+
+## Immediate Implementation Steps (🔜 Sprint Focus)
+
+### A. Prototype Notus App Shell & Auth Views
+- ✅ Refined `frontend/src/routes/+layout.svelte` and `(app)/+layout.svelte` to honour Notus layout patterns, hydrate sidebar/header state from server data, and redirect unauthenticated users via shared layouts.
+- ✅ Added `frontend/src/hooks.server.ts` to populate `event.locals.user` / `token` from cookies and surface them in `(app)/+layout.server.ts` for avatar + expiry metadata; clears invalid tokens on logout.
+- ✅ Flesh out `(auth)` child pages (`register`, `forgot-password`) with Notus forms, SvelteKit form actions, and FastAPI-backed workflows while `login` leverages progressive enhancement to hit `/auth/token`.
+
+### B. Expand FastAPI Auth & Session Contract
+- ✅ Introduced `api/routes/auth.py` with OAuth2 password flow, JWT access tokens, rotating refresh-token HttpOnly cookies, and shared helpers in `api/security.py`.
+- ✅ Updated shared dependency (`require_api_token`) to trust JWT claims, added `/auth/me` + `/auth/logout`, and wired audit logging via `BackgroundTasks` for login/refresh/logout events.
+- ✅ Expose new auth events in UI once activity/history surfaces are designed.
+
+### C. Prepare Terraform Generator Safety Nets
+- When duplicating or refactoring templates for the new UI flows, add `moved` blocks in Terraform modules as needed so downstream users can run `terraform apply` without state loss (per `/hashicorp/terraform` planning guidance).
+- Extend generator smoke tests to cover new Kubernetes flows once UI wiring lands, ensuring `terraform validate` passes for generated archives.
+
+### D. UX Enhancements to Support Upcoming Work
+- ✅ Add a reusable toast/notification store in `frontend/src/lib/stores/notifications.ts` to announce outcomes (knowledge sync success, auth errors). Trigger from `/knowledge/sync` calls and generator submissions.
+- ✅ Define breadcrumb metadata within `(app)/+layout.svelte` using layout data to drive titles/subtitles across routes.

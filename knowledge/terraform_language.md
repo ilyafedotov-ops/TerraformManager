@@ -7,3 +7,8 @@
 - **Depends**: implicit via references; explicit `depends_on = [...]` for edge cases.
 - **Formatting**: `terraform fmt` to normalize style.
 - **Validation**: `terraform validate` after `init`.
+
+## Remote State Basics
+
+- S3 backend: enable `encrypt = true` and configure `dynamodb_table` for state locking alongside unique bucket/key per workspace.
+- Azure backend: set `resource_group_name`, `storage_account_name`, `container_name`, and `key` explicitly to control where state is written.

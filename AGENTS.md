@@ -1,36 +1,35 @@
-# Repository Guidelines
+# Agent Handbook
 
-## Project Structure & Module Organization
-- `app.py` delivers the Streamlit UI with Generate, Review, and Knowledge tabs; keep UI helpers close to their tab definitions.
-- `backend/` hosts reusable logic: `cli.py` (entry point), `scanner.py` (rule engine + terraform hooks), `rag.py` (knowledge retrieval), `generators/` (Jinja templates), and `utils/` for diff helpers.
-- `knowledge/` supplies Markdown explanations referenced by the reviewer; add new concepts here and re-index via the CLI.
-- `docs/report_schema.json` defines the machine-readable findings contract, while `sample/` contains intentionally insecure Terraform projects for regression checks.
+## Repository Layout
+- `frontend/` contains the SvelteKit dashboard; use `src/lib/api` for typed clients and `src/routes/(app)` for authenticated pages.
+- `api/` is the FastAPI surface that powers `/scan`, `/reports`, auth flows, and serves the lightweight HTMX UI in `ui/`.
+- `backend/` houses reusable engines: `cli.py`, `scanner.py`, `policies/`, `generators/`, `rag.py`, `validators.py`, and shared utilities under `utils/`.
+- `knowledge/`, `docs/`, `sample/`, and `tests/backend/` provide explainer content, schemas, regression fixtures, and automated coverage respectively.
 
-## Build, Test, and Development Commands
-```bash
-python -m venv .venv && source .venv/bin/activate  # create local env
-pip install -r requirements.txt                    # install app + backend deps
-streamlit run app.py                               # launch GUI
-python -m backend.cli scan sample --out report.json  # run reviewer on fixtures
-python -m backend.cli scan --path YOUR_DIR --terraform-validate  # optional terraform hook
-```
-- Regenerate the TF-IDF index after adding knowledge documents with `python -m backend.cli reindex`.
+## Environment & Tooling
+- Python 3.11+ recommended; bootstrap with `python -m venv .venv && source .venv/bin/activate`.
+- Install shared dependencies via `pip install -r requirements.txt`; CLI and API share the same stack.
+- Frontend uses PNPM: `cd frontend && pnpm install`; dev server runs with `pnpm dev -- --open`.
+- FastAPI API runs with `python -m api` (loads uvicorn with auto-reload).
+- Rebuild the TF-IDF index after adding Markdown knowledge with `python -m backend.cli reindex`.
 
-## Coding Style & Naming Conventions
-- Follow PEP 8 with 4-space indentation, `snake_case` for functions/modules, and `CamelCase` for classes; prefer descriptive names that reflect Terraform resources (e.g., `scan_aws_s3_policy`).
-- Include type hints on public functions in `backend/` modules and add docstrings when behavior is non-obvious, especially around policy checks.
-- Jinja templates in `backend/generators/` should use clear block names and Terraform-style resource IDs (e.g., `aws_s3_bucket.default`).
+## Working Agreements
+- Follow PEP 8 with 4-space indentation, rich type hints on public `backend/` functions, and concise docstrings where behavior is non-obvious.
+- Svelte files embrace `script lang="ts"` and Tailwind classes; keep route-level actions in `+page.server.ts` and share layout state through stores (`frontend/src/lib/stores`).
+- Keep Jinja templates terraform-native (e.g., `aws_s3_bucket.default`) and document new inputs in the generator metadata.
+- Use environment variables for credentials or model keys; never hard-code secrets or commit local secrets files.
+- Prefer `rg`/`pytest -q`/`pnpm test` in this repo; avoid destructive git commands unless a maintainer asks explicitly.
 
-## Testing Guidelines
-- Exercise the reviewer against `sample/` before merging: `python -m backend.cli scan sample --out tmp/report.json && cat tmp/report.json`.
-- Validate generated Terraform by importing new templates into a throwaway directory and running `terraform fmt && terraform validate` when Terraform is installed.
-- When adding automated coverage, place tests under `tests/backend/...` and mirror module names; name files `test_<module>.py`.
+## Validation Flow
+- Run `python -m backend.cli scan sample --out tmp/report.json` before merge; optionally add `--terraform-validate` when Terraform is installed.
+- HTML/CSV artifacts can be produced with `--html-out report.html` and `--patch-out autofix.patch`; attach sanitized outputs to PRs when relevant.
+- FastAPI smoke test: `python -m api` then hit `/health`; for auth flows, supply `TFM_API_TOKEN` or JWT tokens described in `api/security.py`.
+- Frontend CI parity: `cd frontend && pnpm lint && pnpm check && pnpm test` (Vitest). Align any new endpoints with `frontend/src/lib/api/client.ts`.
+- Terraform templates should round-trip through `scripts/render_templates.py` (if added) or manual `terraform fmt && terraform validate` in a temp directory.
 
-## Commit & Pull Request Guidelines
-- Use imperative, scope-prefixed commit messages such as `feat(scanner): expand s3 encryption rule`; group unrelated changes into separate commits.
-- PRs should summarize functional impact, list manual/verifier commands run, and attach key artifacts (e.g., sanitized `report.json` snippets or screenshots from the GUI).
-- Reference tracking issues in the PR description and call out any new Terraform templates or policies that require doc updates.
-
-## Security & Configuration Tips
-- Never commit real cloud credentials; rely on environment variables or `.streamlit/secrets.toml` excluded via `.gitignore`.
-- Scrub uploaded Terraform files of secrets before sharing in issues, and update `docs/report_schema.json` if new sensitive fields are exposed in findings.
+## Collaboration Checklist
+- Split work by surface: frontend changes under `frontend/`, API changes touch `api/`, static checks and generators in `backend/`.
+- Document new reviewer rules or generator inputs in `docs/` or `knowledge/` and call out reindexing needs.
+- Use imperative, scope-prefixed commit messages (`feat(scanner): enforce alb logging`) and keep unrelated work in separate PRs.
+- Update README/PLAN when roadmap or feature matrices change; surface manual verification commands in PR descriptions.
+- If you add new configuration or secrets, ensure `.env.sample` (if created) reflects them and reference loading helpers in `backend/utils/env.py`.
