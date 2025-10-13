@@ -26,8 +26,8 @@
 
 <form class="space-y-8" method="POST" use:enhance>
 	<div class="space-y-2">
-		<h2 class="text-3xl font-semibold text-blueGray-700">Recover API token</h2>
-		<p class="text-sm text-blueGray-500">
+		<h2 class="text-3xl font-semibold text-slate-700">Recover API token</h2>
+		<p class="text-sm text-slate-500">
 			Enter your work email and we&rsquo;ll send the latest onboarding instructions. Automated delivery will hook into
 			your identity provider later in the migration, but this keeps the workflow in-product today.
 		</p>
@@ -46,10 +46,10 @@
 	{/if}
 
 	<div class="space-y-6">
-		<label class="block space-y-2 text-sm font-medium text-blueGray-600">
+		<label class="block space-y-2 text-sm font-medium text-slate-600">
 			<span>Email</span>
 			<input
-				class="w-full rounded-2xl border border-blueGray-300 bg-white px-4 py-3 text-base text-blueGray-700 shadow-inner shadow-blueGray-200 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
+				class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
 				type="email"
 				name="email"
 				placeholder="security@company.com"
@@ -66,8 +66,8 @@
 		Send recovery email
 	</button>
 
-	<p class="text-xs text-blueGray-400">
+	<p class="text-xs text-slate-400">
 		Remembered your token?
-		<a class="font-semibold text-lightBlue-600 hover:text-lightBlue-700" href="/login">Back to sign-in</a>
+		<a class="font-semibold text-sky-600 hover:text-sky-700" href="/login">Back to sign-in</a>
 	</p>
 </form>

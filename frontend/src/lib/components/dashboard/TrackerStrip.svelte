@@ -16,16 +16,16 @@
 		ok: 'bg-emerald-400',
 		warning: 'bg-amber-400',
 		danger: 'bg-rose-500',
-		muted: 'bg-blueGray-200'
+		muted: 'bg-slate-200'
 	};
 </script>
 
 <div class="space-y-2">
-	<div class="flex items-center justify-between text-xs uppercase tracking-[0.25em] text-blueGray-400">
+	<div class="flex items-center justify-between text-xs uppercase tracking-[0.25em] text-slate-400">
 		<span>Timeline</span>
 		<span>Total {total}</span>
 	</div>
-	<div class="flex h-3 overflow-hidden rounded-full border border-blueGray-200 bg-blueGray-100">
+	<div class="flex h-3 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
 		{#each segments as segment (segment.title)}
 			<div
 				class={`relative flex-1 ${colors[segment.variant ?? 'muted']}`}
@@ -36,7 +36,7 @@
 			</div>
 		{/each}
 	</div>
-	<ul class="flex flex-wrap gap-4 text-[0.65rem] uppercase tracking-[0.2em] text-blueGray-400">
+	<ul class="flex flex-wrap gap-4 text-[0.65rem] uppercase tracking-[0.2em] text-slate-400">
 		{#each segments as segment (segment.title)}
 			<li class="flex items-center gap-2">
 				<span class={`h-2 w-2 rounded-full ${colors[segment.variant ?? 'muted']}`}></span>

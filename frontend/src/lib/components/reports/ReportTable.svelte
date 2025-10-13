@@ -65,9 +65,9 @@ const driftStatus = (summary?: ReportSummary['summary']) => {
 const isDeleting = (id: string) => props.deletingId === id;
 </script>
 
-<div class="overflow-x-auto rounded-3xl border border-blueGray-200 bg-white shadow-xl shadow-blueGray-300/40">
-	<table class="min-w-full divide-y divide-blueGray-100 text-sm">
-		<thead class="bg-blueGray-50 text-xs uppercase tracking-[0.3em] text-blueGray-400">
+<div class="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-300/40">
+	<table class="min-w-full divide-y divide-slate-100 text-sm">
+		<thead class="bg-slate-50 text-xs uppercase tracking-[0.3em] text-slate-400">
 			<tr>
 				<th class="px-6 py-4 text-left">Report ID</th>
 				<th class="px-6 py-4 text-left">Created</th>
@@ -78,12 +78,12 @@ const isDeleting = (id: string) => props.deletingId === id;
 				<th class="px-6 py-4 text-right">Actions</th>
 			</tr>
 		</thead>
-		<tbody class="divide-y divide-blueGray-100 text-blueGray-500">
+		<tbody class="divide-y divide-slate-100 text-slate-500">
 			{#each props.reports as report (report.id)}
-				<tr class="hover:bg-lightBlue-50">
-					<td class="px-6 py-4 font-mono text-sm text-blueGray-600">{report.id}</td>
+				<tr class="hover:bg-sky-50">
+					<td class="px-6 py-4 font-mono text-sm text-slate-600">{report.id}</td>
 					<td class="px-6 py-4">{formatDate(report.created_at)}</td>
-					<td class="px-6 py-4 uppercase tracking-[0.2em] text-blueGray-500">{severityLabel(report.summary)}</td>
+					<td class="px-6 py-4 uppercase tracking-[0.2em] text-slate-500">{severityLabel(report.summary)}</td>
 					<td class="px-6 py-4">{issuesCount(report.summary)}</td>
 					<td class="px-6 py-4">{costDelta(report.summary)}</td>
 					<td class="px-6 py-4">{driftStatus(report.summary)}</td>

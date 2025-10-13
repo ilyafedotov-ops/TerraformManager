@@ -224,9 +224,9 @@
 	};
 </script>
 
-<div class="flex min-h-screen bg-blueGray-100 text-blueGray-700">
+<div class="flex min-h-screen bg-slate-100 text-slate-700">
 	<button
-		class="fixed left-4 top-4 z-40 inline-flex h-11 w-11 items-center justify-center rounded-xl border border-blueGray-200 bg-white text-blueGray-500 shadow-lg shadow-blueGray-300 transition hover:text-blueGray-700 lg:hidden"
+		class="fixed left-4 top-4 z-40 inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-lg shadow-slate-300 transition hover:text-slate-700 lg:hidden"
 		type="button"
 		onclick={() => navigationState.toggleSidebar()}
 		aria-label="Toggle navigation"
@@ -240,18 +240,18 @@
 	</button>
 
 	<aside
-		class="fixed inset-y-0 left-0 z-30 w-72 transform space-y-6 overflow-y-auto border-r border-blueGray-200 bg-white px-6 py-10 shadow-xl shadow-blueGray-300 transition duration-200 ease-out lg:translate-x-0 lg:opacity-100"
+		class="fixed inset-y-0 left-0 z-30 w-72 transform space-y-6 overflow-y-auto border-r border-slate-200 bg-white px-6 py-10 shadow-xl shadow-slate-300 transition duration-200 ease-out lg:translate-x-0 lg:opacity-100"
 		class:translate-x-0={$navigationState.sidebarOpen}
 		class:-translate-x-full={!$navigationState.sidebarOpen}
 	>
 		<div class="flex items-center justify-between">
-			<div class="flex items-center gap-3 text-lg font-semibold uppercase tracking-[0.4em] text-blueGray-400">
-				<span class="flex h-10 w-10 items-center justify-center rounded-xl bg-lightBlue-500 text-xl font-semibold text-white shadow-lg shadow-lightBlue-200">
+			<div class="flex items-center gap-3 text-lg font-semibold uppercase tracking-[0.4em] text-slate-400">
+				<span class="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500 text-xl font-semibold text-white shadow-lg shadow-sky-200">
 					TF
 				</span>
 				<span class="flex flex-col gap-0 leading-tight">
-					<span class="text-xs text-blueGray-400">Terraform</span>
-					<span class="text-sm text-blueGray-700">Manager</span>
+					<span class="text-xs text-slate-400">Terraform</span>
+					<span class="text-sm text-slate-700">Manager</span>
 				</span>
 			</div>
 		</div>
@@ -264,61 +264,61 @@
 			on:toggleSection={(event) => navigationState.setExpanded(event.detail.key, event.detail.open)}
 		/>
 
-		<div class="rounded-2xl border border-blueGray-200 bg-blueGray-50 p-4 text-xs text-blueGray-500">
-			<p class="font-semibold uppercase tracking-[0.3em] text-blueGray-400">Environment</p>
-			<p class="mt-2 font-mono text-blueGray-600">Local Development</p>
-			<p class="mt-2 text-blueGray-500">
+		<div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
+			<p class="font-semibold uppercase tracking-[0.3em] text-slate-400">Environment</p>
+			<p class="mt-2 font-mono text-slate-600">Local Development</p>
+			<p class="mt-2 text-slate-500">
 				API server:
-				<code class="rounded border border-blueGray-200 bg-white px-1 py-0.5 text-blueGray-600">http://localhost:8890</code>
+				<code class="rounded border border-slate-200 bg-white px-1 py-0.5 text-slate-600">http://localhost:8890</code>
 			</p>
 		</div>
 	</aside>
 
 	<div class="flex flex-1 flex-col lg:ml-72">
-		<header class="sticky top-0 z-20 flex items-center justify-between border-b border-blueGray-200 bg-white/90 px-6 py-5 backdrop-blur">
+		<header class="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white/90 px-6 py-5 backdrop-blur">
 			<div class="space-y-1">
 				{#if breadcrumbs.length}
-					<nav class="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-blueGray-400">
+					<nav class="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-slate-400">
 						{#each breadcrumbs as crumb, index (crumb.href)}
-							<a class="text-blueGray-400 hover:text-blueGray-600" href={crumb.href}>{crumb.label}</a>
+							<a class="text-slate-400 hover:text-slate-600" href={crumb.href}>{crumb.label}</a>
 							{#if index < breadcrumbs.length - 1}
 								<span aria-hidden="true">/</span>
 							{/if}
 						{/each}
 					</nav>
 				{:else}
-					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">Terraform Manager</p>
+					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Terraform Manager</p>
 				{/if}
-				<h1 class="text-2xl font-semibold text-blueGray-700">{section?.title ?? 'Control plane'}</h1>
+				<h1 class="text-2xl font-semibold text-slate-700">{section?.title ?? 'Control plane'}</h1>
 				{#if section?.subtitle}
-					<p class="text-xs text-blueGray-400">{section.subtitle}</p>
+					<p class="text-xs text-slate-400">{section.subtitle}</p>
 				{/if}
 			</div>
 			<div class="flex items-center gap-3">
-				<div class="hidden flex-col items-end text-right text-xs text-blueGray-400 sm:flex">
+				<div class="hidden flex-col items-end text-right text-xs text-slate-400 sm:flex">
 					<span class="uppercase tracking-[0.35em]">Signed in as</span>
-					<span class="text-sm font-semibold text-blueGray-700">{profile?.email ?? 'Unknown user'}</span>
+					<span class="text-sm font-semibold text-slate-700">{profile?.email ?? 'Unknown user'}</span>
 					{#if tokenExpiryMinutes !== null}
-						<span class="mt-1 inline-flex items-center gap-1 rounded-full border border-blueGray-200 bg-blueGray-50 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-blueGray-500">
+						<span class="mt-1 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-slate-500">
 							Token renew in ~{tokenExpiryMinutes}m
 						</span>
 					{/if}
 				</div>
 				<button
 					type="button"
-					class="rounded-xl bg-lightBlue-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-lightBlue-200 transition hover:bg-lightBlue-600"
+					class="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-sky-200 transition hover:bg-sky-600"
 					onclick={() => void openCommandPalette()}
 				>
 					Command Palette
 				</button>
 				<button
 					type="button"
-					class="rounded-xl border border-blueGray-200 bg-white px-4 py-2 text-sm font-semibold text-blueGray-500 transition hover:bg-blueGray-50"
+					class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-50"
 					onclick={handleSignOut}
 				>
 					Sign out
 				</button>
-				<div class="flex h-11 w-11 items-center justify-center rounded-xl bg-lightBlue-500 text-base font-semibold text-white shadow-md shadow-lightBlue-200">
+				<div class="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-500 text-base font-semibold text-white shadow-md shadow-sky-200">
 					{#if profile?.email}
 						{profile.email.slice(0, 2).toUpperCase()}
 					{:else}
@@ -334,13 +334,13 @@
 			</div>
 		</main>
 
-		<footer class="border-t border-blueGray-200 bg-white/70 px-6 py-6 text-xs text-blueGray-400">
+		<footer class="border-t border-slate-200 bg-white/70 px-6 py-6 text-xs text-slate-400">
 			<div class="mx-auto flex w-full max-w-6xl items-center justify-between">
 				<p>&copy; {new Date().getFullYear()} Terraform Manager</p>
 				<p>
 					Built with SvelteKit + Notus theme
 					<span aria-hidden="true">•</span>
-					<a class="font-semibold text-lightBlue-500 hover:text-lightBlue-600" href="/knowledge">Knowledge base</a>
+					<a class="font-semibold text-sky-500 hover:text-sky-600" href="/knowledge">Knowledge base</a>
 				</p>
 			</div>
 		</footer>
@@ -348,7 +348,7 @@
 
 	{#if $navigationState.commandOpen}
 		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-blueGray-900/40 backdrop-blur-sm"
+			class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm"
 			role="presentation"
 			onclick={(event) => {
 				if (event.target === event.currentTarget) {
@@ -357,7 +357,7 @@
 			}}
 		>
 			<div
-				class="w-full max-w-xl rounded-3xl border border-blueGray-200 bg-white p-6 shadow-2xl shadow-blueGray-900/20"
+				class="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl shadow-slate-900/20"
 				role="dialog"
 				aria-modal="true"
 				aria-labelledby="command-palette-title"
@@ -370,20 +370,20 @@
 				onkeydown={handleDialogKeydown}
 			>
 				<div class="flex items-center justify-between gap-3">
-					<h2 id="command-palette-title" class="text-sm font-semibold uppercase tracking-[0.3em] text-blueGray-400">
+					<h2 id="command-palette-title" class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">
 						Command palette
 					</h2>
 					<button
 						type="button"
-						class="rounded-xl border border-blueGray-200 px-3 py-1 text-xs font-semibold text-blueGray-500 transition hover:bg-blueGray-50"
+						class="rounded-xl border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-500 transition hover:bg-slate-50"
 						onclick={closeCommandPalette}
 					>
 						Close
 					</button>
 				</div>
-				<div class="mt-4 rounded-2xl border border-blueGray-200 bg-blueGray-50 p-3">
+				<div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
 					<input
-						class="w-full rounded-xl border border-blueGray-200 bg-white px-3 py-2 text-sm text-blueGray-700 focus:border-lightBlue-400 focus:outline-none focus:ring-2 focus:ring-lightBlue-200"
+						class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
 						type="search"
 						placeholder="Jump to a page…"
 						value={$navigationState.commandQuery}
@@ -391,28 +391,28 @@
 						oninput={(event) => navigationState.setCommandQuery((event.target as HTMLInputElement).value)}
 						onkeydown={(event) => handleCommandInputKeydown(event, firstCommandHref)}
 					/>
-					<p class="mt-2 text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-blueGray-400">
+					<p class="mt-2 text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-slate-400">
 						Press Esc to close • {browser ? (navigator.platform.includes('Mac') ? '⌘K' : 'Ctrl+K') : 'Ctrl+K'} to open
 					</p>
 				</div>
-				<div class="mt-4 max-h-60 overflow-auto rounded-2xl border border-blueGray-200 bg-white">
+				<div class="mt-4 max-h-60 overflow-auto rounded-2xl border border-slate-200 bg-white">
 					{#if actionableCommandItems.length}
-						<ul class="divide-y divide-blueGray-100 text-sm text-blueGray-600">
+						<ul class="divide-y divide-slate-100 text-sm text-slate-600">
 							{#each actionableCommandItems as item (item.href ?? item.title)}
 								<li>
 									<button
-										class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-lightBlue-50 hover:text-lightBlue-600"
+										class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-sky-50 hover:text-sky-600"
 										type="button"
 										onclick={() => void handleCommandSelect(item.href)}
 									>
 										<span class="font-semibold">{item.title}</span>
-										<span class="text-xs uppercase tracking-[0.2em] text-blueGray-400">{item.href}</span>
+										<span class="text-xs uppercase tracking-[0.2em] text-slate-400">{item.href}</span>
 									</button>
 								</li>
 							{/each}
 						</ul>
 					{:else}
-						<p class="px-4 py-6 text-sm text-blueGray-400">No matching destinations.</p>
+						<p class="px-4 py-6 text-sm text-slate-400">No matching destinations.</p>
 					{/if}
 				</div>
 			</div>

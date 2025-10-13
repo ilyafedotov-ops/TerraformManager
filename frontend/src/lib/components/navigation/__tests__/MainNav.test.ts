@@ -95,7 +95,7 @@ describe('MainNav', () => {
 
 		const reportsLink = getByText('Reports').closest('a');
 		expect(reportsLink).not.toBeNull();
-		expect(reportsLink?.className).toContain('bg-lightBlue-50');
-		expect(reportsLink?.className).toContain('text-lightBlue-600');
+		expect(reportsLink?.className).toContain('bg-sky-50');
+		expect(reportsLink?.className).toContain('text-sky-600');
 	});
 });

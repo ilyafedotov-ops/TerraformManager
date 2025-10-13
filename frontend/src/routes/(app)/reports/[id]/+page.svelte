@@ -95,11 +95,11 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 
 <section class="space-y-6">
 	<header class="space-y-2">
-		<a class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400 hover:text-lightBlue-500" href="/reports">
+		<a class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 hover:text-sky-500" href="/reports">
 			← Back to reports
 		</a>
-		<h2 class="text-3xl font-semibold text-blueGray-700">Report {params.id}</h2>
-		<p class="max-w-2xl text-sm text-blueGray-500">
+		<h2 class="text-3xl font-semibold text-slate-700">Report {params.id}</h2>
+		<p class="max-w-2xl text-sm text-slate-500">
 			Download artifacts or inspect severity trends from this run. The embedded findings table will land in a follow-up
 			iteration utilising the existing FastAPI viewer endpoints.
 		</p>
@@ -113,18 +113,18 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 	{/if}
 
 	{#if report}
-		<div class="space-y-6 rounded-3xl border border-blueGray-200 bg-white p-6 shadow-xl shadow-blueGray-300/40">
+		<div class="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40">
 			<div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-				<div class="flex flex-wrap gap-3 text-xs text-blueGray-500">
-					<span class="rounded-xl border border-blueGray-200 px-3 py-1">
-						Findings: <strong class="text-blueGray-600">{findingCount}</strong>
+				<div class="flex flex-wrap gap-3 text-xs text-slate-500">
+					<span class="rounded-xl border border-slate-200 px-3 py-1">
+						Findings: <strong class="text-slate-600">{findingCount}</strong>
 					</span>
-					<span class="rounded-xl border border-blueGray-200 px-3 py-1">
-						Issues tracked: <strong class="text-blueGray-600">{issuesFound}</strong>
+					<span class="rounded-xl border border-slate-200 px-3 py-1">
+						Issues tracked: <strong class="text-slate-600">{issuesFound}</strong>
 					</span>
 					{#if generatedAt}
-						<span class="rounded-xl border border-blueGray-200 px-3 py-1">
-							Generated: <strong class="text-blueGray-600">{generatedAt}</strong>
+						<span class="rounded-xl border border-slate-200 px-3 py-1">
+							Generated: <strong class="text-slate-600">{generatedAt}</strong>
 						</span>
 					{/if}
 				</div>
@@ -143,35 +143,35 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 			{/if}
 
 			<div class="grid gap-4 md:grid-cols-3">
-				<div class="rounded-2xl border border-blueGray-200 bg-blueGray-50 p-4">
-					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">Issues found</p>
-					<p class="mt-3 text-4xl font-semibold text-blueGray-700">{issuesFound}</p>
+				<div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Issues found</p>
+					<p class="mt-3 text-4xl font-semibold text-slate-700">{issuesFound}</p>
 				</div>
-				<div class="rounded-2xl border border-blueGray-200 bg-blueGray-50 p-4">
-					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">Findings</p>
-					<p class="mt-3 text-4xl font-semibold text-blueGray-700">{findingCount}</p>
+				<div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Findings</p>
+					<p class="mt-3 text-4xl font-semibold text-slate-700">{findingCount}</p>
 				</div>
-				<div class="rounded-2xl border border-blueGray-200 bg-blueGray-50 p-4">
-					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">Top severity</p>
-					<p class="mt-3 text-2xl font-semibold text-blueGray-700">
+				<div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Top severity</p>
+					<p class="mt-3 text-2xl font-semibold text-slate-700">
 						{severityEntries.length ? severityEntries[0][0] : '—'}
 					</p>
 				</div>
 			</div>
 
 			<section class="space-y-3">
-				<h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">Severity breakdown</h3>
+				<h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Severity breakdown</h3>
 				{#if severityEntries.length}
 					<div class="space-y-2">
 						{#each severityEntries as [severity, count]}
-							<div class="flex items-center gap-4 rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm">
-								<span class="w-28 text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-500">{severity}</span>
-								<span class="flex-1 text-blueGray-600">{count}</span>
+							<div class="flex items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+								<span class="w-28 text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">{severity}</span>
+								<span class="flex-1 text-slate-600">{count}</span>
 							</div>
 						{/each}
 					</div>
 				{:else}
-					<p class="rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-500">
+					<p class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
 						No severity counts recorded for this run.
 					</p>
 				{/if}
@@ -179,30 +179,30 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 
 			{#if hasCost}
 				<section class="space-y-4">
-					<h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">Cost insights</h3>
+					<h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Cost insights</h3>
 					<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-						<div class="rounded-2xl border border-blueGray-200 bg-lightBlue-50 p-4 text-blueGray-700">
-							<p class="text-xs font-semibold uppercase tracking-[0.3em] text-lightBlue-500">Total monthly</p>
+						<div class="rounded-2xl border border-slate-200 bg-sky-50 p-4 text-slate-700">
+							<p class="text-xs font-semibold uppercase tracking-[0.3em] text-sky-500">Total monthly</p>
 							<p class="mt-2 text-2xl font-semibold">{formatCurrency(totalMonthlyCost)}</p>
 						</div>
-						<div class="rounded-2xl border border-blueGray-200 bg-lightBlue-50 p-4 text-blueGray-700">
-							<p class="text-xs font-semibold uppercase tracking-[0.3em] text-lightBlue-500">Δ monthly</p>
+						<div class="rounded-2xl border border-slate-200 bg-sky-50 p-4 text-slate-700">
+							<p class="text-xs font-semibold uppercase tracking-[0.3em] text-sky-500">Δ monthly</p>
 							<p class="mt-2 text-2xl font-semibold">{formatCurrency(diffMonthlyCost)}</p>
 						</div>
-						<div class="rounded-2xl border border-blueGray-200 bg-lightBlue-50 p-4 text-blueGray-700">
-							<p class="text-xs font-semibold uppercase tracking-[0.3em] text-lightBlue-500">Total hourly</p>
+						<div class="rounded-2xl border border-slate-200 bg-sky-50 p-4 text-slate-700">
+							<p class="text-xs font-semibold uppercase tracking-[0.3em] text-sky-500">Total hourly</p>
 							<p class="mt-2 text-2xl font-semibold">{formatCurrency(totalHourlyCost)}</p>
 						</div>
-						<div class="rounded-2xl border border-blueGray-200 bg-lightBlue-50 p-4 text-blueGray-700">
-							<p class="text-xs font-semibold uppercase tracking-[0.3em] text-lightBlue-500">Δ hourly</p>
+						<div class="rounded-2xl border border-slate-200 bg-sky-50 p-4 text-slate-700">
+							<p class="text-xs font-semibold uppercase tracking-[0.3em] text-sky-500">Δ hourly</p>
 							<p class="mt-2 text-2xl font-semibold">{formatCurrency(diffHourlyCost)}</p>
 						</div>
 					</div>
 
 					{#if costProjects.length}
-						<div class="overflow-x-auto rounded-2xl border border-blueGray-200">
-							<table class="min-w-full divide-y divide-blueGray-100 text-sm text-blueGray-600">
-								<thead class="bg-blueGray-50 text-xs uppercase tracking-[0.25em] text-blueGray-400">
+						<div class="overflow-x-auto rounded-2xl border border-slate-200">
+							<table class="min-w-full divide-y divide-slate-100 text-sm text-slate-600">
+								<thead class="bg-slate-50 text-xs uppercase tracking-[0.25em] text-slate-400">
 									<tr>
 										<th class="px-4 py-3 text-left">Project</th>
 										<th class="px-4 py-3 text-left">Path</th>
@@ -210,11 +210,11 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 										<th class="px-4 py-3 text-right">Δ Monthly</th>
 									</tr>
 								</thead>
-								<tbody class="divide-y divide-blueGray-100">
+								<tbody class="divide-y divide-slate-100">
 									{#each costProjects as project}
 										<tr class="bg-white">
 											<td class="px-4 py-3">{project?.name ?? '—'}</td>
-											<td class="px-4 py-3 text-xs text-blueGray-500">{project?.path ?? '—'}</td>
+											<td class="px-4 py-3 text-xs text-slate-500">{project?.path ?? '—'}</td>
 											<td class="px-4 py-3 text-right">{formatCurrency((project?.monthly_cost as number | null) ?? null)}</td>
 											<td class="px-4 py-3 text-right">{formatCurrency((project?.diff_monthly_cost as number | null) ?? null)}</td>
 										</tr>
@@ -239,34 +239,34 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 
 			{#if driftSummary}
 				<section class="space-y-4">
-					<h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">Plan drift</h3>
+					<h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Plan drift</h3>
 					{#if driftError}
 						<div class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{driftError}</div>
 					{:else}
-						<div class="flex flex-wrap gap-3 text-xs text-blueGray-500">
-							<span class="rounded-xl border border-blueGray-200 px-3 py-1">Total changes: <strong class="text-blueGray-600">{driftSummary?.total_changes ?? 0}</strong></span>
-							<span class="rounded-xl border border-blueGray-200 px-3 py-1">Status: <strong class="text-blueGray-600">{driftHasChanges ? 'Changes detected' : 'No drift'}</strong></span>
+						<div class="flex flex-wrap gap-3 text-xs text-slate-500">
+							<span class="rounded-xl border border-slate-200 px-3 py-1">Total changes: <strong class="text-slate-600">{driftSummary?.total_changes ?? 0}</strong></span>
+							<span class="rounded-xl border border-slate-200 px-3 py-1">Status: <strong class="text-slate-600">{driftHasChanges ? 'Changes detected' : 'No drift'}</strong></span>
 						</div>
 
 						{#if driftCountEntries.length}
 							<ul class="grid gap-2 md:grid-cols-2 lg:grid-cols-4">
 								{#each driftCountEntries as [action, value]}
-									<li class="rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-600">
-										<span class="block text-xs font-semibold uppercase tracking-[0.3em] text-blueGray-400">{action}</span>
-										<span class="mt-2 text-xl font-semibold text-blueGray-700">{value}</span>
+									<li class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+										<span class="block text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">{action}</span>
+										<span class="mt-2 text-xl font-semibold text-slate-700">{value}</span>
 									</li>
 								{/each}
 							</ul>
 						{/if}
 
 						{#if driftResourceChanges.length}
-							<details class="rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-600">
+							<details class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
 								<summary class="cursor-pointer font-semibold">Resource changes ({driftResourceChanges.length})</summary>
 								<div class="mt-2 space-y-2 text-xs">
 									{#each driftResourceChanges as change}
-										<div class="rounded-xl border border-blueGray-200 bg-white px-3 py-2">
-											<p class="font-semibold text-blueGray-700">{(change?.address as string) ?? 'Unknown resource'}</p>
-											<p class="text-blueGray-500">Action: {(change?.action as string) ?? (change?.actions?.join(', ') ?? '—')}</p>
+										<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+											<p class="font-semibold text-slate-700">{(change?.address as string) ?? 'Unknown resource'}</p>
+											<p class="text-slate-500">Action: {(change?.action as string) ?? (change?.actions?.join(', ') ?? '—')}</p>
 										</div>
 									{/each}
 								</div>
@@ -274,13 +274,13 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 						{/if}
 
 						{#if driftOutputChanges.length}
-							<details class="rounded-2xl border border-blueGray-200 bg-blueGray-50 px-4 py-3 text-sm text-blueGray-600">
+							<details class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
 								<summary class="cursor-pointer font-semibold">Output changes ({driftOutputChanges.length})</summary>
 								<div class="mt-2 space-y-2 text-xs">
 									{#each driftOutputChanges as output}
-										<div class="rounded-xl border border-blueGray-200 bg-white px-3 py-2">
-											<p class="font-semibold text-blueGray-700">{output?.name ?? 'output'}</p>
-											<p class="text-blueGray-500">Actions: {(output?.actions as string[] | undefined)?.join(', ') ?? '—'}</p>
+										<div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+											<p class="font-semibold text-slate-700">{output?.name ?? 'output'}</p>
+											<p class="text-slate-500">Actions: {(output?.actions as string[] | undefined)?.join(', ') ?? '—'}</p>
 										</div>
 									{/each}
 								</div>
@@ -291,12 +291,12 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 			</section>
 			{/if}
 
-			<div class="rounded-2xl border border-dashed border-blueGray-300/60 bg-blueGray-100 p-6 text-sm text-blueGray-500">
-				<p class="font-medium text-blueGray-700">Findings preview</p>
+			<div class="rounded-2xl border border-dashed border-slate-300/60 bg-slate-100 p-6 text-sm text-slate-500">
+				<p class="font-medium text-slate-700">Findings preview</p>
 				{#if findingCount}
 					<p class="mt-2">
 						Inline filtering and diff previews will surface here. In the interim, use the HTML button above or call
-						<code class="rounded bg-blueGray-50 px-1 py-0.5 text-xs text-blueGray-600">GET /ui/reports/{params.id}/viewer</code> to interact with the
+						<code class="rounded bg-slate-50 px-1 py-0.5 text-xs text-slate-600">GET /ui/reports/{params.id}/viewer</code> to interact with the
 						legacy viewer.
 					</p>
 				{:else}
@@ -305,7 +305,7 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 			</div>
 		</div>
 	{:else if !error}
-		<div class="rounded-3xl border border-blueGray-200 bg-white px-6 py-6 text-sm text-blueGray-500">
+		<div class="rounded-3xl border border-slate-200 bg-white px-6 py-6 text-sm text-slate-500">
 			Loading report details...
 		</div>
 	{/if}

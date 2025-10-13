@@ -120,10 +120,10 @@
 
 <section class="space-y-8">
     <header class="space-y-3">
-        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-blueGray-400">Reviewer</p>
-        <h2 class="text-3xl font-semibold text-blueGray-700">Upload Terraform for analysis</h2>
-        <p class="max-w-3xl text-sm text-blueGray-500">
-            Drop one or more Terraform modules (individual <code class="rounded bg-blueGray-50 px-1 py-0.5 text-xs text-blueGray-600">.tf</code> files or zipped directories).
+        <p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Reviewer</p>
+        <h2 class="text-3xl font-semibold text-slate-700">Upload Terraform for analysis</h2>
+        <p class="max-w-3xl text-sm text-slate-500">
+            Drop one or more Terraform modules (individual <code class="rounded bg-slate-50 px-1 py-0.5 text-xs text-slate-600">.tf</code> files or zipped directories).
             The backend will unpack archives, apply the configured review rules, and optionally persist the report for later lookup.
         </p>
     </header>

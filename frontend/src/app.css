@@ -7,9 +7,9 @@
 }
 
 body {
-	@apply min-h-screen bg-blueGray-100 text-blueGray-700 antialiased;
+	@apply min-h-screen bg-slate-100 text-slate-700 antialiased;
 }
 
 a {
-	@apply text-lightBlue-500 transition hover:text-lightBlue-600;
+	@apply text-sky-500 transition hover:text-sky-600;
 }

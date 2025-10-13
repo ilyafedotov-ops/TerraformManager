@@ -70,7 +70,7 @@
 <nav class="space-y-6">
 	{#each sections as section (section.title)}
 		<section class="space-y-2">
-			<h2 class="px-3 text-xs font-semibold uppercase tracking-[0.25em] text-blueGray-400">
+			<h2 class="px-3 text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
 				{section.title}
 			</h2>
 			<ul class="space-y-1">
@@ -89,34 +89,34 @@
 									}
 								}}
 							>
-								<summary class="flex cursor-pointer items-center justify-between rounded-2xl px-3 py-2 text-sm font-semibold text-blueGray-500 transition hover:bg-lightBlue-50 hover:text-lightBlue-600">
+								<summary class="flex cursor-pointer items-center justify-between rounded-2xl px-3 py-2 text-sm font-semibold text-slate-500 transition hover:bg-sky-50 hover:text-sky-600">
 									<span class="flex items-center gap-3">
-										<span class="flex h-9 w-9 items-center justify-center rounded-xl bg-blueGray-100 text-sm font-semibold text-lightBlue-500 transition group-open:bg-lightBlue-500 group-open:text-white">
+										<span class="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-sm font-semibold text-sky-500 transition group-open:bg-sky-500 group-open:text-white">
 											<Icon name={item.icon} size={16} />
 										</span>
 										<span>{item.title}</span>
 									</span>
-									<span class="text-blueGray-300 group-open:rotate-90 transition">›</span>
+									<span class="text-slate-300 group-open:rotate-90 transition">›</span>
 								</summary>
 								<ul class="mt-1 space-y-1 pl-11">
 									{#if isLoadingChildren(item)}
-										<li class="rounded-xl px-3 py-2 text-xs text-blueGray-400">Loading…</li>
+										<li class="rounded-xl px-3 py-2 text-xs text-slate-400">Loading…</li>
 									{:else if resolveChildItems(item).length}
 										{#each resolveChildItems(item) as child (child.title)}
 											<li>
 												<a
-													class={`flex items-center justify-between rounded-xl px-3 py-1.5 text-xs font-medium transition hover:bg-lightBlue-50 hover:text-lightBlue-600 ${
-														isActive(child.href) ? 'bg-lightBlue-50 text-lightBlue-600' : 'text-blueGray-500'
+													class={`flex items-center justify-between rounded-xl px-3 py-1.5 text-xs font-medium transition hover:bg-sky-50 hover:text-sky-600 ${
+														isActive(child.href) ? 'bg-sky-50 text-sky-600' : 'text-slate-500'
 													}`}
 													href={child.href}
 													onclick={(event) => handleNavigate(child.href, event)}
 												>
 													<span class="flex items-center gap-2">
-														<Icon name={child.icon} size={14} class="text-blueGray-400" />
+														<Icon name={child.icon} size={14} class="text-slate-400" />
 														{child.title}
 													</span>
 													{#if child.label}
-														<span class="rounded-full bg-blueGray-100 px-2 py-[2px] text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-blueGray-500">
+														<span class="rounded-full bg-slate-100 px-2 py-[2px] text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-slate-500">
 															{child.label}
 														</span>
 													{/if}
@@ -124,7 +124,7 @@
 											</li>
 										{/each}
 									{:else}
-										<li class="rounded-xl px-3 py-2 text-xs text-blueGray-300">No items available.</li>
+										<li class="rounded-xl px-3 py-2 text-xs text-slate-300">No items available.</li>
 									{/if}
 								</ul>
 							</details>
@@ -132,18 +132,18 @@
 							<a
 								class={`group flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-semibold transition ${
 									isActive(item.href)
-										? 'bg-lightBlue-50 text-lightBlue-600'
-										: 'text-blueGray-500 hover:bg-lightBlue-50 hover:text-lightBlue-600'
+										? 'bg-sky-50 text-sky-600'
+										: 'text-slate-500 hover:bg-sky-50 hover:text-sky-600'
 								}`}
 								href={item.href}
 								onclick={(event) => handleNavigate(item.href, event)}
 							>
-								<span class="flex h-9 w-9 items-center justify-center rounded-xl bg-blueGray-100 text-sm font-semibold text-lightBlue-500 transition group-hover:bg-lightBlue-500 group-hover:text-white">
+								<span class="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-sm font-semibold text-sky-500 transition group-hover:bg-sky-500 group-hover:text-white">
 									<Icon name={item.icon} />
 								</span>
 								<span class="flex-1">{item.title}</span>
 								{#if item.label}
-									<span class="rounded-full bg-blueGray-100 px-2 py-[2px] text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-blueGray-500">
+									<span class="rounded-full bg-slate-100 px-2 py-[2px] text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-slate-500">
 										{item.label}
 									</span>
 								{/if}

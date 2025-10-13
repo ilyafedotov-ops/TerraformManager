@@ -60,7 +60,7 @@ const viewHref = props.viewHref ?? `/reports/${id}`;
 <div class={`flex flex-wrap items-center ${layoutClass}`}>
 	{#if showView}
 		<a
-			class="inline-flex items-center gap-2 rounded-xl border border-lightBlue-200 px-4 py-2 font-semibold text-lightBlue-600 transition hover:bg-lightBlue-500 hover:text-white"
+			class="inline-flex items-center gap-2 rounded-xl border border-sky-200 px-4 py-2 font-semibold text-sky-600 transition hover:bg-sky-500 hover:text-white"
 			href={viewHref}
 		>
 			View
@@ -69,7 +69,7 @@ const viewHref = props.viewHref ?? `/reports/${id}`;
 
 	{#if showApiLinks}
 		<a
-			class="inline-flex items-center gap-2 rounded-xl border border-blueGray-200 px-4 py-2 font-semibold text-blueGray-600 transition hover:bg-lightBlue-500 hover:text-white"
+			class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-600 transition hover:bg-sky-500 hover:text-white"
 			href={jsonHref}
 			target="_blank"
 			rel="noreferrer"
@@ -77,13 +77,13 @@ const viewHref = props.viewHref ?? `/reports/${id}`;
 			JSON
 		</a>
 		<a
-			class="inline-flex items-center gap-2 rounded-xl border border-blueGray-200 px-4 py-2 font-semibold text-blueGray-600 transition hover:bg-lightBlue-500 hover:text-white"
+			class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-600 transition hover:bg-sky-500 hover:text-white"
 			href={csvHref}
 		>
 			CSV
 		</a>
 		<a
-			class="inline-flex items-center gap-2 rounded-xl border border-blueGray-200 px-4 py-2 font-semibold text-blueGray-600 transition hover:bg-lightBlue-500 hover:text-white"
+			class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-600 transition hover:bg-sky-500 hover:text-white"
 			href={htmlHref}
 			target="_blank"
 			rel="noreferrer"
@@ -95,7 +95,7 @@ const viewHref = props.viewHref ?? `/reports/${id}`;
 	{#if showCopyJson}
 		<button
 			type="button"
-			class="inline-flex items-center gap-2 rounded-xl border border-blueGray-200 px-4 py-2 font-semibold text-blueGray-500 transition hover:bg-blueGray-50"
+			class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-500 transition hover:bg-slate-50"
 			onclick={copyJsonLink}
 		>
 			Copy JSON link

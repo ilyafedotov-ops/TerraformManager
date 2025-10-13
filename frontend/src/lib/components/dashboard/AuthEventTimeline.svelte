@@ -46,34 +46,34 @@
 
 <div class="space-y-4">
 	{#each events as event (event.id)}
-		<article class="rounded-3xl border border-blueGray-100 bg-white p-5 shadow-sm shadow-blueGray-200/40">
+		<article class="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm shadow-slate-200/40">
 			<header class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
 				<div>
-					<h3 class="text-sm font-semibold text-blueGray-700">{formatLabel(event.event)}</h3>
-					<p class="text-xs uppercase tracking-[0.25em] text-blueGray-400">{formatTimestamp(event.created_at)}</p>
+					<h3 class="text-sm font-semibold text-slate-700">{formatLabel(event.event)}</h3>
+					<p class="text-xs uppercase tracking-[0.25em] text-slate-400">{formatTimestamp(event.created_at)}</p>
 				</div>
 				{#if abbreviateSession(event.session_id)}
-					<span class="inline-flex w-fit items-center gap-2 rounded-full bg-blueGray-50 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-blueGray-500 md:self-center">
+					<span class="inline-flex w-fit items-center gap-2 rounded-full bg-slate-50 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-slate-500 md:self-center">
 						Session {abbreviateSession(event.session_id)}
 					</span>
 				{/if}
 			</header>
 
-			<dl class="mt-4 grid gap-4 text-xs text-blueGray-600 md:grid-cols-3">
+			<dl class="mt-4 grid gap-4 text-xs text-slate-600 md:grid-cols-3">
 				<div>
-					<dt class="font-semibold uppercase tracking-[0.2em] text-blueGray-400">IP address</dt>
-					<dd class="mt-1 text-blueGray-700">{event.ip_address ?? '—'}</dd>
+					<dt class="font-semibold uppercase tracking-[0.2em] text-slate-400">IP address</dt>
+					<dd class="mt-1 text-slate-700">{event.ip_address ?? '—'}</dd>
 				</div>
 				<div class="md:col-span-2">
-					<dt class="font-semibold uppercase tracking-[0.2em] text-blueGray-400">User agent</dt>
-					<dd class="mt-1 text-blueGray-700">{event.user_agent ? truncateAgent(event.user_agent) : '—'}</dd>
+					<dt class="font-semibold uppercase tracking-[0.2em] text-slate-400">User agent</dt>
+					<dd class="mt-1 text-slate-700">{event.user_agent ? truncateAgent(event.user_agent) : '—'}</dd>
 				</div>
 			</dl>
 
 			{#if event.scopes.length}
 				<div class="mt-4 flex flex-wrap gap-2">
 					{#each event.scopes as scope (scope)}
-						<span class="rounded-full bg-blueGray-100 px-2 py-[2px] text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-blueGray-500">
+						<span class="rounded-full bg-slate-100 px-2 py-[2px] text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-slate-500">
 							{scope}
 						</span>
 					{/each}
@@ -81,9 +81,9 @@
 			{/if}
 
 			{#if hasDetails(event.details)}
-				<details class="mt-4 rounded-2xl border border-blueGray-100 bg-blueGray-50 px-4 py-3 text-xs text-blueGray-600">
-					<summary class="cursor-pointer text-blueGray-500">Details</summary>
-					<pre class="mt-2 whitespace-pre-wrap break-words text-[0.65rem] leading-relaxed text-blueGray-600">{formatDetails(event.details)}</pre>
+				<details class="mt-4 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+					<summary class="cursor-pointer text-slate-500">Details</summary>
+					<pre class="mt-2 whitespace-pre-wrap break-words text-[0.65rem] leading-relaxed text-slate-600">{formatDetails(event.details)}</pre>
 				</details>
 			{/if}
 		</article>
