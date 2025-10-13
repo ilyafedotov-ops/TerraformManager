@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict
 
@@ -13,6 +14,14 @@ def db_path(tmp_path: Path) -> Path:
     db_file = tmp_path / "app.db"
     storage.init_db(db_file)
     return db_file
+
+
+@pytest.fixture()
+def storage_context(tmp_path: Path) -> Dict[str, Path]:
+    db_file = tmp_path / "app.db"
+    storage.init_db(db_file)
+    projects_root = tmp_path / "projects"
+    return {"db_path": db_file, "projects_root": projects_root}
 
 
 def test_config_crud(db_path: Path) -> None:
@@ -81,3 +90,112 @@ def test_settings_helpers(db_path: Path) -> None:
 
     storage.upsert_setting("llm", '{"provider": "off"}', db_path=db_path)
     assert storage.get_llm_settings(db_path=db_path)["provider"] == "off"
+
+
+def test_project_and_run_artifacts(storage_context: Dict[str, Path]) -> None:
+    db_path = storage_context["db_path"]
+    projects_root = storage_context["projects_root"]
+
+    project = storage.create_project(
+        "Demo Project",
+        description="Example workspace",
+        metadata={"env": "dev"},
+        projects_root=projects_root,
+        db_path=db_path,
+    )
+    assert project["name"] == "Demo Project"
+    assert project["slug"]
+    assert (projects_root / project["slug"]).exists()
+
+    with pytest.raises(ValueError):
+        storage.create_project(
+            "Demo Project",
+            projects_root=projects_root,
+            db_path=db_path,
+        )
+
+    listed = storage.list_projects(db_path=db_path)
+    assert listed and listed[0]["id"] == project["id"]
+
+    fetched = storage.get_project(project_id=project["id"], db_path=db_path)
+    assert fetched is not None and fetched["metadata"]["env"] == "dev"
+
+    run = storage.create_project_run(
+        project["id"],
+        label="Initial generation",
+        kind="generator",
+        parameters={"template": "aws_s3"},
+        projects_root=projects_root,
+        db_path=db_path,
+    )
+    assert run["status"] == "queued"
+
+    runs = storage.list_project_runs(project["id"], db_path=db_path)
+    assert len(runs) == 1 and runs[0]["id"] == run["id"]
+
+    run_detail = storage.get_project_run(run["id"], project_id=project["id"], db_path=db_path)
+    assert run_detail is not None
+
+    started_at = datetime.now(timezone.utc)
+    updated = storage.update_project_run(
+        run["id"],
+        project_id=project["id"],
+        status="in_progress",
+        started_at=started_at,
+        db_path=db_path,
+    )
+    assert updated is not None and updated["status"] == "in_progress"
+
+    artifact_info = storage.save_run_artifact(
+        project["id"],
+        run["id"],
+        path="outputs/main.tf",
+        data=b'resource "null_resource" "example" {}',
+        db_path=db_path,
+        projects_root=projects_root,
+    )
+    assert artifact_info["path"] == "outputs/main.tf"
+
+    entries_root = storage.list_run_artifacts(project["id"], run["id"], db_path=db_path)
+    assert any(entry["path"] == "outputs" and entry["is_dir"] for entry in entries_root)
+
+    entries_outputs = storage.list_run_artifacts(
+        project["id"],
+        run["id"],
+        path="outputs",
+        db_path=db_path,
+    )
+    assert entries_outputs and entries_outputs[0]["path"] == "outputs/main.tf"
+
+    artifact_path = storage.get_run_artifact_path(
+        project["id"],
+        run["id"],
+        path="outputs/main.tf",
+        db_path=db_path,
+    )
+    assert artifact_path.exists()
+
+    with pytest.raises(storage.ArtifactPathError):
+        storage.save_run_artifact(
+            project["id"],
+            run["id"],
+            path="../escape.txt",
+            data=b"nope",
+            db_path=db_path,
+        )
+
+    assert storage.delete_run_artifact(
+        project["id"],
+        run["id"],
+        path="outputs/main.tf",
+        db_path=db_path,
+    )
+    assert not storage.delete_run_artifact(
+        project["id"],
+        run["id"],
+        path="outputs/main.tf",
+        db_path=db_path,
+    )
+
+    storage.delete_project(project["id"], remove_files=True, db_path=db_path)
+    assert not (projects_root / project["slug"]).exists()

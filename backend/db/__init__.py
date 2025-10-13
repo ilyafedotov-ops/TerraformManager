@@ -1,4 +1,14 @@
-from .models import Base, Config, Report, Setting, User, RefreshSession, AuthAudit
+from .models import (
+    Base,
+    Config,
+    Report,
+    Setting,
+    User,
+    RefreshSession,
+    AuthAudit,
+    Project,
+    ProjectRun,
+)
 from .session import DEFAULT_DB_PATH, get_engine, get_sessionmaker, get_session_dependency, init_models, session_scope
 
 __all__ = [
@@ -9,6 +19,8 @@ __all__ = [
     "User",
     "RefreshSession",
     "AuthAudit",
+    "Project",
+    "ProjectRun",
     "DEFAULT_DB_PATH",
     "get_engine",
     "get_sessionmaker",
