@@ -39,6 +39,7 @@ from backend.storage import (
     get_generated_asset_version_path,
     diff_generated_asset_versions,
     ArtifactPathError,
+    get_project_overview,
 )
 
 
@@ -56,6 +57,24 @@ class ProjectBaseResponse(BaseModel):
 
 
 class ProjectResponse(ProjectBaseResponse):
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ProjectListLatestRun(BaseModel):
+    id: str
+    label: str
+    status: str
+    kind: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    finished_at: Optional[str] = None
+
+
+class ProjectListItemResponse(ProjectBaseResponse):
+    latest_run: Optional[ProjectListLatestRun] = None
+    run_count: int = 0
+    library_asset_count: int = 0
+    last_activity_at: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
 
@@ -189,12 +208,63 @@ class GeneratedAssetUpdateRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(default=None)
 
 
-@router.get("/", response_model=List[ProjectBaseResponse])
+class ProjectRunListResponse(BaseModel):
+    items: List[ProjectRunResponse]
+    next_cursor: Optional[str] = None
+    total_count: int
+
+
+class ProjectLibraryListResponse(BaseModel):
+    items: List[GeneratedAssetSummary]
+    next_cursor: Optional[str] = None
+    total_count: int
+
+
+class ProjectOverviewMetrics(BaseModel):
+    cost: Optional[Dict[str, Any]] = None
+    drift: Optional[Dict[str, Any]] = None
+    policy: Optional[Dict[str, Any]] = None
+
+
+class ProjectOverviewResponse(BaseModel):
+    project: ProjectResponse
+    run_count: int
+    latest_run: Optional[ProjectRunResponse] = None
+    library_asset_count: int
+    recent_assets: List[GeneratedAssetSummary]
+    metrics: ProjectOverviewMetrics = Field(default_factory=ProjectOverviewMetrics)
+    last_activity_at: Optional[str] = None
+
+
+@router.get("/", response_model=List[ProjectListItemResponse])
 def projects_index(
+    include_metadata: bool = Query(
+        default=False,
+        description="Include metadata payload for each project",
+    ),
+    search: Optional[str] = Query(
+        default=None,
+        description="Filter projects by name or slug using a case-insensitive search term",
+    ),
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=200,
+        description="Maximum number of projects to return",
+    ),
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> List[Dict[str, Any]]:
-    return list_projects(session=session)
+    try:
+        return list_projects(
+            session=session,
+            include_metadata=include_metadata,
+            include_stats=True,
+            search=search,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
@@ -266,17 +336,37 @@ def project_delete(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/{project_id}/runs", response_model=List[ProjectRunResponse])
+@router.get("/{project_id}/runs", response_model=ProjectRunListResponse)
 def project_runs_index(
     project_id: str,
-    limit: int = 50,
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=200,
+        description="Maximum number of runs to return",
+    ),
+    cursor: Optional[str] = Query(
+        default=None,
+        description="Opaque cursor referencing the last run from the previous page",
+    ),
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
-) -> List[Dict[str, Any]]:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
-    return list_project_runs(project_id=project_id, limit=limit, session=session)
+) -> Dict[str, Any]:
+    try:
+        runs = list_project_runs(
+            project_id=project_id,
+            limit=limit,
+            cursor=cursor,
+            session=session,
+        )
+        runs["items"] = [ProjectRunResponse.model_validate(run) for run in runs["items"]]
+        return runs
+    except ValueError as exc:
+        detail = str(exc)
+        status_code_value = (
+            status.HTTP_404_NOT_FOUND if "not found" in detail else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=status_code_value, detail=detail) from exc
 
 
 @router.post("/{project_id}/runs", response_model=ProjectRunResponse, status_code=status.HTTP_201_CREATED)
@@ -453,22 +543,38 @@ def project_run_artifact_delete(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/{project_id}/library", response_model=List[GeneratedAssetSummary])
+@router.get("/{project_id}/library", response_model=ProjectLibraryListResponse)
 def project_library_index(
     project_id: str,
     include_versions: bool = Query(default=False, description="Include version history for each asset"),
+    limit: int = Query(
+        default=100,
+        ge=1,
+        le=200,
+        description="Maximum number of assets to return",
+    ),
+    cursor: Optional[str] = Query(
+        default=None,
+        description="Opaque cursor referencing the last asset from the previous page",
+    ),
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
-) -> List[GeneratedAssetSummary]:
+) -> Dict[str, Any]:
     project = get_project(project_id=project_id, session=session)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
-    assets = list_generated_assets(
-        project_id=project_id,
-        include_versions=include_versions,
-        session=session,
-    )
-    return [GeneratedAssetSummary.model_validate(asset) for asset in assets]
+    try:
+        assets = list_generated_assets(
+            project_id=project_id,
+            include_versions=include_versions,
+            limit=limit,
+            cursor=cursor,
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    assets["items"] = [GeneratedAssetSummary.model_validate(asset) for asset in assets["items"]]
+    return assets
 
 
 @router.get("/{project_id}/library/{asset_id}", response_model=GeneratedAssetSummary)
@@ -491,6 +597,48 @@ def project_library_detail(
     if not asset:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
     return GeneratedAssetSummary.model_validate(asset)
+
+
+@router.get("/{project_id}/overview", response_model=ProjectOverviewResponse)
+def project_overview(
+    project_id: str,
+    recent_assets: int = Query(
+        default=3,
+        ge=1,
+        le=25,
+        description="Maximum number of recent assets to include",
+    ),
+    include_metadata: bool = Query(
+        default=True,
+        description="Include full metadata payload for the project",
+    ),
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> Dict[str, Any]:
+    try:
+        overview = get_project_overview(
+            project_id=project_id,
+            recent_assets=recent_assets,
+            include_metadata=include_metadata,
+            session=session,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code_value = (
+            status.HTTP_404_NOT_FOUND if "not found" in detail else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=status_code_value, detail=detail) from exc
+
+    latest_run_payload = overview.get("latest_run")
+    overview["project"] = ProjectResponse.model_validate(overview["project"])
+    overview["latest_run"] = (
+        ProjectRunResponse.model_validate(latest_run_payload) if latest_run_payload else None
+    )
+    overview["recent_assets"] = [
+        GeneratedAssetSummary.model_validate(asset) for asset in overview.get("recent_assets", [])
+    ]
+    overview["metrics"] = ProjectOverviewMetrics.model_validate(overview.get("metrics", {}))
+    return overview
 
 
 @router.post("/{project_id}/library", response_model=GeneratedAssetRegisterResponse, status_code=status.HTTP_201_CREATED)

@@ -84,6 +84,16 @@ export interface DriftReport extends DriftSummary {
 	error?: string | null;
 }
 
+export interface ProjectListLatestRun {
+	id: string;
+	label: string;
+	kind: string;
+	status: string;
+	created_at?: string | null;
+	updated_at?: string | null;
+	finished_at?: string | null;
+}
+
 export interface ProjectSummary {
 	id: string;
 	name: string;
@@ -92,6 +102,11 @@ export interface ProjectSummary {
 	description?: string | null;
 	created_at?: string | null;
 	updated_at?: string | null;
+	last_activity_at?: string | null;
+	run_count?: number;
+	library_asset_count?: number;
+	latest_run?: ProjectListLatestRun | null;
+	metadata?: Record<string, unknown> | null;
 }
 
 export interface ProjectDetail extends ProjectSummary {
@@ -138,6 +153,28 @@ export interface ProjectRunUpdatePayload {
 	summary?: Record<string, unknown> | null;
 	started_at?: string;
 	finished_at?: string;
+}
+
+export interface PaginatedResult<T> {
+	items: T[];
+	nextCursor?: string | null;
+	totalCount: number;
+}
+
+export interface ProjectOverviewMetrics {
+	cost?: Record<string, unknown> | null;
+	drift?: Record<string, unknown> | null;
+	policy?: Record<string, unknown> | null;
+}
+
+export interface ProjectOverview {
+	project: ProjectDetail;
+	run_count: number;
+	latest_run?: ProjectRunSummary | null;
+	library_asset_count: number;
+	recent_assets: GeneratedAssetSummary[];
+	metrics: ProjectOverviewMetrics;
+	last_activity_at?: string | null;
 }
 
 export interface ArtifactEntry {
@@ -798,9 +835,30 @@ export async function deleteReviewConfig(fetchFn: typeof fetch, token: string, n
     });
 }
 
-export async function listProjects(fetchFn: typeof fetch, token: string): Promise<ProjectSummary[]> {
+export interface ListProjectsOptions {
+	search?: string;
+	includeMetadata?: boolean;
+	limit?: number;
+}
+
+export async function listProjects(
+	fetchFn: typeof fetch,
+	token: string,
+	options: ListProjectsOptions = {}
+): Promise<ProjectSummary[]> {
+	const searchParams: Record<string, string> = {};
+	if (options.search) {
+		searchParams.search = options.search;
+	}
+	if (typeof options.limit === 'number') {
+		searchParams.limit = String(options.limit);
+	}
+	if (options.includeMetadata) {
+		searchParams.include_metadata = 'true';
+	}
 	return apiFetch(fetchFn, '/projects', {
-		token
+		token,
+		searchParams: Object.keys(searchParams).length ? searchParams : undefined
 	});
 }
 
@@ -835,6 +893,32 @@ export async function getProject(fetchFn: typeof fetch, token: string, projectId
 	});
 }
 
+export interface GetProjectOverviewOptions {
+	recentAssets?: number;
+	includeMetadata?: boolean;
+}
+
+export async function getProjectOverview(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	options: GetProjectOverviewOptions = {}
+): Promise<ProjectOverview> {
+	const searchParams: Record<string, string> = {};
+	if (typeof options.recentAssets === 'number') {
+		searchParams.recent_assets = String(options.recentAssets);
+	}
+	if (options.includeMetadata === false) {
+		searchParams.include_metadata = 'false';
+	} else if (options.includeMetadata === true) {
+		searchParams.include_metadata = 'true';
+	}
+	return apiFetch(fetchFn, `/projects/${projectId}/overview`, {
+		token,
+		searchParams: Object.keys(searchParams).length ? searchParams : undefined
+	});
+}
+
 export async function deleteProject(
 	fetchFn: typeof fetch,
 	token: string,
@@ -848,16 +932,33 @@ export async function deleteProject(
 	});
 }
 
+export interface ListProjectRunsOptions {
+	limit?: number;
+	cursor?: string;
+}
+
 export async function listProjectRuns(
 	fetchFn: typeof fetch,
 	token: string,
 	projectId: string,
-	limit = 50
-): Promise<ProjectRunSummary[]> {
-	return apiFetch(fetchFn, `/projects/${projectId}/runs`, {
+	options: ListProjectRunsOptions = {}
+): Promise<PaginatedResult<ProjectRunSummary>> {
+	const searchParams: Record<string, string> = {};
+	if (typeof options.limit === 'number') {
+		searchParams.limit = String(options.limit);
+	}
+	if (options.cursor) {
+		searchParams.cursor = options.cursor;
+	}
+	const response = await apiFetch(fetchFn, `/projects/${projectId}/runs`, {
 		token,
-		searchParams: { limit }
+		searchParams: Object.keys(searchParams).length ? searchParams : undefined
 	});
+	return {
+		items: response.items,
+		nextCursor: response.next_cursor ?? null,
+		totalCount: response.total_count ?? response.items.length
+	};
 }
 
 export async function createProjectRun(
@@ -957,16 +1058,37 @@ export async function downloadRunArtifact(
 	return response;
 }
 
+export interface ListProjectLibraryOptions {
+	includeVersions?: boolean;
+	limit?: number;
+	cursor?: string;
+}
+
 export async function listProjectLibrary(
 	fetchFn: typeof fetch,
 	token: string,
 	projectId: string,
-	includeVersions = false
-): Promise<GeneratedAssetSummary[]> {
-	return apiFetch(fetchFn, `/projects/${projectId}/library`, {
+	options: ListProjectLibraryOptions = {}
+): Promise<PaginatedResult<GeneratedAssetSummary>> {
+	const searchParams: Record<string, string> = {};
+	if (options.includeVersions) {
+		searchParams.include_versions = 'true';
+	}
+	if (typeof options.limit === 'number') {
+		searchParams.limit = String(options.limit);
+	}
+	if (options.cursor) {
+		searchParams.cursor = options.cursor;
+	}
+	const response = await apiFetch(fetchFn, `/projects/${projectId}/library`, {
 		token,
-		searchParams: includeVersions ? { include_versions: 'true' } : undefined
+		searchParams: Object.keys(searchParams).length ? searchParams : undefined
 	});
+	return {
+		items: response.items,
+		nextCursor: response.next_cursor ?? null,
+		totalCount: response.total_count ?? response.items.length
+	};
 }
 
 export async function getProjectLibraryAsset(

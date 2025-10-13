@@ -508,22 +508,54 @@ def list_project_runs(
     project_id: str,
     *,
     limit: int = 50,
+    cursor: str | None = None,
     db_path: Path = DEFAULT_DB_PATH,
     session: Session | None = None,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
+    if limit <= 0:
+        raise ValueError("limit must be greater than zero")
+    limit = min(limit, 200)
+
     with _get_session(session, db_path) as db:
         try:
-            _get_project_or_raise(db, project_id)
+            project = _get_project_or_raise(db, project_id)
         except ProjectNotFoundError as exc:
             raise ValueError(f"project '{project_id}' not found") from exc
-        stmt = (
-            select(ProjectRun)
-            .where(ProjectRun.project_id == project_id)
-            .order_by(ProjectRun.created_at.desc())
-            .limit(limit)
-        )
-        runs = db.execute(stmt).scalars()
-        return [run.to_dict(include_parameters=False) for run in runs]
+        cursor_run: ProjectRun | None = None
+        if cursor:
+            candidate = db.get(ProjectRun, cursor)
+            if not candidate or candidate.project_id != project.id:
+                raise ValueError("cursor does not reference a project run for this project")
+            cursor_run = candidate
+
+        stmt = select(ProjectRun).where(ProjectRun.project_id == project_id)
+        if cursor_run:
+            stmt = stmt.where(
+                or_(
+                    ProjectRun.created_at < cursor_run.created_at,
+                    and_(
+                        ProjectRun.created_at == cursor_run.created_at,
+                        ProjectRun.id < cursor_run.id,
+                    ),
+                )
+            )
+
+        stmt = stmt.order_by(ProjectRun.created_at.desc(), ProjectRun.id.desc()).limit(limit + 1)
+        fetched = list(db.execute(stmt).scalars())
+        items = fetched[:limit]
+
+        next_cursor: Optional[str] = None
+        if items and len(fetched) > limit:
+            next_cursor = items[-1].id
+
+        count_stmt = select(func.count(ProjectRun.id)).where(ProjectRun.project_id == project_id)
+        total_count = int(db.execute(count_stmt).scalar_one() or 0)
+
+        return {
+            "items": [run.to_dict(include_parameters=False) for run in items],
+            "next_cursor": next_cursor,
+            "total_count": total_count,
+        }
 
 
 def get_project_run(
@@ -723,19 +755,135 @@ def list_generated_assets(
     project_id: str,
     *,
     limit: int = 200,
+    cursor: str | None = None,
     include_versions: bool = False,
     db_path: Path = DEFAULT_DB_PATH,
     session: Session | None = None,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
+    if limit <= 0:
+        raise ValueError("limit must be greater than zero")
+    limit = min(limit, 200)
+
     with _get_session(session, db_path) as db:
-        stmt = (
+        cursor_asset: GeneratedAsset | None = None
+        if cursor:
+            candidate = db.get(GeneratedAsset, cursor)
+            if not candidate or candidate.project_id != project_id:
+                raise ValueError("cursor does not reference a project asset")
+            cursor_asset = candidate
+
+        stmt = select(GeneratedAsset).where(GeneratedAsset.project_id == project_id)
+        if cursor_asset:
+            stmt = stmt.where(
+                or_(
+                    GeneratedAsset.updated_at < cursor_asset.updated_at,
+                    and_(
+                        GeneratedAsset.updated_at == cursor_asset.updated_at,
+                        GeneratedAsset.id < cursor_asset.id,
+                    ),
+                )
+            )
+
+        stmt = stmt.order_by(GeneratedAsset.updated_at.desc(), GeneratedAsset.id.desc()).limit(limit + 1)
+        fetched = list(db.execute(stmt).scalars())
+        items = fetched[:limit]
+
+        next_cursor: Optional[str] = None
+        if items and len(fetched) > limit:
+            next_cursor = items[-1].id
+
+        count_stmt = select(func.count(GeneratedAsset.id)).where(GeneratedAsset.project_id == project_id)
+        total_count = int(db.execute(count_stmt).scalar_one() or 0)
+
+        return {
+            "items": [asset.to_dict(include_versions=include_versions) for asset in items],
+            "next_cursor": next_cursor,
+            "total_count": total_count,
+        }
+
+
+def get_project_overview(
+    project_id: str,
+    *,
+    recent_assets: int = 3,
+    include_metadata: bool = True,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Dict[str, Any]:
+    if recent_assets <= 0:
+        raise ValueError("recent_assets must be greater than zero")
+    with _get_session(session, db_path) as db:
+        try:
+            project = _get_project_or_raise(db, project_id)
+        except ProjectNotFoundError as exc:
+            raise ValueError(f"project '{project_id}' not found") from exc
+
+        latest_run = (
+            db.execute(
+                select(ProjectRun)
+                .where(ProjectRun.project_id == project_id)
+                .order_by(ProjectRun.created_at.desc(), ProjectRun.id.desc())
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+
+        run_count = int(
+            db.execute(select(func.count(ProjectRun.id)).where(ProjectRun.project_id == project_id)).scalar_one() or 0
+        )
+
+        library_asset_count = int(
+            db.execute(
+                select(func.count(GeneratedAsset.id)).where(GeneratedAsset.project_id == project_id)
+            ).scalar_one()
+            or 0
+        )
+
+        latest_asset_updated = db.execute(
+            select(func.max(GeneratedAsset.updated_at)).where(GeneratedAsset.project_id == project_id)
+        ).scalar_one_or_none()
+
+        recent_assets_stmt = (
             select(GeneratedAsset)
             .where(GeneratedAsset.project_id == project_id)
-            .order_by(GeneratedAsset.updated_at.desc())
-            .limit(limit)
+            .order_by(GeneratedAsset.updated_at.desc(), GeneratedAsset.id.desc())
+            .limit(recent_assets)
         )
-        assets = db.execute(stmt).scalars().all()
-        return [asset.to_dict(include_versions=include_versions) for asset in assets]
+        assets = [
+            asset.to_dict(include_versions=False)
+            for asset in db.execute(recent_assets_stmt).scalars()
+        ]
+
+        metrics: Dict[str, Any] = {}
+        if latest_run and latest_run.summary:
+            summary_payload = dict(latest_run.summary or {})
+            metrics = {
+                "cost": summary_payload.get("cost"),
+                "drift": summary_payload.get("drift"),
+                "policy": summary_payload.get("policy"),
+            }
+
+        last_activity_candidates = [
+            project.updated_at,
+            latest_run.updated_at if latest_run else None,
+        ]
+        if latest_asset_updated:
+            last_activity_candidates.append(latest_asset_updated)
+        last_activity = max(
+            (value for value in last_activity_candidates if value is not None),
+            default=project.updated_at,
+        )
+
+        return {
+            "project": project.to_dict(include_metadata=include_metadata),
+            "run_count": run_count,
+            "latest_run": latest_run.to_dict(include_parameters=False) if latest_run else None,
+            "library_asset_count": library_asset_count,
+            "recent_assets": assets,
+            "metrics": metrics,
+            "last_activity_at": format_timestamp(last_activity),
+        }
 
 
 def get_generated_asset(

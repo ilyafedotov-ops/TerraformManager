@@ -626,10 +626,11 @@ def main() -> None:
                 )
                 _print_json(project)
             elif args.project_cmd == "runs":
-                runs = list_project_runs(args.project_id, limit=args.limit)
+                runs_payload = list_project_runs(args.project_id, limit=args.limit)
                 if args.json:
-                    _print_json(runs)
+                    _print_json(runs_payload)
                 else:
+                    runs = runs_payload.get("items", [])
                     if not runs:
                         print("No runs found.")
                     for run in runs:
@@ -637,6 +638,9 @@ def main() -> None:
                             f"{run['id']}  {run['label']} [{run['status']}] kind={run['kind']} "
                             f"created={run.get('created_at')}"
                         )
+                    next_cursor = runs_payload.get("next_cursor")
+                    if next_cursor:
+                        print(f"... more available (next cursor: {next_cursor})")
             elif args.project_cmd == "run-create":
                 parameters: Dict[str, Any] = {}
                 if args.parameters:
