@@ -2,14 +2,15 @@
 import { env } from '$env/dynamic/public';
 import { deleteReport, ApiError, type ReportSummary } from '$lib/api/client';
 import ReportTable from '$lib/components/reports/ReportTable.svelte';
-	import { browser } from '$app/environment';
+import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
+import { browser } from '$app/environment';
 
 	const { data } = $props();
-	let reports = $state<ReportSummary[]>(data.reports ?? []);
-	const error = data.error as string | undefined;
-	const token = data.token as string | null;
-	let deleteStatus = $state<string | null>(null);
-	let deletingId = $state<string | null>(null);
+let reports = $state<ReportSummary[]>(data.reports ?? []);
+const error = data.error as string | undefined;
+const token = data.token as string | null;
+let deleteStatus = $state<string | null>(null);
+let deletingId = $state<string | null>(null);
 
 const apiBase = (env.PUBLIC_API_BASE ?? 'http://localhost:8890').replace(/\/$/, '');
 
@@ -47,6 +48,12 @@ const apiBase = (env.PUBLIC_API_BASE ?? 'http://localhost:8890').replace(/\/$/, 
 </script>
 
 <section class="space-y-8">
+	<RunArtifactsPanel
+		token={token}
+		title="Project artifacts"
+		emptyMessage="Select a project in the sidebar to explore run artifacts alongside saved reports."
+	/>
+
 	<header class="space-y-3">
 		<p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Reports</p>
 		<h2 class="text-3xl font-semibold text-slate-700">Saved reviewer results</h2>

@@ -84,6 +84,70 @@ export interface DriftReport extends DriftSummary {
 	error?: string | null;
 }
 
+export interface ProjectSummary {
+	id: string;
+	name: string;
+	slug: string;
+	root_path: string;
+	description?: string | null;
+	created_at?: string | null;
+	updated_at?: string | null;
+}
+
+export interface ProjectDetail extends ProjectSummary {
+	metadata?: Record<string, unknown> | null;
+}
+
+export interface ProjectCreatePayload {
+	name: string;
+	description?: string;
+	slug?: string;
+	metadata?: Record<string, unknown>;
+}
+
+export interface ProjectRunSummary {
+	id: string;
+	project_id: string;
+	label: string;
+	kind: string;
+	status: string;
+	triggered_by?: string | null;
+	parameters?: Record<string, unknown> | null;
+	summary?: Record<string, unknown> | null;
+	artifacts_path?: string | null;
+	created_at?: string | null;
+	updated_at?: string | null;
+	started_at?: string | null;
+	finished_at?: string | null;
+}
+
+export interface ProjectRunCreatePayload {
+	label: string;
+	kind: string;
+	parameters?: Record<string, unknown>;
+}
+
+export interface ProjectUpdatePayload {
+	name?: string;
+	description?: string;
+	metadata?: Record<string, unknown> | null;
+}
+
+export interface ProjectRunUpdatePayload {
+	status?: string;
+	summary?: Record<string, unknown> | null;
+	started_at?: string;
+	finished_at?: string;
+}
+
+export interface ArtifactEntry {
+	name: string;
+	path: string;
+	is_dir: boolean;
+	size?: number | null;
+	modified_at?: string | null;
+}
+
 function buildUrl(path: string, searchParams?: ApiRequestOptions['searchParams']): string {
     const url = new URL(path.startsWith('/') ? path : `/${path}`, API_BASE);
 	if (searchParams) {
@@ -657,6 +721,165 @@ export async function deleteReviewConfig(fetchFn: typeof fetch, token: string, n
         method: 'DELETE',
         token
     });
+}
+
+export async function listProjects(fetchFn: typeof fetch, token: string): Promise<ProjectSummary[]> {
+	return apiFetch(fetchFn, '/projects', {
+		token
+	});
+}
+
+export async function createProject(
+	fetchFn: typeof fetch,
+	token: string,
+	payload: ProjectCreatePayload
+): Promise<ProjectDetail> {
+	return apiFetch(fetchFn, '/projects', {
+		method: 'POST',
+		token,
+		body: payload
+	});
+}
+
+export async function updateProject(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	payload: ProjectUpdatePayload
+): Promise<ProjectDetail> {
+	return apiFetch(fetchFn, `/projects/${projectId}`, {
+		method: 'PATCH',
+		token,
+		body: payload
+	});
+}
+
+export async function getProject(fetchFn: typeof fetch, token: string, projectId: string): Promise<ProjectDetail> {
+	return apiFetch(fetchFn, `/projects/${projectId}`, {
+		token
+	});
+}
+
+export async function deleteProject(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	removeFiles = false
+): Promise<void> {
+	await apiFetch(fetchFn, `/projects/${projectId}`, {
+		method: 'DELETE',
+		token,
+		searchParams: removeFiles ? { remove_files: 'true' } : undefined
+	});
+}
+
+export async function listProjectRuns(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	limit = 50
+): Promise<ProjectRunSummary[]> {
+	return apiFetch(fetchFn, `/projects/${projectId}/runs`, {
+		token,
+		searchParams: { limit }
+	});
+}
+
+export async function createProjectRun(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	payload: ProjectRunCreatePayload
+): Promise<ProjectRunSummary> {
+	return apiFetch(fetchFn, `/projects/${projectId}/runs`, {
+		method: 'POST',
+		token,
+		body: payload
+	});
+}
+
+export async function updateProjectRun(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	runId: string,
+	payload: ProjectRunUpdatePayload
+): Promise<ProjectRunSummary> {
+	return apiFetch(fetchFn, `/projects/${projectId}/runs/${runId}`, {
+		method: 'PATCH',
+		token,
+		body: payload
+	});
+}
+
+export async function listRunArtifacts(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	runId: string,
+	path?: string
+): Promise<ArtifactEntry[]> {
+	return apiFetch(fetchFn, `/projects/${projectId}/runs/${runId}/artifacts`, {
+		token,
+		searchParams: path ? { path } : undefined
+	});
+}
+
+export async function uploadRunArtifact(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	runId: string,
+	options: { path: string; file: File | Blob; filename?: string; overwrite?: boolean }
+): Promise<ArtifactEntry> {
+	const formData = new FormData();
+	formData.set('path', options.path);
+	formData.set('overwrite', options.overwrite === false ? 'false' : 'true');
+	const filename =
+		options.filename ?? (typeof File !== 'undefined' && options.file instanceof File ? options.file.name : 'artifact');
+	formData.set('file', options.file, filename);
+
+	return apiFetch(fetchFn, `/projects/${projectId}/runs/${runId}/artifacts`, {
+		method: 'POST',
+		token,
+		body: formData
+	});
+}
+
+export async function deleteRunArtifact(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	runId: string,
+	path: string
+): Promise<void> {
+	await apiFetch(fetchFn, `/projects/${projectId}/runs/${runId}/artifacts`, {
+		method: 'DELETE',
+		token,
+		searchParams: { path }
+	});
+}
+
+export async function downloadRunArtifact(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	runId: string,
+	path: string
+): Promise<Response> {
+	const url = new URL(`/projects/${projectId}/runs/${runId}/artifacts/download`, API_BASE);
+	url.searchParams.set('path', path);
+	const response = await fetchFn(url.toString(), {
+		method: 'GET',
+		headers: {
+			Authorization: `Bearer ${token}`
+		}
+	});
+	if (!response.ok) {
+		const detail = await response.text();
+		throw new ApiError(`Failed to download artifact (${response.status})`, response.status, detail);
+	}
+	return response;
 }
 
 export interface ConfigPreviewPayload {

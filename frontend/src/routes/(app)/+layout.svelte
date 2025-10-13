@@ -7,6 +7,7 @@
 	import { API_BASE } from '$lib/api/client';
 	import MainNav from '$lib/components/navigation/MainNav.svelte';
 	import { navigationSectionsStore, navigationState, commandResults } from '$lib/stores/navigation';
+	import { projectState, activeProject, activeProjectRuns } from '$lib/stores/project';
 	import type { NavigationItem } from '$lib/navigation/types';
 
 	const { children, data } = $props();
@@ -222,6 +223,62 @@
 		navigationState.setActivePath(href);
 		navigationState.closeSidebar();
 	};
+
+	let projectsInitialised = false;
+	let lastRunsProjectId: string | null = null;
+
+	$effect(() => {
+		if (!browser) {
+			return;
+		}
+		if (!currentToken) {
+			projectsInitialised = false;
+			projectState.reset();
+			return;
+		}
+		if (!projectsInitialised) {
+			projectsInitialised = true;
+			void projectState.loadProjects(fetch, currentToken).catch((err) => {
+				console.error('Failed to load projects', err);
+			});
+		}
+	});
+
+	$effect(() => {
+		if (!browser || !currentToken) {
+			return;
+		}
+		const projectId = $activeProject?.id ?? null;
+		if (!projectId) {
+			lastRunsProjectId = null;
+			return;
+		}
+		if (projectId === lastRunsProjectId) {
+			return;
+		}
+		lastRunsProjectId = projectId;
+		void projectState.refreshRuns(fetch, currentToken, projectId, 10).catch((err) => {
+			console.error('Failed to load project runs', err);
+		});
+	});
+
+	const handleProjectChange = async (event: Event) => {
+		const select = event.target as HTMLSelectElement;
+		const projectId = select.value || null;
+		projectState.setActiveProject(projectId);
+		if (projectId && browser && currentToken) {
+			await projectState.refreshRuns(fetch, currentToken, projectId, 10).catch((err) => {
+				console.error('Failed to refresh runs', err);
+			});
+		}
+	};
+
+	const handleReloadProjects = async () => {
+		if (!browser || !currentToken) return;
+		await projectState.loadProjects(fetch, currentToken).catch((err) => {
+			console.error('Failed to reload projects', err);
+		});
+	};
 </script>
 
 <div class="flex min-h-screen bg-slate-100 text-slate-700">
@@ -254,6 +311,72 @@
 					<span class="text-sm text-slate-700">Manager</span>
 				</span>
 			</div>
+		</div>
+
+		<div class="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
+			<div class="flex items-center justify-between gap-2">
+				<div>
+					<p class="font-semibold uppercase tracking-[0.3em] text-slate-400">Project</p>
+					<p class="mt-1 text-sm font-semibold text-slate-700">
+						{$activeProject?.name ?? 'No project selected'}
+					</p>
+				</div>
+				<button
+					type="button"
+					class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-slate-500 transition hover:bg-slate-100"
+					onclick={() => void handleReloadProjects()}
+					aria-label="Reload projects"
+				>
+					↻
+				</button>
+			</div>
+
+			<select
+				class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
+				onchange={handleProjectChange}
+				value={$activeProject?.id ?? ''}
+				aria-label="Select project"
+			>
+				<option value="">Select a project…</option>
+				{#each $projectState.projects as project (project.id)}
+					<option value={project.id}>
+						{project.name}
+					</option>
+				{/each}
+			</select>
+
+			{#if $projectState.error}
+				<p class="rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">
+					{$projectState.error}
+				</p>
+			{/if}
+
+			{#if $activeProjectRuns.length}
+				<div class="space-y-2">
+					<p class="font-semibold uppercase tracking-[0.25em] text-slate-400">Recent runs</p>
+					<ul class="space-y-1">
+						{#each $activeProjectRuns.slice(0, 5) as run (run.id)}
+							<li class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[0.7rem] leading-relaxed text-slate-600">
+								<span class="font-semibold text-slate-700">{run.label}</span>
+								<span class="ml-2 inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-[1px] text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-slate-500">
+									{run.status}
+								</span>
+								{#if run.created_at}
+									<span class="ml-1 text-slate-400">• {run.created_at}</span>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				</div>
+			{:else if $activeProject}
+				<p class="rounded-xl bg-white px-3 py-2 text-xs text-slate-500">
+					No runs yet. Start a generator or review to create the first run.
+				</p>
+{:else if $projectState.projects.length === 0 && !$projectState.loading}
+		<p class="rounded-xl bg-white px-3 py-2 text-xs text-slate-500">
+			Use the Projects page to create a workspace and start tracking runs.
+		</p>
+{/if}
 		</div>
 
 		<MainNav
@@ -292,6 +415,17 @@
 				<h1 class="text-2xl font-semibold text-slate-700">{section?.title ?? 'Control plane'}</h1>
 				{#if section?.subtitle}
 					<p class="text-xs text-slate-400">{section.subtitle}</p>
+				{/if}
+				{#if $activeProject}
+					<p class="mt-2 text-[0.7rem] text-slate-500">
+						Active project:
+						<span class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+							{$activeProject.name}
+							{#if $activeProject.slug}
+								<span class="text-[0.6rem] uppercase tracking-[0.2em] text-slate-400">{$activeProject.slug}</span>
+							{/if}
+						</span>
+					</p>
 				{/if}
 			</div>
 			<div class="flex items-center gap-3">

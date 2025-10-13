@@ -5,6 +5,7 @@ export const navigationSections: NavigationSection[] = [
 		title: 'Workbench',
 		items: [
 			{ title: 'Dashboard', href: '/dashboard', icon: 'grid' },
+			{ title: 'Projects', href: '/projects', icon: 'folder-tree' },
 			{ title: 'Generate', href: '/generate', icon: 'sparkles', label: 'Beta' },
 			{ title: 'Review', href: '/review', icon: 'upload-cloud', label: 'Core' },
 			{ title: 'Reports', href: '/reports', icon: 'file-bar-chart-2' },
