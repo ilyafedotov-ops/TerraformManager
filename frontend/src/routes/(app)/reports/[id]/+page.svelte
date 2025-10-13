@@ -2,6 +2,7 @@
 	import { env } from '$env/dynamic/public';
 import { deleteReport, type ReportDetail, ApiError } from '$lib/api/client';
 import ReportActions from '$lib/components/reports/ReportActions.svelte';
+import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
 	import { notifyError, notifySuccess } from '$lib/stores/notifications';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
@@ -55,10 +56,12 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 	const driftSummary = report?.summary?.drift ?? driftDetails ?? null;
 	const driftCounts = driftSummary?.counts ?? {};
 	const driftCountEntries = Object.entries(driftCounts).filter(([, value]) => Number(value ?? 0) > 0);
-	const driftResourceChanges = driftDetails?.resource_changes ?? [];
-	const driftOutputChanges = driftDetails?.output_changes ?? [];
-	const driftError = driftDetails?.error ?? null;
-	const driftHasChanges = Boolean(driftSummary?.has_changes);
+const driftResourceChanges = driftDetails?.resource_changes ?? [];
+const driftOutputChanges = driftDetails?.output_changes ?? [];
+const driftError = driftDetails?.error ?? null;
+const driftHasChanges = Boolean(driftSummary?.has_changes);
+const findings = Array.isArray(report?.findings) ? report?.findings ?? [] : [];
+const displayedFindings = findings.slice(0, 50);
 
 	const handleDelete = async () => {
 		if (!token) {
@@ -141,6 +144,13 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 			{#if deleteError}
 				<div class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-700">{deleteError}</div>
 			{/if}
+
+			<RunArtifactsPanel
+				token={token}
+				title="Project run context"
+				emptyMessage="Select a project in the sidebar to correlate this report with recorded runs."
+				highlightReportId={params.id}
+			/>
 
 			<div class="grid gap-4 md:grid-cols-3">
 				<div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -297,16 +307,56 @@ import ReportActions from '$lib/components/reports/ReportActions.svelte';
 			</section>
 			{/if}
 
-			<div class="rounded-2xl border border-dashed border-slate-300/60 bg-slate-100 p-6 text-sm text-slate-500">
-				<p class="font-medium text-slate-700">Findings preview</p>
-				{#if findingCount}
-					<p class="mt-2">
-						Inline filtering and diff previews will surface here. The retired FastAPI viewer has been replaced by direct exports, so use the JSON/CSV/HTML buttons above until the Svelte findings grid lands.
-					</p>
-				{:else}
+			{#if displayedFindings.length}
+				<section class="space-y-4">
+					<h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+						Findings ({findings.length})
+					</h3>
+					<div class="overflow-x-auto rounded-2xl border border-slate-200 bg-slate-50">
+						<table class="min-w-full divide-y divide-slate-200 text-sm">
+							<thead class="bg-slate-100 text-xs uppercase tracking-[0.3em] text-slate-400">
+								<tr>
+									<th class="px-4 py-3 text-left">Severity</th>
+									<th class="px-4 py-3 text-left">Rule</th>
+									<th class="px-4 py-3 text-left">Title</th>
+									<th class="px-4 py-3 text-left">Location</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-slate-100 text-slate-600">
+								{#each displayedFindings as finding, index (finding.id ?? finding.rule ?? index)}
+									<tr class="hover:bg-sky-50">
+										<td class="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+											{finding.severity ?? 'unknown'}
+										</td>
+										<td class="px-4 py-3 font-mono text-xs text-slate-500">
+											{finding.rule ?? '—'}
+										</td>
+										<td class="px-4 py-3 text-sm text-slate-600">
+											{finding.title ?? 'Untitled finding'}
+										</td>
+										<td class="px-4 py-3 text-xs text-slate-500">
+											{finding.file ?? '—'}
+											{#if finding.line}
+												: {finding.line}
+											{/if}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+					{#if findings.length > displayedFindings.length}
+						<p class="text-xs text-slate-400">
+							Displaying first {displayedFindings.length} findings. Use the JSON or CSV export for the full set.
+						</p>
+					{/if}
+				</section>
+			{:else}
+				<div class="rounded-2xl border border-dashed border-slate-300/60 bg-slate-100 p-6 text-sm text-slate-500">
+					<p class="font-medium text-slate-700">Findings</p>
 					<p class="mt-2">Great news—no active findings recorded for this run.</p>
-				{/if}
-			</div>
+				</div>
+			{/if}
 		</div>
 	{:else if !error}
 		<div class="rounded-3xl border border-slate-200 bg-white px-6 py-6 text-sm text-slate-500">

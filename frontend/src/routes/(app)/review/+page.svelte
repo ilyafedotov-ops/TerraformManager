@@ -1,7 +1,11 @@
 <script lang="ts">
-    import { API_BASE } from '$lib/api/client';
+    import { browser } from '$app/environment';
+    import { API_BASE, updateProjectRun, type ProjectRunUpdatePayload, type ProjectSummary } from '$lib/api/client';
     import ScanForm, { type ScanFormData } from '$lib/components/review/ScanForm.svelte';
     import ScanSummary from '$lib/components/review/ScanSummary.svelte';
+    import { activeProject, projectState } from '$lib/stores/project';
+    import { notifyError, notifySuccess } from '$lib/stores/notifications';
+    import { onDestroy } from 'svelte';
 
     const { data } = $props();
     const token = data.token as string | null;
@@ -15,6 +19,22 @@
     let isSubmitting = $state(false);
     let error = $state<string | null>(null);
     let result = $state<{ id?: string | null; summary?: Record<string, unknown>; report?: Record<string, unknown> } | null>(null);
+    let activeProjectValue = $state<ProjectSummary | null>(null);
+    let missingProjectWarningShown = $state(false);
+    let unsubscribeProject: (() => void) | null = null;
+
+    if (browser) {
+        unsubscribeProject = activeProject.subscribe((value) => {
+            activeProjectValue = value;
+            if (value) {
+                missingProjectWarningShown = false;
+            }
+        });
+    }
+
+    onDestroy(() => {
+        unsubscribeProject?.();
+    });
 
     const toFileList = (file: File | null) => {
         if (!file) return null;
@@ -79,7 +99,19 @@
                 const detail = await response.text();
                 throw new Error(detail || `Scan failed with status ${response.status}`);
             }
-            result = await response.json();
+            const payload = await response.json();
+            result = payload;
+            void recordReviewRun(
+                {
+                    terraform_validate: shouldValidate,
+                saved_report: shouldSave,
+                include_cost: includeCostFlag,
+                files: Array.from(selectedFiles).map((file) => file.name),
+                cost_usage_file: usageFile?.name ?? null,
+                plan_file: planFile?.name ?? null
+                },
+                payload
+            );
         } catch (err) {
             error = err instanceof Error ? err.message : 'Unexpected error while running scan';
         } finally {
@@ -115,6 +147,65 @@
             }
         ];
         return steps;
+    };
+
+    const buildRunSummary = (scanResult: Record<string, unknown> | null) => {
+        if (!scanResult) return null;
+        const summary = (scanResult.summary ?? null) as Record<string, unknown> | null;
+        if (!summary) return null;
+        const severity = summary?.severity_counts ?? null;
+        const issues = summary?.issues_found ?? null;
+        return {
+            issues_found: issues,
+            severity_counts: severity,
+            saved_report_id: scanResult.id ?? null
+        };
+    };
+
+    const recordReviewRun = async (
+        parameters: Record<string, unknown>,
+        scanResult: Record<string, unknown> | null
+    ) => {
+        if (!browser) {
+            return;
+        }
+        if (!activeProjectValue) {
+            if (!missingProjectWarningShown) {
+                notifyError('Select a project in the sidebar to log review runs.');
+                missingProjectWarningShown = true;
+            }
+            return;
+        }
+        if (!token) {
+            console.warn('Skipping project run logging because token is unavailable.');
+            return;
+        }
+        try {
+            const label = `Review • ${new Date().toLocaleString()}`;
+            const run = await projectState.createRun(fetch, token, activeProjectValue.id, {
+                label,
+                kind: 'review',
+                parameters
+            });
+            if (!run?.id) {
+                return;
+            }
+            const summary = buildRunSummary(scanResult);
+            const updatePayload: ProjectRunUpdatePayload = {
+                status: 'completed',
+                finished_at: new Date().toISOString(),
+                summary: summary ?? undefined
+            };
+            try {
+                const updated = await updateProjectRun(fetch, token, activeProjectValue.id, run.id, updatePayload);
+                projectState.upsertRun(activeProjectValue.id, updated);
+                notifySuccess('Review run recorded.');
+            } catch (updateError) {
+                console.warn('Failed to update review run status', updateError);
+            }
+        } catch (error) {
+            console.warn('Unable to record review run', error);
+        }
     };
 </script>
 

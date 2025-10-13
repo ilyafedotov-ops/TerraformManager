@@ -1,19 +1,24 @@
 <script lang="ts">
+    import { browser } from '$app/environment';
     import {
         generateAwsS3,
         generateAzureServiceBus,
         generateAzureStorageAccount,
         generateAzureFunctionApp,
         generateAzureApiManagement,
+        updateProjectRun,
         type AwsS3GeneratorPayload,
         type AzureServiceBusGeneratorPayload,
         type AzureStorageGeneratorPayload,
         type AzureFunctionAppGeneratorPayload,
         type AzureApiManagementGeneratorPayload,
-        type GeneratorResult
+        type GeneratorResult,
+        type ProjectRunUpdatePayload,
+        type ProjectSummary
     } from '$lib/api/client';
     import { notifyError, notifySuccess } from '$lib/stores/notifications';
     import type { SubmitFunction } from '@sveltejs/kit';
+    import { onDestroy } from 'svelte';
     import AwsS3Form from '$lib/components/generate/AwsS3Form.svelte';
     import AzureStorageForm from '$lib/components/generate/AzureStorageForm.svelte';
     import AzureServiceBusForm from '$lib/components/generate/AzureServiceBusForm.svelte';
@@ -21,6 +26,8 @@
     import AzureApiManagementForm from '$lib/components/generate/AzureApiManagementForm.svelte';
     import type { GeneratorFormStyles } from '$lib/components/generate/types';
     import type { ServiceBusPreset } from '$lib/components/generate/models';
+    import { token as authTokenStore } from '$lib/stores/auth';
+    import { activeProject, projectState } from '$lib/stores/project';
     import type { PageData } from './$types';
 
     const { data } = $props<{ data: PageData }>();
@@ -188,8 +195,38 @@
         }
     ];
 
+    const generatorLabels: Record<GeneratorId, string> = {
+        aws_s3: 'AWS S3 Generator',
+        azure_storage: 'Azure Storage Generator',
+        azure_servicebus: 'Azure Service Bus Generator',
+        azure_function_app: 'Azure Function App Generator',
+        azure_api_management: 'Azure API Management Generator'
+    };
+
     let activeStep = $state<WizardStepId>('select');
     let activeGenerator = $state<GeneratorId>('aws_s3');
+    let activeProjectValue = $state<ProjectSummary | null>(null);
+    let authTokenValue = $state<string | null>(null);
+    let missingProjectWarningShown = $state(false);
+    let unsubscribeProject: (() => void) | null = null;
+    let unsubscribeToken: (() => void) | null = null;
+
+    if (browser) {
+        unsubscribeProject = activeProject.subscribe((value) => {
+            activeProjectValue = value;
+            if (value) {
+                missingProjectWarningShown = false;
+            }
+        });
+        unsubscribeToken = authTokenStore.subscribe((value) => {
+            authTokenValue = value;
+        });
+    }
+
+    onDestroy(() => {
+        unsubscribeProject?.();
+        unsubscribeToken?.();
+    });
 
     const setActiveGenerator = (id: GeneratorId) => {
         if (activeGenerator !== id) {
@@ -659,6 +696,119 @@
         }
     };
 
+    const summariseAwsInputs = (payload: AwsS3GeneratorPayload) => ({
+        bucket_name: payload.bucket_name,
+        region: payload.region,
+        environment: payload.environment,
+        versioning: payload.versioning,
+        secure_transport: payload.enforce_secure_transport,
+        backend_enabled: Boolean(payload.backend)
+    });
+
+    const summariseAzureStorageInputs = (payload: AzureStorageGeneratorPayload) => ({
+        storage_account: payload.storage_account_name,
+        location: payload.location,
+        environment: payload.environment,
+        restrict_network: payload.restrict_network,
+        private_endpoint: Boolean(payload.private_endpoint),
+        backend_enabled: Boolean(payload.backend)
+    });
+
+    const summariseServiceBusInputs = (payload: AzureServiceBusGeneratorPayload) => ({
+        namespace: payload.namespace_name,
+        location: payload.location,
+        sku: payload.sku,
+        queues: payload.queues?.length ?? 0,
+        topics: payload.topics?.length ?? 0,
+        restrict_network: payload.restrict_network,
+        private_endpoint: Boolean(payload.private_endpoint),
+        diagnostics: Boolean(payload.diagnostics)
+    });
+
+    const summariseFunctionInputs = (payload: AzureFunctionAppGeneratorPayload) => ({
+        function_app: payload.function_app_name,
+        runtime: `${payload.runtime} ${payload.runtime_version}`,
+        plan_sku: payload.app_service_plan_sku,
+        application_insights: payload.enable_application_insights,
+        vnet_integration: payload.enable_vnet_integration
+    });
+
+    const summariseApiManagementInputs = (payload: AzureApiManagementGeneratorPayload) => ({
+        name: payload.name,
+        location: payload.location,
+        environment: payload.environment,
+        sku: payload.sku_name,
+        capacity: payload.capacity ?? 1,
+        virtual_network: payload.virtual_network_type,
+        diagnostics: Boolean(payload.diagnostics)
+    });
+
+    const buildRunSummary = (result: GeneratorResult | null): Record<string, unknown> | null => {
+        if (!result) return null;
+        return {
+            filename: result.filename,
+            content_length: result.content.length
+        };
+    };
+
+    const recordGeneratorRun = async (
+        generatorId: GeneratorId,
+        inputs: Record<string, unknown>,
+        result: GeneratorResult | null
+    ) => {
+        if (!browser) {
+            return;
+        }
+        if (!activeProjectValue) {
+            if (!missingProjectWarningShown) {
+                notifyError('Select a project in the sidebar to log generator runs.');
+                missingProjectWarningShown = true;
+            }
+            return;
+        }
+        if (!authTokenValue) {
+            console.warn('Skipping project run logging because token is unavailable.');
+            return;
+        }
+
+        const label = `${generatorLabels[generatorId] ?? generatorId} • ${new Date().toLocaleString()}`;
+        try {
+            const run = await projectState.createRun(fetch, authTokenValue, activeProjectValue.id, {
+                label,
+                kind: 'generator',
+                parameters: {
+                    generator: generatorId,
+                    inputs
+                }
+            });
+            if (!run?.id) {
+                return;
+            }
+            const summary = buildRunSummary(result);
+            const updatePayload: ProjectRunUpdatePayload = {
+                status: 'completed',
+                finished_at: new Date().toISOString()
+            };
+            if (summary) {
+                updatePayload.summary = summary;
+            }
+            try {
+                const updated = await updateProjectRun(
+                    fetch,
+                    authTokenValue,
+                    activeProjectValue.id,
+                    run.id,
+                    updatePayload
+                );
+                projectState.upsertRun(activeProjectValue.id, updated);
+            } catch (updateError) {
+                console.warn('Failed to update generator run status', updateError);
+            }
+        } catch (error) {
+            console.warn('Unable to record generator run', error);
+        }
+    };
+
     const handleAwsSubmit = async (event?: SubmitEvent) => {
         event?.preventDefault();
         awsStatus = null;
@@ -678,10 +828,12 @@
         }
         awsBusy = true;
         try {
-            awsResult = await generateAwsS3(fetch, buildAwsPayload());
+            const payload = buildAwsPayload();
+            awsResult = await generateAwsS3(fetch, payload);
             awsStatus = 'Terraform module generated successfully.';
             notifySuccess(awsStatus);
             moveToReview();
+            void recordGeneratorRun('aws_s3', summariseAwsInputs(payload), awsResult);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to generate AWS S3 module.';
             awsStatus = message;
@@ -720,10 +872,12 @@
         }
         azureBusy = true;
         try {
-            azureResult = await generateAzureStorageAccount(fetch, buildAzureStoragePayload());
+            const payload = buildAzureStoragePayload();
+            azureResult = await generateAzureStorageAccount(fetch, payload);
             azureStatus = 'Terraform module generated successfully.';
             notifySuccess(azureStatus);
             moveToReview();
+            void recordGeneratorRun('azure_storage', summariseAzureStorageInputs(payload), azureResult);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to generate Azure storage module.';
             azureStatus = message;
@@ -772,10 +926,12 @@
         }
         sbBusy = true;
         try {
-            sbResult = await generateAzureServiceBus(fetch, buildServiceBusPayload());
+            const payload = buildServiceBusPayload();
+            sbResult = await generateAzureServiceBus(fetch, payload);
             sbStatus = 'Terraform module generated successfully.';
             notifySuccess(sbStatus);
             moveToReview();
+            void recordGeneratorRun('azure_servicebus', summariseServiceBusInputs(payload), sbResult);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to generate Service Bus module.';
             sbStatus = message;
@@ -806,10 +962,12 @@
         }
         funcBusy = true;
         try {
-            funcResult = await generateAzureFunctionApp(fetch, buildFunctionPayload());
+            const payload = buildFunctionPayload();
+            funcResult = await generateAzureFunctionApp(fetch, payload);
             funcStatus = 'Terraform module generated successfully.';
             notifySuccess(funcStatus);
             moveToReview();
+            void recordGeneratorRun('azure_function_app', summariseFunctionInputs(payload), funcResult);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to generate Function App module.';
             funcStatus = message;
@@ -845,10 +1003,12 @@
         }
         apimBusy = true;
         try {
-            apimResult = await generateAzureApiManagement(fetch, buildApiManagementPayload());
+            const payload = buildApiManagementPayload();
+            apimResult = await generateAzureApiManagement(fetch, payload);
             apimStatus = 'Terraform module generated successfully.';
             notifySuccess(apimStatus);
             moveToReview();
+            void recordGeneratorRun('azure_api_management', summariseApiManagementInputs(payload), apimResult);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to generate API Management module.';
             apimStatus = message;

@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import { goto } from '$app/navigation';
 	import AuthEventTimeline from '$lib/components/dashboard/AuthEventTimeline.svelte';
-import StatCard from '$lib/components/dashboard/StatCard.svelte';
-import StepBar from '$lib/components/dashboard/StepBar.svelte';
-import SeverityDistribution from '$lib/components/dashboard/SeverityDistribution.svelte';
+	import StatCard from '$lib/components/dashboard/StatCard.svelte';
+	import StepBar from '$lib/components/dashboard/StepBar.svelte';
+	import SeverityDistribution from '$lib/components/dashboard/SeverityDistribution.svelte';
 	import type { AuthEvent } from '$lib/api/client';
-import type { DashboardStats } from '$lib/types/dashboard';
+	import type { DashboardStats } from '$lib/types/dashboard';
+	import { activeProject, activeProjectRuns, projectState } from '$lib/stores/project';
 
 	const { data } = $props();
 	const statsSource = data.stats as DashboardStats | Promise<DashboardStats | null> | null;
@@ -151,6 +153,19 @@ const topSeverityCount = $derived(
 
 const hasSeverityData = $derived(topSeverityCount > 0);
 
+	const activeProjectSummary = $derived($activeProject);
+	const recentRuns = $derived($activeProjectRuns.slice(0, 3));
+	const hasProjects = $derived($projectState.projects.length > 0);
+	const isProjectLoading = $derived($projectState.loading);
+
+	const handleStartRun = async () => {
+		await goto('/generate');
+	};
+
+	const handleReviewRuns = async () => {
+		await goto('/reports');
+	};
+
 	const stepItems = [
 		{
 			title: 'Scan',
@@ -174,11 +189,80 @@ const hasSeverityData = $derived(topSeverityCount > 0);
 	<header class="flex flex-col gap-2">
 		<p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Overview</p>
 		<h2 class="text-3xl font-semibold text-slate-700">Platform health</h2>
-		<p class="max-w-2xl text-sm text-slate-500">
-			High-level metrics pulled directly from the FastAPI reviewer. Counts update whenever new reports are stored via the
-			CLI or this SvelteKit interface (the legacy Streamlit UI has been retired).
-		</p>
+	<p class="max-w-2xl text-sm text-slate-500">
+		High-level metrics pulled directly from the FastAPI reviewer. Counts update whenever new reports are stored via the
+		Projects workspace or this SvelteKit interface (the legacy Streamlit UI has been retired).
+	</p>
 	</header>
+
+	<section class="rounded-3xl border border-slate-200 bg-white px-6 py-5 shadow-sm shadow-slate-200">
+		<div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+			<div>
+				<p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">Project workspace</p>
+				{#if activeProjectSummary}
+					<h3 class="mt-1 text-xl font-semibold text-slate-700">{activeProjectSummary.name}</h3>
+					<p class="text-sm text-slate-500">
+						Using slug
+						<span class="rounded-full bg-slate-100 px-2 py-[2px] text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-slate-500">
+							{activeProjectSummary.slug}
+						</span>
+					</p>
+				{:else if isProjectLoading}
+					<p class="text-sm text-slate-500">Loading projects…</p>
+				{:else if hasProjects}
+					<p class="text-sm text-slate-500">Select a project from the sidebar to see run history.</p>
+				{:else}
+			<p class="text-sm text-slate-500">
+				No projects yet. Create one from the Projects page to bootstrap a workspace, then refresh.
+			</p>
+				{/if}
+			</div>
+			<div class="flex flex-wrap gap-3">
+				<button
+					type="button"
+					class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-50"
+					onclick={handleReviewRuns}
+				>
+					View Reports
+				</button>
+				<button
+					type="button"
+					class="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-sky-200 transition hover:bg-sky-600"
+					onclick={handleStartRun}
+				>
+					Start New Run
+				</button>
+			</div>
+		</div>
+		{#if recentRuns.length}
+			<div class="mt-5 grid gap-3 md:grid-cols-3">
+				{#each recentRuns as run (run.id)}
+					<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-500">
+						<p class="text-sm font-semibold text-slate-700">{run.label}</p>
+						<p class="mt-1 text-[0.7rem] uppercase tracking-[0.2em] text-slate-400">{run.kind}</p>
+						<p class="mt-2 inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-[2px] text-[0.6rem] font-semibold uppercase tracking-[0.2em] text-slate-500">
+							{run.status}
+						</p>
+						{#if run.created_at}
+							<p class="mt-1 text-[0.65rem] text-slate-400">Created {run.created_at}</p>
+						{/if}
+						{#if run.summary && Object.keys(run.summary).length}
+							<p class="mt-2 text-[0.65rem] text-slate-500">
+								Summary fields: {Object.keys(run.summary).slice(0, 3).join(', ')}
+								{#if Object.keys(run.summary).length > 3}
+									…
+								{/if}
+							</p>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		{:else if activeProjectSummary && !isProjectLoading}
+			<p class="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs text-slate-500">
+				No runs recorded for this project yet. Use the generator or review flows to create the first run.
+			</p>
+		{/if}
+	</section>
 
 	{#if resolvedError}
 		<div class="rounded-3xl border border-rose-300 bg-rose-50 px-6 py-4 text-sm text-rose-700">
