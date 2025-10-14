@@ -212,3 +212,149 @@ def test_project_and_run_artifacts(storage_context: Dict[str, Path]) -> None:
 
     storage.delete_project(project["id"], remove_files=True, db_path=db_path)
     assert not (projects_root / project["slug"]).exists()
+
+
+def test_generated_asset_promotion_and_versioning(storage_context: Dict[str, Path]) -> None:
+    db_path = storage_context["db_path"]
+    projects_root = storage_context["projects_root"]
+
+    project = storage.create_project(
+        "Library Demo",
+        description="Workspace with promoted assets",
+        metadata={"team": "platform"},
+        projects_root=projects_root,
+        db_path=db_path,
+    )
+    run = storage.create_project_run(
+        project["id"],
+        label="Baseline generation",
+        kind="generator",
+        parameters={"template": "aws_vpc"},
+        projects_root=projects_root,
+        db_path=db_path,
+    )
+
+    artifact_bytes = b'resource "null_resource" "example" {\n  triggers = { version = "v1" }\n}\n'
+    artifact_info = storage.save_run_artifact(
+        project["id"],
+        run["id"],
+        path="outputs/main.tf",
+        data=artifact_bytes,
+        projects_root=projects_root,
+        db_path=db_path,
+    )
+    assert artifact_info["path"] == "outputs/main.tf"
+
+    artifact_file_path = storage.get_run_artifact_path(
+        project["id"],
+        run["id"],
+        path=artifact_info["path"],
+        db_path=db_path,
+    )
+    assert artifact_file_path.exists()
+
+    registered = storage.register_generated_asset(
+        project["id"],
+        name="Baseline Terraform",
+        asset_type="terraform",
+        description="Initial configuration promoted from generator output.",
+        tags=["baseline", "terraform"],
+        metadata={"env": "dev"},
+        run_id=run["id"],
+        source_path=artifact_file_path,
+        notes="First promotion from baseline run.",
+        projects_root=projects_root,
+        db_path=db_path,
+    )
+    asset_payload = registered["asset"]
+    version_v1 = registered["version"]
+
+    assert asset_payload["latest_version_id"] == version_v1["id"]
+    assert asset_payload["versions"] is not None
+    assert len(asset_payload["versions"]) == 1
+
+    version_v1_path = Path(version_v1["storage_path"])
+    assert version_v1_path.exists()
+    assert version_v1_path.read_bytes() == artifact_bytes
+
+    overview = storage.get_project_overview(project["id"], db_path=db_path)
+    assert overview["library_asset_count"] == 1
+
+    new_version_bytes = b'resource "null_resource" "example" {\n  triggers = { version = "v2" }\n  depends_on = []\n}\n'
+    promoted_v2 = storage.add_generated_asset_version(
+        asset_payload["id"],
+        project_id=project["id"],
+        run_id=run["id"],
+        data=new_version_bytes,
+        media_type="text/plain",
+        notes="Updated triggers for version two.",
+        projects_root=projects_root,
+        db_path=db_path,
+    )
+    asset_with_v2 = promoted_v2["asset"]
+    version_v2 = promoted_v2["version"]
+
+    assert asset_with_v2["latest_version_id"] == version_v2["id"]
+    assert asset_with_v2["versions"] is not None
+    assert len(asset_with_v2["versions"]) == 2
+    version_ids = {version["id"] for version in asset_with_v2["versions"]}
+    assert version_ids == {version_v1["id"], version_v2["id"]}
+
+    version_v2_path = Path(version_v2["storage_path"])
+    assert version_v2_path.exists()
+    assert version_v2_path.read_bytes() == new_version_bytes
+
+    paged_assets = storage.list_generated_assets(
+        project["id"],
+        include_versions=True,
+        db_path=db_path,
+    )
+    assert paged_assets["total_count"] == 1
+    assert paged_assets["items"][0]["versions"] is not None
+    assert len(paged_assets["items"][0]["versions"]) == 2
+
+    diff_payload = storage.diff_generated_asset_versions(
+        asset_payload["id"],
+        base_version_id=version_v1["id"],
+        compare_version_id=version_v2["id"],
+        project_id=project["id"],
+        db_path=db_path,
+    )
+    assert diff_payload["base"]["id"] == version_v1["id"]
+    assert diff_payload["compare"]["id"] == version_v2["id"]
+    assert "+  depends_on = []" in diff_payload["diff"]
+
+    deleted_new = storage.delete_generated_asset_version(
+        asset_payload["id"],
+        version_v2["id"],
+        project_id=project["id"],
+        db_path=db_path,
+    )
+    assert deleted_new is True
+
+    post_delete_assets = storage.list_generated_assets(
+        project["id"],
+        include_versions=True,
+        db_path=db_path,
+    )
+    assert post_delete_assets["items"][0]["latest_version_id"] == version_v1["id"]
+    assert post_delete_assets["items"][0]["versions"] is not None
+    assert len(post_delete_assets["items"][0]["versions"]) == 1
+
+    removed_asset = storage.delete_generated_asset(
+        asset_payload["id"],
+        project_id=project["id"],
+        remove_files=True,
+        projects_root=projects_root,
+        db_path=db_path,
+    )
+    assert removed_asset is True
+
+    list_after_removal = storage.list_generated_assets(
+        project["id"],
+        include_versions=True,
+        db_path=db_path,
+    )
+    assert list_after_removal["total_count"] == 0
+    asset_root = Path(project["root_path"]) / "library" / asset_payload["id"]
+    assert not asset_root.exists()

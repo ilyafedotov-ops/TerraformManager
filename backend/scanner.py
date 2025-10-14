@@ -64,7 +64,7 @@ def scan_paths(
             "paths": [str(p) for p in paths],
             "use_terraform_validate": use_terraform_validate,
             "llm_enabled": bool(llm_options),
-            "cost_enabled": bool(cost_options),
+            "cost_enabled": cost_options is not None,
             "plan_path": str(plan_path) if plan_path else None,
         },
     )
@@ -135,7 +135,7 @@ def scan_paths(
             "patches_enabled": bool(llm_options.get("enable_patches")),
         }
 
-    if cost_options:
+    if cost_options is not None:
         usage = cost_options.get("usage_file")
         usage_path = Path(usage).resolve() if usage else None
         cost_result = run_infracost(paths, usage_file=usage_path)

@@ -103,7 +103,8 @@ def test_project_route_lifecycle(projects_client: Tuple[TestClient, str, Path, P
 
     runs_response = client.get(f"/projects/{project_id}/runs", headers=auth_headers(token))
     assert runs_response.status_code == 200
-    assert runs_response.json()[0]["id"] == run_id
+    runs_payload = runs_response.json()
+    assert runs_payload["items"][0]["id"] == run_id
 
     patch_response = client.patch(
         f"/projects/{project_id}/runs/{run_id}",
