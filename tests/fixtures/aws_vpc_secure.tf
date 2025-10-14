@@ -5,6 +5,7 @@ resource "aws_vpc" "secure" {
 
 resource "aws_cloudwatch_log_group" "vpc" {
   name = "/aws/vpc/tfm-secure"
+  retention_in_days = 90
 }
 
 resource "aws_iam_role" "flow_logs" {
