@@ -340,6 +340,11 @@ class ProjectGeneratorRunRequest(BaseModel):
     options: ProjectGeneratorRunOptions = Field(default_factory=ProjectGeneratorRunOptions)
 
 
+class GeneratorResponse(BaseModel):
+    filename: str
+    content: str
+
+
 class ProjectGeneratorRunResponse(BaseModel):
     output: GeneratorResponse
     asset: GeneratedAssetSummary
@@ -1229,6 +1234,23 @@ def project_generator_run(
         "output_filename": rendered["filename"],
         "force_save": options.force_save,
     }
+
+    validation_status = (validation_summary.get("status") or "").lower() if isinstance(validation_summary, dict) else ""
+    if validation_status == "failed" and not options.force_save:
+        _mark_run_failure(
+            run_record["id"],
+            project_id,
+            message="Terraform validation failed",
+            started_at=started_at,
+            session=session,
+        )
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "validation_failed",
+                "validation_summary": validation_summary,
+            },
+        )
 
     try:
         asset_result = register_generated_asset(
