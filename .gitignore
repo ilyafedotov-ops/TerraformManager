@@ -31,3 +31,4 @@ repo_remote/
 .DS_Store
 Thumbs.db
 data/projects/
+data/app.db
