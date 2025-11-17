@@ -164,7 +164,9 @@ pnpm dev -- --open
 - Authenticated routes live under `(app)/` while guest flows live under `(auth)/`; tokens persist via cookies/local storage helpers.
 - The **Projects** workspace lets you create, edit, and delete project folders entirely in the browser, browse recent runs, upload or delete artifacts, and download generator/review outputs without touching the CLI. Select a project and scroll to the "Project artifacts" panel to manage files directly from the UI.
 - Promoting an artifact now opens a structured dialog where you can capture asset type, tags, notes, and JSON metadata before saving it to the library. The dialog remembers your last-used defaults, suggests tags from existing assets, and the library view lets you edit metadata in-place as requirements evolve.
-- Library diffs support unified or side-by-side layouts, an “ignore whitespace” toggle, and copy/download helpers so reviewers can share patches or skim large changes quickly.
+- Library diffs support unified or side-by-side layouts, an “ignore whitespace” toggle, per-file status filters, and copy/download helpers so reviewers can zero in on the exact Terraform files that changed.
+- The library view now includes asset-type filters (e.g., Terraform configs vs scan reports) plus version validation badges and manifest browsers. Every generated file is tracked with checksums, sizes, and media types so you can diff, download, or audit bundles without leaving the UI.
+- Server-side generator runs (UI/CLI/API) record validation summaries and block promotion when `terraform fmt -check` fails unless you explicitly use the new force-save override for exceptional situations.
 
 ## Linting & Formatting
 
@@ -214,6 +216,14 @@ python -m backend.cli docs --out docs/generators --knowledge-out knowledge/gener
 
 # Authenticate against running API (stores access/refresh data in tm_auth.json)
 python -m backend.cli auth login --email you@example.com --base-url http://localhost:8890
+
+# Invoke a registered generator via the API (auto-saves run + library asset)
+python -m backend.cli project generator \
+  --project-id <uuid> \
+  --slug aws/s3-secure-bucket \
+  --payload payloads/s3-secure-bucket.json \
+  --asset-name "Platform Logs Bucket" \
+  --tags "terraform,baseline"
 ```
 
 > Tip: The Projects UI in the SvelteKit dashboard now covers workspace creation, editing, deletion, artifact browsing, and uploading new files. Reach for the CLI when you want automation, CI integration, or scripted workloads.

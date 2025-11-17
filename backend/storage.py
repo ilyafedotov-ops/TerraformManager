@@ -5,6 +5,7 @@ import difflib
 import json
 import re
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Sequence
@@ -25,6 +26,7 @@ from backend.db.models import (
     ProjectArtifact,
     GeneratedAsset,
     GeneratedAssetVersion,
+    GeneratedAssetVersionFile,
     format_timestamp,
 )
 from backend.db.session import DEFAULT_DB_PATH as _DEFAULT_DB_PATH, init_models, session_scope
@@ -32,6 +34,22 @@ from backend.db.session import DEFAULT_DB_PATH as _DEFAULT_DB_PATH, init_models,
 DEFAULT_DB_PATH = _DEFAULT_DB_PATH
 DEFAULT_PROJECTS_ROOT = Path("data/projects")
 MAX_VERSION_TEXT_BYTES = 512 * 1024
+
+
+@dataclass
+class VersionFilePayload:
+    path: str
+    content: bytes
+    media_type: str | None = None
+
+
+@dataclass
+class VersionFileView:
+    path: str
+    storage_path: str
+    checksum: str | None
+    size_bytes: int | None
+    media_type: str | None
 
 
 class ProjectNotFoundError(Exception):
@@ -482,6 +500,45 @@ def _resolve_asset_bytes(source_path: Path | None, data: bytes | None) -> bytes:
     return resolved.read_bytes()
 
 
+def _coerce_bytes(value: bytes | str) -> bytes:
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        return value.encode("utf-8")
+    raise TypeError("file content must be bytes or str")
+
+
+def _prepare_version_files(files: Optional[Sequence[Dict[str, Any]]]) -> List[VersionFilePayload]:
+    prepared: List[VersionFilePayload] = []
+    if not files:
+        return prepared
+    seen: set[str] = set()
+    for index, file_entry in enumerate(files, start=1):
+        if not isinstance(file_entry, dict):
+            raise ValueError(f"files[{index}] must be a mapping with 'path' and 'content'")
+        raw_path = file_entry.get("path")
+        if not raw_path or not isinstance(raw_path, str):
+            raise ValueError(f"files[{index}] must include a non-empty string path")
+        cleaned_path = _normalise_relative_path(raw_path)
+        if cleaned_path in {".", ""}:
+            raise ValueError(f"files[{index}] path cannot reference the root directory")
+        if cleaned_path in seen:
+            raise ValueError(f"duplicate file path detected: {cleaned_path}")
+        seen.add(cleaned_path)
+        raw_content = file_entry.get("content")
+        if raw_content is None:
+            raise ValueError(f"files[{index}] must include content")
+        try:
+            content_bytes = _coerce_bytes(raw_content)
+        except TypeError as exc:
+            raise ValueError(f"files[{index}] content must be bytes or string") from exc
+        media_type = file_entry.get("media_type")
+        if media_type is not None and not isinstance(media_type, str):
+            raise ValueError(f"files[{index}] media_type must be a string if provided")
+        prepared.append(VersionFilePayload(path=cleaned_path, content=content_bytes, media_type=media_type))
+    return prepared
+
+
 def _create_asset_version(
     db: Session,
     project: Project,
@@ -494,6 +551,10 @@ def _create_asset_version(
     media_type: str | None,
     notes: str | None,
     projects_root: Path | None,
+    files: Optional[List[VersionFilePayload]] = None,
+    version_metadata: Optional[Dict[str, Any]] = None,
+    validation_summary: Optional[Dict[str, Any]] = None,
+    payload_fingerprint: str | None = None,
 ) -> GeneratedAssetVersion:
     version_id = str(uuid4())
     library_dir = _ensure_library_directory(project, asset.id, version_id, projects_root)
@@ -517,8 +578,16 @@ def _create_asset_version(
         size_bytes=len(content_bytes),
         media_type=media_type,
         notes=notes,
+        version_metadata=dict(version_metadata or {}),
+        validation_summary=(dict(validation_summary) if isinstance(validation_summary, dict) else None),
+        payload_fingerprint=payload_fingerprint,
     )
     db.add(version)
+    db.flush()
+    _record_version_file(db, version, relative_path=storage_name, absolute_path=destination, media_type=media_type)
+    for file_payload in files or []:
+        file_destination = _write_version_file(library_dir, file_payload.path, file_payload.content)
+        _record_version_file(db, version, relative_path=file_payload.path, absolute_path=file_destination, media_type=file_payload.media_type)
     db.flush()
     return version
 
@@ -546,6 +615,66 @@ def _ensure_library_directory(
     library_root = project_root / "library" / asset_id / version_id
     library_root.mkdir(parents=True, exist_ok=True)
     return library_root
+
+
+def _write_version_file(root: Path, relative_path: str, content: bytes) -> Path:
+    target = (root / relative_path).resolve()
+    try:
+        target.relative_to(root.resolve())
+    except ValueError as exc:
+        raise ValueError(f"file path '{relative_path}' escapes version directory") from exc
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        raise FileExistsError(f"file '{relative_path}' already exists in version directory")
+    with open(target, "wb") as handle:
+        handle.write(content)
+    return target
+
+
+def _record_version_file(
+    db: Session,
+    version: GeneratedAssetVersion,
+    *,
+    relative_path: str,
+    absolute_path: Path,
+    media_type: str | None,
+) -> None:
+    checksum = _hash_file(absolute_path)
+    stat = absolute_path.stat()
+    record = GeneratedAssetVersionFile(
+        project_id=version.project_id,
+        version_id=version.id,
+        path=_normalise_relative_path(relative_path),
+        storage_path=str(absolute_path),
+        checksum=checksum,
+        size_bytes=int(stat.st_size),
+        media_type=media_type,
+    )
+    db.add(record)
+
+
+def _get_version_file_views(version: GeneratedAssetVersion) -> Dict[str, VersionFileView]:
+    if getattr(version, "files", None):
+        records = {
+            file_record.path: VersionFileView(
+                path=file_record.path,
+                storage_path=file_record.storage_path,
+                checksum=file_record.checksum,
+                size_bytes=file_record.size_bytes,
+                media_type=file_record.media_type,
+            )
+            for file_record in version.files
+        }
+        if records:
+            return records
+    fallback = VersionFileView(
+        path=version.display_path,
+        storage_path=version.storage_path,
+        checksum=version.checksum,
+        size_bytes=version.size_bytes,
+        media_type=version.media_type,
+    )
+    return {fallback.path: fallback}
 
 
 def _get_asset_library_root(
@@ -1701,6 +1830,10 @@ def register_generated_asset(
     media_type: str | None = None,
     notes: str | None = None,
     projects_root: Path | None = None,
+    files: Optional[Sequence[Dict[str, Any]]] = None,
+    version_metadata: Optional[Dict[str, Any]] = None,
+    payload_fingerprint: str | None = None,
+    validation_summary: Optional[Dict[str, Any]] = None,
     db_path: Path = DEFAULT_DB_PATH,
     session: Session | None = None,
 ) -> Dict[str, Any]:
@@ -1715,6 +1848,7 @@ def register_generated_asset(
     tags_value = _normalise_tags(tags)
     metadata_value = dict(metadata or {})
     source_path_obj = Path(source_path).expanduser() if source_path else None
+    file_payloads = _prepare_version_files(files)
 
     with _get_session(session, db_path) as db:
         project = _get_project_or_raise(db, project_id)
@@ -1769,6 +1903,10 @@ def register_generated_asset(
             media_type=media_type,
             notes=notes,
             projects_root=projects_root,
+            files=file_payloads,
+            version_metadata=version_metadata,
+            validation_summary=validation_summary,
+            payload_fingerprint=payload_fingerprint,
         )
 
         asset.latest_version_id = version.id
@@ -1850,10 +1988,15 @@ def add_generated_asset_version(
     notes: str | None = None,
     promote_latest: bool = True,
     projects_root: Path | None = None,
+    files: Optional[Sequence[Dict[str, Any]]] = None,
+    version_metadata: Optional[Dict[str, Any]] = None,
+    payload_fingerprint: str | None = None,
+    validation_summary: Optional[Dict[str, Any]] = None,
     db_path: Path = DEFAULT_DB_PATH,
     session: Session | None = None,
 ) -> Dict[str, Any]:
     source_path_obj = Path(source_path).expanduser() if source_path else None
+    file_payloads = _prepare_version_files(files)
 
     with _get_session(session, db_path) as db:
         asset = db.get(GeneratedAsset, asset_id)
@@ -1899,6 +2042,10 @@ def add_generated_asset_version(
             media_type=media_type,
             notes=notes,
             projects_root=projects_root,
+            files=file_payloads,
+            version_metadata=version_metadata,
+            validation_summary=validation_summary,
+            payload_fingerprint=payload_fingerprint,
         )
 
         if promote_latest or not asset.latest_version_id:
@@ -2038,7 +2185,7 @@ def get_generated_asset_version_path(
         path = Path(version.storage_path).expanduser()
         if not path.exists() or not path.is_file():
             raise FileNotFoundError(str(path))
-        return path
+    return path
 
 
 def diff_generated_asset_versions(
@@ -2065,32 +2212,121 @@ def diff_generated_asset_versions(
         if not compare_version or compare_version.asset_id != asset_id:
             raise ValueError("compare version not found for asset")
 
-        base_path = Path(base_version.storage_path).expanduser()
-        compare_path = Path(compare_version.storage_path).expanduser()
-        base_text = _read_text_file(base_path, max_bytes=max_bytes)
-        compare_text = _read_text_file(compare_path, max_bytes=max_bytes)
+        base_files = _get_version_file_views(base_version)
+        compare_files = _get_version_file_views(compare_version)
+        diff_chunks: List[str] = []
+        file_diffs: List[Dict[str, Any]] = []
+        paired_paths: List[tuple[str, VersionFileView | None, VersionFileView | None]] = []
+        all_paths = sorted(set(base_files.keys()) | set(compare_files.keys()))
+        for path in all_paths:
+            paired_paths.append((path, base_files.get(path), compare_files.get(path)))
 
-        if ignore_whitespace:
-            base_lines = [line.strip() for line in base_text.splitlines()]
-            compare_lines = [line.strip() for line in compare_text.splitlines()]
-        else:
-            base_lines = base_text.splitlines()
-            compare_lines = compare_text.splitlines()
-        diff_lines = difflib.unified_diff(
-            base_lines,
-            compare_lines,
-            fromfile=base_version.display_path,
-            tofile=compare_version.display_path,
-            lineterm="",
-        )
-        diff_text = "\n".join(diff_lines)
+        if not any(base and compare for _, base, compare in paired_paths):
+            if base_files and compare_files and len(base_files) == 1 and len(compare_files) == 1:
+                base_entry = next(iter(base_files.values()))
+                compare_entry = next(iter(compare_files.values()))
+                synthetic_path = compare_entry.path or base_entry.path or compare_version.display_path
+                paired_paths.append((synthetic_path, base_entry, compare_entry))
+
+        for path, base_entry, compare_entry in paired_paths:
+            if base_entry and compare_entry:
+                status = "modified"
+            elif base_entry and not compare_entry:
+                status = "removed"
+            else:
+                status = "added"
+
+            file_diff_text: Optional[str] = None
+            if base_entry and compare_entry:
+                base_path = Path(base_entry.storage_path).expanduser()
+                compare_path = Path(compare_entry.storage_path).expanduser()
+                try:
+                    base_text = _read_text_file(base_path, max_bytes=max_bytes)
+                    compare_text = _read_text_file(compare_path, max_bytes=max_bytes)
+                    if ignore_whitespace:
+                        base_lines = [line.strip() for line in base_text.splitlines()]
+                        compare_lines = [line.strip() for line in compare_text.splitlines()]
+                    else:
+                        base_lines = base_text.splitlines()
+                        compare_lines = compare_text.splitlines()
+                    diff_lines = difflib.unified_diff(
+                        base_lines,
+                        compare_lines,
+                        fromfile=path,
+                        tofile=path,
+                        lineterm="",
+                    )
+                    file_diff_text = "\n".join(diff_lines)
+                    if file_diff_text:
+                        diff_chunks.append(file_diff_text)
+                except (FileNotFoundError, ValueError):
+                    file_diff_text = None
+
+            file_diffs.append(
+                {
+                    "path": path,
+                    "status": status,
+                    "base": {
+                        "storage_path": base_entry.storage_path,
+                        "checksum": base_entry.checksum,
+                        "size_bytes": base_entry.size_bytes,
+                        "media_type": base_entry.media_type,
+                    }
+                    if base_entry
+                    else None,
+                    "compare": {
+                        "storage_path": compare_entry.storage_path,
+                        "checksum": compare_entry.checksum,
+                        "size_bytes": compare_entry.size_bytes,
+                        "media_type": compare_entry.media_type,
+                    }
+                    if compare_entry
+                    else None,
+                    "diff": file_diff_text,
+                }
+            )
+
+        if not diff_chunks:
+            raise ValueError("diff unavailable for the specified versions (no textual differences detected)")
+
+        diff_text = "\n".join(diff_chunks)
 
         return {
             "base": base_version.to_dict(include_blob=False),
             "compare": compare_version.to_dict(include_blob=False),
             "diff": diff_text,
             "ignore_whitespace": ignore_whitespace,
+            "files": file_diffs,
         }
+
+
+def list_generated_asset_version_files(
+    asset_id: str,
+    version_id: str,
+    *,
+    project_id: str | None = None,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> List[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        asset = db.get(GeneratedAsset, asset_id)
+        if not asset:
+            raise ValueError("asset not found")
+        if project_id and asset.project_id != project_id:
+            raise ValueError("asset does not belong to the specified project")
+        version = db.get(GeneratedAssetVersion, version_id)
+        if not version or version.asset_id != asset_id:
+            raise ValueError("version not found for asset")
+        files = (
+            db.execute(
+                select(GeneratedAssetVersionFile)
+                .where(GeneratedAssetVersionFile.version_id == version.id)
+                .order_by(GeneratedAssetVersionFile.path.asc())
+            )
+            .scalars()
+            .all()
+        )
+        return [file_record.to_dict() for file_record in files]
 
 
 def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:

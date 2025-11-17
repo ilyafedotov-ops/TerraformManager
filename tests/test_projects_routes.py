@@ -198,6 +198,33 @@ def test_project_route_lifecycle(projects_client: Tuple[TestClient, str, Path, P
     assert download.status_code == 200
     assert download.content == b'{"ok": true}'
 
+    registered = storage.register_generated_asset(
+        project_id=project_id,
+        name="Scan report bundle",
+        asset_type="scan_report",
+        description="Latest scan outputs",
+        tags=["report"],
+        metadata={"source": "api"},
+        run_id=run_id,
+        storage_filename="report.json",
+        data=b'{"issues": []}',
+        media_type="application/json",
+        projects_root=projects_root,
+        db_path=db_path,
+    )
+    asset_id = registered["asset"]["id"]
+    version_id = registered["version"]["id"]
+
+    manifest_response = client.get(
+        f"/projects/{project_id}/library/{asset_id}/versions/{version_id}/files",
+        headers=auth_headers(token),
+    )
+    assert manifest_response.status_code == 200
+    manifest = manifest_response.json()
+    assert len(manifest) == 1
+    assert manifest[0]["path"] == registered["version"]["display_path"]
+    assert manifest[0]["media_type"] == "application/json"
+
     delete_file = client.delete(
         f"/projects/{project_id}/runs/{run_id}/artifacts",
         params={"path": "outputs/report.json"},

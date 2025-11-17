@@ -1,19 +1,14 @@
 <script lang="ts">
     import { browser } from '$app/environment';
     import {
-        generateAwsS3,
-        generateAzureServiceBus,
-        generateAzureStorageAccount,
-        generateAzureFunctionApp,
-        generateAzureApiManagement,
-        updateProjectRun,
+        ApiError,
+        runProjectGenerator,
         type AwsS3GeneratorPayload,
         type AzureServiceBusGeneratorPayload,
         type AzureStorageGeneratorPayload,
         type AzureFunctionAppGeneratorPayload,
         type AzureApiManagementGeneratorPayload,
         type GeneratorResult,
-        type ProjectRunUpdatePayload,
         type ProjectSummary
     } from '$lib/api/client';
     import { notifyError, notifySuccess } from '$lib/stores/notifications';
@@ -40,11 +35,17 @@
         | 'azure_function_app'
         | 'azure_api_management';
 
-	type GeneratorMetadata = {
-		slug: string;
-		example_payload?: Record<string, unknown>;
-		presets?: Array<{ id?: string; label?: string; description?: string; payload?: Record<string, unknown> }>;
-	};
+type GeneratorMetadata = {
+        slug: string;
+        example_payload?: Record<string, unknown>;
+        presets?: Array<{ id?: string; label?: string; description?: string; payload?: Record<string, unknown> }>;
+    };
+
+    type GeneratorOverrideState = {
+        generatorId: GeneratorId;
+        summary: Record<string, unknown> | null;
+        message: string | null;
+    };
 
     const metadataBySlug: Record<string, GeneratorMetadata> = Object.fromEntries(
         (data.metadata as GeneratorMetadata[]).map((item) => [item.slug, item])
@@ -379,9 +380,10 @@
     let awsBackendKey = $state('s3/baseline/terraform.tfstate');
     let awsBackendRegion = $state('us-east-1');
     let awsBackendTable = $state('terraform_locks');
-    let awsResult = $state<GeneratorResult | null>(null);
-    let awsStatus = $state<string | null>(null);
-    let awsBusy = $state(false);
+let awsResult = $state<GeneratorResult | null>(null);
+let awsStatus = $state<string | null>(null);
+let awsBusy = $state(false);
+let generatorOverride = $state<GeneratorOverrideState | null>(null);
 
     // Azure storage state
     let azureRgName = $state(storageExample.resource_group_name ?? 'rg-app');
@@ -703,120 +705,7 @@
         }
     };
 
-    const summariseAwsInputs = (payload: AwsS3GeneratorPayload) => ({
-        bucket_name: payload.bucket_name,
-        region: payload.region,
-        environment: payload.environment,
-        versioning: payload.versioning,
-        secure_transport: payload.enforce_secure_transport,
-        backend_enabled: Boolean(payload.backend)
-    });
-
-    const summariseAzureStorageInputs = (payload: AzureStorageGeneratorPayload) => ({
-        storage_account: payload.storage_account_name,
-        location: payload.location,
-        environment: payload.environment,
-        restrict_network: payload.restrict_network,
-        private_endpoint: Boolean(payload.private_endpoint),
-        backend_enabled: Boolean(payload.backend)
-    });
-
-    const summariseServiceBusInputs = (payload: AzureServiceBusGeneratorPayload) => ({
-        namespace: payload.namespace_name,
-        location: payload.location,
-        sku: payload.sku,
-        queues: payload.queues?.length ?? 0,
-        topics: payload.topics?.length ?? 0,
-        restrict_network: payload.restrict_network,
-        private_endpoint: Boolean(payload.private_endpoint),
-        diagnostics: Boolean(payload.diagnostics)
-    });
-
-    const summariseFunctionInputs = (payload: AzureFunctionAppGeneratorPayload) => ({
-        function_app: payload.function_app_name,
-        runtime: `${payload.runtime} ${payload.runtime_version}`,
-        plan_sku: payload.app_service_plan_sku,
-        application_insights: payload.enable_application_insights,
-        vnet_integration: payload.enable_vnet_integration
-    });
-
-    const summariseApiManagementInputs = (payload: AzureApiManagementGeneratorPayload) => ({
-        name: payload.name,
-        location: payload.location,
-        environment: payload.environment,
-        sku: payload.sku_name,
-        capacity: payload.capacity ?? 1,
-        virtual_network: payload.virtual_network_type,
-        diagnostics: Boolean(payload.diagnostics)
-    });
-
-    const buildRunSummary = (result: GeneratorResult | null): Record<string, unknown> | null => {
-        if (!result) return null;
-        return {
-            filename: result.filename,
-            content_length: result.content.length
-        };
-    };
-
-    const recordGeneratorRun = async (
-        generatorId: GeneratorId,
-        inputs: Record<string, unknown>,
-        result: GeneratorResult | null
-    ) => {
-        if (!browser) {
-            return;
-        }
-        if (!activeProjectValue) {
-            if (!missingProjectWarningShown) {
-                notifyError('Select a project in the sidebar to log generator runs.');
-                missingProjectWarningShown = true;
-            }
-            return;
-        }
-        if (!authTokenValue) {
-            console.warn('Skipping project run logging because token is unavailable.');
-            return;
-        }
-
-        const label = `${generatorLabels[generatorId] ?? generatorId} • ${new Date().toLocaleString()}`;
-        try {
-            const run = await projectState.createRun(fetch, authTokenValue, activeProjectValue.id, {
-                label,
-                kind: 'generator',
-                parameters: {
-                    generator: generatorId,
-                    inputs
-                }
-            });
-            if (!run?.id) {
-                return;
-            }
-            const summary = buildRunSummary(result);
-            const updatePayload: ProjectRunUpdatePayload = {
-                status: 'completed',
-                finished_at: new Date().toISOString()
-            };
-            if (summary) {
-                updatePayload.summary = summary;
-            }
-            try {
-                const updated = await updateProjectRun(
-                    fetch,
-                    authTokenValue,
-                    activeProjectValue.id,
-                    run.id,
-                    updatePayload
-                );
-                projectState.upsertRun(activeProjectValue.id, updated);
-            } catch (updateError) {
-                console.warn('Failed to update generator run status', updateError);
-            }
-        } catch (error) {
-            console.warn('Unable to record generator run', error);
-        }
-    };
-
-    const handleAwsSubmit = async (event?: SubmitEvent) => {
+    const handleAwsSubmit = async (event?: SubmitEvent, opts?: { force?: boolean }) => {
         event?.preventDefault();
         awsStatus = null;
         awsResult = null;
@@ -834,14 +723,49 @@
             return;
         }
         awsBusy = true;
+        const forceSave = opts?.force ?? false;
         try {
             const payload = buildAwsPayload();
-            awsResult = await generateAwsS3(fetch, payload);
-            awsStatus = 'Terraform module generated successfully.';
+            const context = requireProjectContext();
+            if (!context) {
+                awsBusy = false;
+                return;
+            }
+            const response = await runProjectGenerator(fetch, context.token, context.project.id, 'aws/s3-secure-bucket', {
+                payload,
+                options: {
+                    run_label: `${generatorLabels.aws_s3} • ${new Date().toLocaleString()}`,
+                    force_save: forceSave
+                }
+            });
+            generatorOverride = null;
+            awsResult = response.output;
+            const validationStatus = validationStatusLabel(response.version.validation_summary ?? null);
+            if (validationStatus === 'failed') {
+                const details = validationMessage(response.version.validation_summary ?? null);
+                awsStatus = 'Terraform validation failed.';
+                notifyError(details ?? 'Terraform validation failed in the API. Adjust inputs or run locally for details.');
+                generatorOverride = {
+                    assetName: payload.bucket_name,
+                    metadata: {
+                        generator: 'aws_s3-secure-bucket',
+                        payload
+                    }
+                };
+                return;
+            }
+            awsStatus =
+                validationStatus === 'warn'
+                    ? 'Terraform module generated with warnings. Review validation output.'
+                    : `Terraform module generated (validation ${validationStatus}).`;
             notifySuccess(awsStatus);
             moveToReview();
-            void recordGeneratorRun('aws_s3', summariseAwsInputs(payload), awsResult);
+            projectState.upsertRun(context.project.id, response.run);
         } catch (error) {
+            if (handleGeneratorValidationError('aws_s3', error)) {
+                awsStatus = 'Terraform validation failed.';
+                return;
+            }
             const message = error instanceof Error ? error.message : 'Failed to generate AWS S3 module.';
             awsStatus = message;
             notifyError(message);
@@ -850,7 +774,7 @@
         }
     };
 
-    const handleAzureStorageSubmit = async (event?: SubmitEvent) => {
+    const handleAzureStorageSubmit = async (event?: SubmitEvent, opts?: { force?: boolean }) => {
         event?.preventDefault();
         azureStatus = null;
         azureResult = null;
@@ -878,14 +802,49 @@
             return;
         }
         azureBusy = true;
+        const forceSave = opts?.force ?? false;
         try {
             const payload = buildAzureStoragePayload();
-            azureResult = await generateAzureStorageAccount(fetch, payload);
-            azureStatus = 'Terraform module generated successfully.';
+            const context = requireProjectContext();
+            if (!context) {
+                azureBusy = false;
+                return;
+            }
+            const response = await runProjectGenerator(fetch, context.token, context.project.id, 'azure/storage-secure-account', {
+                payload,
+                options: {
+                    run_label: `${generatorLabels.azure_storage} • ${new Date().toLocaleString()}`,
+                    force_save: forceSave
+                }
+            });
+            generatorOverride = null;
+            azureResult = response.output;
+            const validationStatus = validationStatusLabel(response.version.validation_summary ?? null);
+            if (validationStatus === 'failed') {
+                const details = validationMessage(response.version.validation_summary ?? null);
+                azureStatus = 'Terraform validation failed.';
+                notifyError(details ?? 'Terraform validation failed in the API. Adjust inputs or run locally for details.');
+                generatorOverride = {
+                    assetName: payload.storage_account_name,
+                    metadata: {
+                        generator: 'azure/storage-secure-account',
+                        payload
+                    }
+                };
+                return;
+            }
+            azureStatus =
+                validationStatus === 'warn'
+                    ? 'Terraform module generated with warnings. Review validation output.'
+                    : `Terraform module generated (validation ${validationStatus}).`;
             notifySuccess(azureStatus);
             moveToReview();
-            void recordGeneratorRun('azure_storage', summariseAzureStorageInputs(payload), azureResult);
+            projectState.upsertRun(context.project.id, response.run);
         } catch (error) {
+            if (handleGeneratorValidationError('azure_storage', error)) {
+                azureStatus = 'Terraform validation failed.';
+                return;
+            }
             const message = error instanceof Error ? error.message : 'Failed to generate Azure storage module.';
             azureStatus = message;
             notifyError(message);
@@ -894,7 +853,7 @@
         }
     };
 
-    const handleServiceBusSubmit = async (event?: SubmitEvent) => {
+    const handleServiceBusSubmit = async (event?: SubmitEvent, opts?: { force?: boolean }) => {
         event?.preventDefault();
         sbStatus = null;
         sbResult = null;
@@ -932,14 +891,49 @@
             return;
         }
         sbBusy = true;
+        const forceSave = opts?.force ?? false;
         try {
             const payload = buildServiceBusPayload();
-            sbResult = await generateAzureServiceBus(fetch, payload);
-            sbStatus = 'Terraform module generated successfully.';
+            const context = requireProjectContext();
+            if (!context) {
+                sbBusy = false;
+                return;
+            }
+            const response = await runProjectGenerator(fetch, context.token, context.project.id, 'azure/servicebus-namespace', {
+                payload,
+                options: {
+                    run_label: `${generatorLabels.azure_servicebus} • ${new Date().toLocaleString()}`,
+                    force_save: forceSave
+                }
+            });
+            generatorOverride = null;
+            sbResult = response.output;
+            const validationStatus = validationStatusLabel(response.version.validation_summary ?? null);
+            if (validationStatus === 'failed') {
+                const details = validationMessage(response.version.validation_summary ?? null);
+                sbStatus = 'Terraform validation failed.';
+                notifyError(details ?? 'Terraform validation failed in the API. Adjust inputs or run locally for details.');
+                generatorOverride = {
+                    assetName: payload.namespace_name,
+                    metadata: {
+                        generator: 'azure/servicebus-namespace',
+                        payload
+                    }
+                };
+                return;
+            }
+            sbStatus =
+                validationStatus === 'warn'
+                    ? 'Terraform module generated with warnings. Review validation output.'
+                    : `Terraform module generated (validation ${validationStatus}).`;
             notifySuccess(sbStatus);
             moveToReview();
-            void recordGeneratorRun('azure_servicebus', summariseServiceBusInputs(payload), sbResult);
+            projectState.upsertRun(context.project.id, response.run);
         } catch (error) {
+            if (handleGeneratorValidationError('azure_servicebus', error)) {
+                sbStatus = 'Terraform validation failed.';
+                return;
+            }
             const message = error instanceof Error ? error.message : 'Failed to generate Service Bus module.';
             sbStatus = message;
             notifyError(message);
@@ -948,7 +942,7 @@
         }
     };
 
-    const handleFunctionSubmit = async (event?: SubmitEvent) => {
+    const handleFunctionSubmit = async (event?: SubmitEvent, opts?: { force?: boolean }) => {
         event?.preventDefault();
         funcStatus = null;
         funcResult = null;
@@ -968,14 +962,49 @@
             return;
         }
         funcBusy = true;
+        const forceSave = opts?.force ?? false;
         try {
             const payload = buildFunctionPayload();
-            funcResult = await generateAzureFunctionApp(fetch, payload);
-            funcStatus = 'Terraform module generated successfully.';
+            const context = requireProjectContext();
+            if (!context) {
+                funcBusy = false;
+                return;
+            }
+            const response = await runProjectGenerator(fetch, context.token, context.project.id, 'azure/function-app', {
+                payload,
+                options: {
+                    run_label: `${generatorLabels.azure_function_app} • ${new Date().toLocaleString()}`,
+                    force_save: forceSave
+                }
+            });
+            generatorOverride = null;
+            funcResult = response.output;
+            const validationStatus = validationStatusLabel(response.version.validation_summary ?? null);
+            if (validationStatus === 'failed') {
+                const details = validationMessage(response.version.validation_summary ?? null);
+                funcStatus = 'Terraform validation failed.';
+                notifyError(details ?? 'Terraform validation failed in the API. Adjust inputs or run locally for details.');
+                generatorOverride = {
+                    assetName: payload.function_app_name,
+                    metadata: {
+                        generator: 'azure/function-app',
+                        payload
+                    }
+                };
+                return;
+            }
+            funcStatus =
+                validationStatus === 'warn'
+                    ? 'Terraform module generated with warnings. Review validation output.'
+                    : `Terraform module generated (validation ${validationStatus}).`;
             notifySuccess(funcStatus);
             moveToReview();
-            void recordGeneratorRun('azure_function_app', summariseFunctionInputs(payload), funcResult);
+            projectState.upsertRun(context.project.id, response.run);
         } catch (error) {
+            if (handleGeneratorValidationError('azure_function_app', error)) {
+                funcStatus = 'Terraform validation failed.';
+                return;
+            }
             const message = error instanceof Error ? error.message : 'Failed to generate Function App module.';
             funcStatus = message;
             notifyError(message);
@@ -984,7 +1013,7 @@
         }
     };
 
-    const handleApimSubmit = async (event?: SubmitEvent) => {
+    const handleApimSubmit = async (event?: SubmitEvent, opts?: { force?: boolean }) => {
         event?.preventDefault();
         apimStatus = null;
         apimResult = null;
@@ -1009,14 +1038,49 @@
             return;
         }
         apimBusy = true;
+        const forceSave = opts?.force ?? false;
         try {
             const payload = buildApiManagementPayload();
-            apimResult = await generateAzureApiManagement(fetch, payload);
-            apimStatus = 'Terraform module generated successfully.';
+            const context = requireProjectContext();
+            if (!context) {
+                apimBusy = false;
+                return;
+            }
+            const response = await runProjectGenerator(fetch, context.token, context.project.id, 'azure/api-management', {
+                payload,
+                options: {
+                    run_label: `${generatorLabels.azure_api_management} • ${new Date().toLocaleString()}`,
+                    force_save: forceSave
+                }
+            });
+            generatorOverride = null;
+            apimResult = response.output;
+            const validationStatus = validationStatusLabel(response.version.validation_summary ?? null);
+            if (validationStatus === 'failed') {
+                const details = validationMessage(response.version.validation_summary ?? null);
+                apimStatus = 'Terraform validation failed.';
+                notifyError(details ?? 'Terraform validation failed in the API. Adjust inputs or run locally for details.');
+                generatorOverride = {
+                    assetName: payload.name,
+                    metadata: {
+                        generator: 'azure/api-management',
+                        payload
+                    }
+                };
+                return;
+            }
+            apimStatus =
+                validationStatus === 'warn'
+                    ? 'Terraform module generated with warnings. Review validation output.'
+                    : `Terraform module generated (validation ${validationStatus}).`;
             notifySuccess(apimStatus);
             moveToReview();
-            void recordGeneratorRun('azure_api_management', summariseApiManagementInputs(payload), apimResult);
+            projectState.upsertRun(context.project.id, response.run);
         } catch (error) {
+            if (handleGeneratorValidationError('azure_api_management', error)) {
+                apimStatus = 'Terraform validation failed.';
+                return;
+            }
             const message = error instanceof Error ? error.message : 'Failed to generate API Management module.';
             apimStatus = message;
             notifyError(message);
@@ -1322,6 +1386,37 @@
             </button>
         </div>
 
+        {#if generatorOverride && generatorOverride.generatorId === activeGenerator}
+            <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 space-y-2">
+                <p class="font-semibold">Validation failed</p>
+                <p class="mt-1 text-xs">
+                    Fix the reported issues and regenerate, or continue and override validation in your workspace. Use the project
+                    generator log to inspect the saved run and library asset.
+                </p>
+                {#if generatorOverride.message}
+                    <pre class="overflow-auto rounded-xl border border-amber-300 bg-white/80 p-3 text-xs text-amber-800">
+{generatorOverride.message}</pre>
+                {/if}
+                <div class="flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        class={resultButtonClass}
+                        onclick={forceSaveCurrentGenerator}
+                        disabled={awsBusy || azureBusy || sbBusy || funcBusy || apimBusy}
+                    >
+                        Force save anyway
+                    </button>
+                    <button
+                        type="button"
+                        class="rounded-xl border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-500 transition hover:bg-slate-100"
+                        onclick={() => (generatorOverride = null)}
+                    >
+                        Dismiss
+                    </button>
+                </div>
+            </div>
+        {/if}
+
         {#if activeResult}
             {@const summaryItems = getSummaryForGenerator(activeGenerator)}
             <div class={resultClass}>
@@ -1365,3 +1460,104 @@
     </section>
 {/if}
 </section>
+    const requireProjectContext = (): { project: ProjectSummary; token: string } | null => {
+        if (!browser) {
+            return null;
+        }
+        if (!activeProjectValue) {
+            if (!missingProjectWarningShown) {
+                notifyError('Select a project to save generated configs into its library.');
+                missingProjectWarningShown = true;
+            }
+            return null;
+        }
+        if (!authTokenValue) {
+            notifyError('Authentication required to generate Terraform modules.');
+            return null;
+        }
+        return { project: activeProjectValue, token: authTokenValue };
+    };
+
+    type ValidationStatus = 'skipped' | 'passed' | 'failed' | 'warn' | 'unknown';
+
+    const validationStatusLabel = (summary?: Record<string, unknown> | null): ValidationStatus => {
+        if (!summary) {
+            return 'skipped';
+        }
+        const raw = summary['status'];
+        if (typeof raw === 'string') {
+            const lower = raw.toLowerCase();
+            if (lower === 'passed' || lower === 'failed' || lower === 'warn' || lower === 'skipped') {
+                return lower;
+            }
+        }
+        return 'unknown' as ValidationStatus;
+    };
+
+    const validationMessage = (summary?: Record<string, unknown> | null): string | null => {
+        if (!summary) return null;
+        if (Array.isArray(summary['issues'])) {
+            const issues = summary['issues']
+                .map((issue) => (typeof issue === 'string' ? issue : JSON.stringify(issue)))
+                .filter(Boolean);
+            if (issues.length) {
+                return issues.join('\n');
+            }
+        }
+        if (typeof summary['details'] === 'string') {
+            return summary['details'];
+        }
+        return null;
+    };
+
+    const parseValidationSummary = (error: unknown): Record<string, unknown> | null => {
+        if (error instanceof ApiError && error.detail && typeof error.detail === 'object') {
+            const detail = error.detail as Record<string, unknown>;
+            if (detail.error === 'validation_failed') {
+                const summary = detail.validation_summary;
+                if (!summary || typeof summary !== 'object') {
+                    return null;
+                }
+                return summary as Record<string, unknown>;
+            }
+        }
+        return null;
+    };
+
+    const handleGeneratorValidationError = (generatorId: GeneratorId, error: unknown): boolean => {
+        const summary = parseValidationSummary(error);
+        if (!summary) {
+            return false;
+        }
+        const message = validationMessage(summary);
+        generatorOverride = {
+            generatorId,
+            summary,
+            message,
+        };
+        notifyError(message ?? 'Terraform validation failed. Review validation output or override below.');
+        return true;
+    };
+
+    const forceSaveCurrentGenerator = () => {
+        if (!generatorOverride) return;
+        const target = generatorOverride.generatorId;
+        generatorOverride = null;
+        switch (target) {
+            case 'aws_s3':
+                void handleAwsSubmit(undefined, { force: true });
+                break;
+            case 'azure_storage':
+                void handleAzureStorageSubmit(undefined, { force: true });
+                break;
+            case 'azure_servicebus':
+                void handleServiceBusSubmit(undefined, { force: true });
+                break;
+            case 'azure_function_app':
+                void handleFunctionSubmit(undefined, { force: true });
+                break;
+            case 'azure_api_management':
+                void handleApimSubmit(undefined, { force: true });
+                break;
+        }
+    };

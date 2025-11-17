@@ -554,6 +554,9 @@ class GeneratedAssetVersion(Base):
     size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     media_type: Mapped[str | None] = mapped_column(String(96), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version_metadata: Mapped[Dict[str, Any]] = mapped_column("metadata", JSON, nullable=False, default=dict)
+    validation_summary: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    payload_fingerprint: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -574,6 +577,12 @@ class GeneratedAssetVersion(Base):
     project: Mapped[Project] = relationship()
     run: Mapped[ProjectRun | None] = relationship()
     report: Mapped[Report | None] = relationship()
+    files: Mapped[List["GeneratedAssetVersionFile"]] = relationship(  # type: ignore[name-defined]
+        "GeneratedAssetVersionFile",
+        back_populates="version",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     def to_dict(self, include_blob: bool = False) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
@@ -588,11 +597,49 @@ class GeneratedAssetVersion(Base):
             "size_bytes": self.size_bytes,
             "media_type": self.media_type,
             "notes": self.notes,
+            "validation_summary": dict(self.validation_summary or {}),
+            "payload_fingerprint": self.payload_fingerprint,
+            "metadata": dict(self.version_metadata or {}),
             "created_at": format_timestamp(self.created_at),
         }
         if include_blob:
             payload["content"] = None
         return payload
+
+
+class GeneratedAssetVersionFile(Base):
+    __tablename__ = "generated_asset_version_files"
+    __table_args__ = (UniqueConstraint("version_id", "path", name="uq_asset_version_file_path"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_id: Mapped[str] = mapped_column(String, ForeignKey("generated_asset_versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    path: Mapped[str] = mapped_column(String, nullable=False)
+    storage_path: Mapped[str] = mapped_column(String, nullable=False)
+    checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    media_type: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+    )
+
+    version: Mapped[GeneratedAssetVersion] = relationship(back_populates="files")
+    project: Mapped[Project] = relationship()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "version_id": self.version_id,
+            "project_id": self.project_id,
+            "path": self.path,
+            "storage_path": self.storage_path,
+            "checksum": self.checksum,
+            "size_bytes": self.size_bytes,
+            "media_type": self.media_type,
+            "created_at": format_timestamp(self.created_at),
+        }
 
 
 def format_timestamp(value: Optional[datetime]) -> Optional[str]:
