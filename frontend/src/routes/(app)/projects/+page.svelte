@@ -2,19 +2,22 @@
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
+import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
 import {
-		type GeneratedAssetSummary,
-		type GeneratedAssetVersionSummary,
-		type ProjectDetail,
-		type ProjectRunSummary,
-		type ProjectSummary,
-		type ProjectOverview,
-		type ProjectConfigRecord,
-		type ProjectArtifactRecord,
-		downloadProjectLibraryAssetVersion,
-		diffProjectLibraryAssetVersions
-	} from '$lib/api/client';
+	type GeneratedAssetSummary,
+	type GeneratedAssetVersionSummary,
+	type GeneratedAssetVersionFile,
+	type GeneratedAssetDiffFileEntry,
+	type ProjectDetail,
+	type ProjectRunSummary,
+	type ProjectSummary,
+	type ProjectOverview,
+	type ProjectConfigRecord,
+	type ProjectArtifactRecord,
+	downloadProjectLibraryAssetVersion,
+	diffProjectLibraryAssetVersions,
+	listProjectLibraryVersionFiles
+} from '$lib/api/client';
 	import {
 		projectState,
 		activeProject,
@@ -57,6 +60,19 @@ const projects = $derived($projectState.projects as ProjectSummary[]);
 const activeProjectValue = $derived($activeProject as ProjectDetail | null);
 const projectRuns = $derived($activeProjectRuns as ProjectRunSummary[]);
 const libraryAssets = $derived($activeProjectLibrary as GeneratedAssetSummary[]);
+const libraryAssetTypes = $derived(() => {
+	const values = Array.from(new Set((libraryAssets ?? []).map((asset) => asset.asset_type))).filter(Boolean);
+	return values.sort((a, b) => a.localeCompare(b));
+});
+const filteredLibraryAssets = $derived(() => {
+	if (!libraryAssets) {
+		return [];
+	}
+	if (libraryTypeFilter === 'all') {
+		return libraryAssets;
+	}
+	return libraryAssets.filter((asset) => asset.asset_type === libraryTypeFilter);
+});
 const overview = $derived($activeProjectOverview as ProjectOverview | null);
 
 let runCache = $state<RunsCacheEntry>(null);
@@ -73,9 +89,10 @@ let activeTab = $state<'overview' | 'runs' | 'files' | 'configs' | 'artifacts' |
 
 	let createName = $state('');
 	let createDescription = $state('');
-	let createMetadata = $state('{\n\t"owner": "platform"\n}');
-	let createError = $state<string | null>(null);
-	let createBusy = $state(false);
+let createMetadata = $state('{\n\t"owner": "platform"\n}');
+let createError = $state<string | null>(null);
+let createBusy = $state(false);
+let libraryTypeFilter = $state('all');
 
 	let editName = $state('');
 	let editDescription = $state('');
@@ -116,18 +133,29 @@ let artifactRunFilter = $state('');
 	let artifactEditError = $state<string | null>(null);
 	let artifactSyncBusy = $state(false);
 
-	type DiffState = {
-		assetId: string;
-		versionId: string;
-		againstVersionId: string;
-		diff: string | null;
-		error: string | null;
-		loading: boolean;
-		ignoreWhitespace: boolean;
-	};
+type DiffState = {
+	assetId: string;
+	versionId: string;
+	againstVersionId: string;
+	diff: string | null;
+	files: GeneratedAssetDiffFileEntry[];
+	selectedPath: string | null;
+	error: string | null;
+	loading: boolean;
+	ignoreWhitespace: boolean;
+};
 
-	let diffState = $state<DiffState | null>(null);
-	let diffLayout = $state<'unified' | 'split'>('unified');
+let diffState = $state<DiffState | null>(null);
+let diffLayout = $state<'unified' | 'split'>('unified');
+
+type VersionFileState = {
+	expanded: boolean;
+	loading: boolean;
+	error: string | null;
+	items: GeneratedAssetVersionFile[];
+};
+
+let versionFileState = $state<Record<string, VersionFileState>>({});
 
 	let editAssetTarget = $state<GeneratedAssetSummary | null>(null);
 	let editAssetName = $state('');
@@ -758,15 +786,17 @@ let artifactRunFilter = $state('');
 			notifyError('Select another version to diff against.');
 			return;
 		}
-		diffState = {
-			assetId: asset.id,
-			versionId: version.id,
-			againstVersionId,
-			ignoreWhitespace: options.ignoreWhitespace ?? false,
-			diff: null,
-			error: null,
-			loading: true
-		};
+	diffState = {
+		assetId: asset.id,
+		versionId: version.id,
+		againstVersionId,
+		ignoreWhitespace: options.ignoreWhitespace ?? false,
+		diff: null,
+		files: [],
+		selectedPath: null,
+		error: null,
+		loading: true
+	};
 		try {
 			const payload = await diffProjectLibraryAssetVersions(
 				fetch,
@@ -783,6 +813,15 @@ let artifactRunFilter = $state('');
 				againstVersionId,
 				ignoreWhitespace: payload.ignore_whitespace ?? options.ignoreWhitespace ?? false,
 				diff: payload.diff,
+				files: payload.files ?? [],
+				selectedPath: (() => {
+					const files = payload.files ?? [];
+					if (!files.length) {
+						return null;
+					}
+					const withDiff = files.find((item) => item.diff && item.diff.length);
+					return (withDiff ?? files[0]).path;
+				})(),
 				error: null,
 				loading: false
 			};
@@ -795,6 +834,8 @@ let artifactRunFilter = $state('');
 				againstVersionId,
 				ignoreWhitespace,
 				diff: null,
+				files: [],
+				selectedPath: null,
 				error: message,
 				loading: false
 			};
@@ -806,7 +847,8 @@ let artifactRunFilter = $state('');
 	};
 
 	const handleCopyDiff = async () => {
-		if (!diffState || !diffState.diff) {
+		const diffText = getCurrentDiffText();
+		if (!diffText) {
 			notifyError('No diff available to copy.');
 			return;
 		}
@@ -815,7 +857,7 @@ let artifactRunFilter = $state('');
 			return;
 		}
 		try {
-			await navigator.clipboard.writeText(diffState.diff);
+			await navigator.clipboard.writeText(diffText);
 			notifySuccess('Diff copied to clipboard.');
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Failed to copy diff.';
@@ -824,11 +866,12 @@ let artifactRunFilter = $state('');
 	};
 
 	const handleDownloadDiffText = () => {
-		if (!diffState || !diffState.diff) {
+		const diffText = getCurrentDiffText();
+		if (!diffText) {
 			notifyError('No diff available to download.');
 			return;
 		}
-		const blob = new Blob([diffState.diff], { type: 'text/plain;charset=utf-8' });
+		const blob = new Blob([diffText], { type: 'text/plain;charset=utf-8' });
 		const url = URL.createObjectURL(blob);
 		const anchor = document.createElement('a');
 		anchor.href = url;
@@ -879,9 +922,9 @@ let artifactRunFilter = $state('');
 		type: 'context' | 'added' | 'removed';
 	};
 
-	const buildSplitRows = (diffText: string): SplitRow[] => {
-		const rows: SplitRow[] = [];
-		for (const rawLine of diffText.split('\n')) {
+const buildSplitRows = (diffText: string): SplitRow[] => {
+	const rows: SplitRow[] = [];
+	for (const rawLine of diffText.split('\n')) {
 			if (!rawLine || rawLine.startsWith('@@') || rawLine.startsWith('---') || rawLine.startsWith('+++')) {
 				continue;
 			}
@@ -898,9 +941,142 @@ let artifactRunFilter = $state('');
 			}
 			const value = rawLine.startsWith(' ') ? rawLine.slice(1) : rawLine;
 			rows.push({ left: value, right: value, type: 'context' });
+	}
+	return rows;
+};
+
+const getSelectedDiffEntry = (): GeneratedAssetDiffFileEntry | null => {
+	if (!diffState || !diffState.selectedPath) {
+		return null;
+	}
+	return diffState.files.find((file) => file.path === diffState.selectedPath) ?? null;
+};
+
+const getCurrentDiffText = (): string | null => {
+	const entry = getSelectedDiffEntry();
+	if (entry?.diff) {
+		return entry.diff;
+	}
+	return diffState?.diff ?? null;
+};
+
+const selectDiffFile = (path: string) => {
+	if (!diffState) return;
+	diffState = { ...diffState, selectedPath: path };
+};
+
+const diffFileStatusClass = (status: string): string => {
+	switch (status) {
+		case 'added':
+			return 'border-emerald-200 bg-emerald-50 text-emerald-600';
+		case 'removed':
+			return 'border-rose-200 bg-rose-50 text-rose-600';
+		case 'modified':
+			return 'border-amber-200 bg-amber-50 text-amber-600';
+		default:
+			return 'border-slate-200 bg-slate-50 text-slate-500';
+	}
+};
+
+const validationStatusLabel = (summary?: Record<string, unknown> | null): string => {
+	if (!summary) return 'skipped';
+	const raw = summary['status'];
+	return typeof raw === 'string' ? raw : 'unknown';
+};
+
+const validationStatusClass = (status: string): string => {
+	switch (status) {
+		case 'passed':
+			return 'border-emerald-200 bg-emerald-50 text-emerald-600';
+		case 'failed':
+			return 'border-rose-200 bg-rose-50 text-rose-600';
+		default:
+			return 'border-slate-200 bg-slate-50 text-slate-500';
+	}
+};
+
+const formatBytes = (value?: number | null): string => {
+	if (value === null || value === undefined) {
+		return '—';
+	}
+	const units = ['B', 'KB', 'MB', 'GB'];
+	let size = value;
+	let idx = 0;
+	while (size >= 1024 && idx < units.length - 1) {
+		size /= 1024;
+		idx += 1;
+	}
+	const decimals = size >= 10 || idx === 0 ? 0 : 1;
+	return `${size.toFixed(decimals)} ${units[idx]}`;
+};
+
+const getVersionFileKey = (assetId: string, versionId: string) => `${assetId}::${versionId}`;
+
+const getVersionFileEntry = (assetId: string, versionId: string): VersionFileState => {
+	const key = getVersionFileKey(assetId, versionId);
+	return (
+		versionFileState[key] ?? {
+			expanded: false,
+			loading: false,
+			error: null,
+			items: []
 		}
-		return rows;
+	);
+};
+
+const toggleVersionFiles = async (asset: GeneratedAssetSummary, version: GeneratedAssetVersionSummary) => {
+	const project = $activeProject as ProjectDetail | null;
+	if (!project || !token) {
+		notifyError('Select a project to load version files.');
+		return;
+	}
+	const key = getVersionFileKey(asset.id, version.id);
+	const entry = getVersionFileEntry(asset.id, version.id);
+	const nextExpanded = !entry.expanded;
+	versionFileState = {
+		...versionFileState,
+		[key]: {
+			...entry,
+			expanded: nextExpanded
+		}
 	};
+	if (!nextExpanded || entry.items.length) {
+		return;
+	}
+	versionFileState = {
+		...versionFileState,
+		[key]: {
+			...entry,
+			expanded: true,
+			loading: true,
+			error: null
+		}
+	};
+	try {
+		const items = await listProjectLibraryVersionFiles(fetch, token, project.id, asset.id, version.id);
+		versionFileState = {
+			...versionFileState,
+			[key]: {
+				expanded: true,
+				loading: false,
+				error: null,
+				items
+			}
+		};
+	} catch (error) {
+		const message = error instanceof Error ? error.message : 'Failed to load version files.';
+		notifyError(message);
+		versionFileState = {
+			...versionFileState,
+			[key]: {
+				expanded: true,
+				loading: false,
+				error: message,
+				items: []
+			}
+		};
+	}
+};
 
 	const openEditAsset = (asset: GeneratedAssetSummary) => {
 		editAssetTarget = asset;
@@ -1867,14 +2043,26 @@ $effect(() => {
 						{:else if activeTab === 'library'}
 							<section class="space-y-4">
 								<div class="flex items-center justify-between">
-									<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Library assets</h3>
-									<div class="flex items-center gap-2 text-xs text-slate-400">
-										<span>
-											Showing {libraryAssets.length} of {libraryCache?.totalCount ?? libraryAssets.length} asset(s)
-										</span>
-										{#if libraryCache?.nextCursor}
-											<button
-												type="button"
+					<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Library assets</h3>
+					<div class="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+						<span>
+							Showing {filteredLibraryAssets.length} of {libraryCache?.totalCount ?? libraryAssets.length} asset(s)
+						</span>
+						<label class="flex items-center gap-2 text-[0.65rem] uppercase tracking-[0.3em] text-slate-400">
+							Type
+							<select
+								class="rounded-xl border border-slate-200 bg-white px-2 py-1 text-[0.7rem] text-slate-600 focus:border-sky-400 focus:outline-none"
+								bind:value={libraryTypeFilter}
+							>
+								<option value="all">All</option>
+								{#each libraryAssetTypes as type}
+									<option value={type}>{type}</option>
+								{/each}
+							</select>
+						</label>
+						{#if libraryCache?.nextCursor}
+							<button
+								type="button"
 												class={`inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-[6px] font-semibold text-slate-500 transition hover:bg-slate-50 ${
 													libraryLoadingMore ? 'cursor-wait opacity-60' : ''
 												}`}
@@ -1887,15 +2075,16 @@ $effect(() => {
 									</div>
 								</div>
 
-								{#if libraryError}
-									<div class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-600">
-										{libraryError}
-									</div>
-								{:else if libraryLoading && !libraryAssets.length}
-									<p class="text-sm text-slate-500">Loading project library…</p>
-								{:else if libraryAssets.length}
-									<ul class="space-y-3">
-										{#each libraryAssets as asset (asset.id)}
+					{#if libraryError}
+						<div class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-600">
+							{libraryError}
+						</div>
+					{:else if libraryLoading && !libraryAssets.length}
+						<p class="text-sm text-slate-500">Loading project library…</p>
+					{:else if libraryAssets.length}
+						{#if filteredLibraryAssets.length}
+							<ul class="space-y-3">
+								{#each filteredLibraryAssets as asset (asset.id)}
 											<li class="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
 												<div class="flex flex-wrap items-start justify-between gap-3">
 													<div>
@@ -1934,39 +2123,61 @@ $effect(() => {
 													<p class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
 														Versions ({asset.versions?.length ?? 0})
 													</p>
-													{#if asset.versions && asset.versions.length}
-														<ul class="space-y-2 text-xs text-slate-600">
-															{#each asset.versions as version, versionIndex (version.id)}
-																{@const previousVersion = asset.versions ? asset.versions[versionIndex + 1] ?? null : null}
-																<li class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-																	<div class="space-y-1">
-																		<span class="font-mono text-[0.7rem] text-slate-600">{version.display_path}</span>
-																		<div class="flex items-center gap-2">
-																			{#if version.created_at}
+												{#if asset.versions && asset.versions.length}
+													<ul class="space-y-2 text-xs text-slate-600">
+														{#each asset.versions as version, versionIndex (version.id)}
+															{@const previousVersion = asset.versions ? asset.versions[versionIndex + 1] ?? null : null}
+															{@const manifestEntry = getVersionFileEntry(asset.id, version.id)}
+															<li class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+																<div class="space-y-1">
+																	<span class="font-mono text-[0.7rem] text-slate-600">{version.display_path}</span>
+																	<div class="flex items-center gap-2">
+																		{#if version.created_at}
 																				<span class="rounded-full border border-slate-200 bg-white px-2 py-[1px] text-[0.6rem] uppercase tracking-[0.3em] text-slate-400">
 																					{version.created_at}
 																				</span>
 																			{/if}
-																			{#if asset.latest_version_id === version.id}
-																				<span class="rounded-full border border-sky-200 bg-sky-50 px-2 py-[1px] text-[0.6rem] font-semibold uppercase tracking-[0.3em] text-sky-500">
-																					Latest
-																				</span>
-																			{/if}
-																		</div>
+																		{#if asset.latest_version_id === version.id}
+																			<span class="rounded-full border border-sky-200 bg-sky-50 px-2 py-[1px] text-[0.6rem] font-semibold uppercase tracking-[0.3em] text-sky-500">
+																				Latest
+																			</span>
+																		{/if}
+																		{#if version.validation_summary}
+																			{@const validationStatus = validationStatusLabel(version.validation_summary)}
+																			<span class={`rounded-full border px-2 py-[1px] text-[0.6rem] font-semibold uppercase tracking-[0.3em] ${validationStatusClass(validationStatus)}`}>
+																				Validation {validationStatus}
+																			</span>
+																		{/if}
 																	</div>
-																	<div class="flex flex-wrap items-center gap-2">
-																		<button
-																			type="button"
-																			class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1 text-[0.65rem] font-semibold text-slate-500 transition hover:bg-slate-100"
-																			onclick={() => void handleDownloadVersion(asset.id, version)}
-																		>
-																			Download
-																		</button>
-																		<button
-																			type="button"
-																			class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1 text-[0.65rem] font-semibold text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-																			onclick={() => {
-																				void handleDiffVersion(asset, version, previousVersion?.id ?? null, {
+																	{#if version.metadata && Object.keys(version.metadata).length}
+																		<details class="text-[0.65rem] text-slate-500">
+																			<summary class="cursor-pointer font-semibold">Version metadata</summary>
+																			<pre class="mt-2 overflow-auto rounded-xl border border-slate-200 bg-white p-2 font-mono">
+{JSON.stringify(version.metadata, null, 2)}</pre>
+																		</details>
+																	{/if}
+																</div>
+																<div class="flex flex-wrap items-center gap-2">
+																	<button
+																		type="button"
+																		class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1 text-[0.65rem] font-semibold text-slate-500 transition hover:bg-slate-100"
+																		onclick={() => void handleDownloadVersion(asset.id, version)}
+																	>
+																		Download
+																	</button>
+																	<button
+																		type="button"
+																		class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1 text-[0.65rem] font-semibold text-slate-500 transition hover:bg-slate-100"
+																		onclick={() => void toggleVersionFiles(asset, version)}
+																		disabled={manifestEntry.loading}
+																	>
+																		{manifestEntry.expanded ? 'Hide files' : manifestEntry.items.length ? `Files (${manifestEntry.items.length})` : 'View files'}
+																	</button>
+																	<button
+																		type="button"
+																		class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1 text-[0.65rem] font-semibold text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+																		onclick={() => {
+																			void handleDiffVersion(asset, version, previousVersion?.id ?? null, {
 																					ignoreWhitespace: diffState?.ignoreWhitespace ?? false
 																				});
 																				activeTab = 'library';
@@ -1977,8 +2188,44 @@ $effect(() => {
 																		</button>
 																	</div>
 																</li>
-																{#if diffState && diffState.assetId === asset.id && diffState.versionId === version.id}
-																	<li class="space-y-2 rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
+															{#if manifestEntry.expanded}
+																<li class="rounded-lg border border-slate-200 bg-white px-3 py-2">
+																	{#if manifestEntry.loading}
+																		<p class="text-[0.65rem] text-slate-500">Loading files…</p>
+																	{:else if manifestEntry.error}
+																		<p class="text-[0.65rem] text-rose-500">{manifestEntry.error}</p>
+																	{:else if manifestEntry.items.length}
+																		<div class="overflow-auto rounded-xl border border-slate-100">
+																			<table class="min-w-full text-[0.65rem] text-left text-slate-600">
+																				<thead class="bg-slate-50 text-[0.6rem] uppercase tracking-[0.25em] text-slate-400">
+																					<tr>
+																						<th class="px-3 py-2">Path</th>
+																						<th class="px-3 py-2">Size</th>
+																						<th class="px-3 py-2">Media</th>
+																						<th class="px-3 py-2">Checksum</th>
+																					</tr>
+																				</thead>
+																				<tbody>
+																					{#each manifestEntry.items as file}
+																						<tr class="odd:bg-white even:bg-slate-50">
+																							<td class="px-3 py-2 font-mono">{file.path}</td>
+																							<td class="px-3 py-2">{formatBytes(file.size_bytes ?? null)}</td>
+																							<td class="px-3 py-2">{file.media_type ?? '—'}</td>
+																							<td class="px-3 py-2 font-mono">{file.checksum ?? '—'}</td>
+																						</tr>
+																					{/each}
+																				</tbody>
+																			</table>
+																		</div>
+																	{:else}
+																		<p class="text-[0.65rem] text-slate-500">No files were recorded for this version.</p>
+																	{/if}
+																</li>
+															{/if}
+															{#if diffState && diffState.assetId === asset.id && diffState.versionId === version.id}
+																<li class="space-y-2 rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
+																	{@const currentDiff = getCurrentDiffText()}
+																		{@const selectedEntry = getSelectedDiffEntry()}
 																		<div class="flex flex-wrap items-center justify-between gap-2">
 																			<p class="font-semibold uppercase tracking-[0.25em] text-slate-400">
 																				Diff vs {diffState.againstVersionId}
@@ -2024,7 +2271,7 @@ $effect(() => {
 																					type="button"
 																					class="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-2 py-1 text-[0.65rem] font-semibold text-slate-500 transition hover:bg-slate-100"
 																					onclick={handleCopyDiff}
-																					disabled={!diffState.diff}
+																					disabled={!currentDiff}
 																				>
 																					Copy
 																				</button>
@@ -2032,7 +2279,7 @@ $effect(() => {
 																					type="button"
 																					class="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-2 py-1 text-[0.65rem] font-semibold text-slate-500 transition hover:bg-slate-100"
 																					onclick={handleDownloadDiffText}
-																					disabled={!diffState.diff}
+																					disabled={!currentDiff}
 																				>
 																					Download
 																				</button>
@@ -2045,19 +2292,47 @@ $effect(() => {
 																				</button>
 																			</div>
 																		</div>
+																		{#if diffState.files.length}
+																			<div class="space-y-2 rounded-xl border border-slate-100 bg-slate-50 p-2">
+																				<p class="text-[0.65rem] font-semibold uppercase tracking-[0.3em] text-slate-400">
+																					Files ({diffState.files.length})
+																				</p>
+																				<div class="flex flex-wrap gap-2">
+																					{#each diffState.files as file}
+																						<button
+																							type="button"
+																							class={`rounded-xl border px-2 py-1 text-[0.65rem] font-semibold transition ${diffFileStatusClass(file.status)}`}
+																							class:border-sky-500={diffState.selectedPath === file.path}
+																							class:bg-sky-50={diffState.selectedPath === file.path}
+																							onclick={() => selectDiffFile(file.path)}
+																							disabled={diffState.loading}
+																						>
+																							<span class="font-mono">{file.path}</span>
+																							<span class="ml-2 uppercase tracking-[0.15em]">{file.status}</span>
+																						</button>
+																					{/each}
+																				</div>
+																				{#if selectedEntry}
+																					<p class="text-[0.6rem] text-slate-500">
+																						Base: {formatBytes(selectedEntry.base?.size_bytes ?? null)} · Compare:
+																						{formatBytes(selectedEntry.compare?.size_bytes ?? null)}
+																					</p>
+																				{/if}
+																			</div>
+																		{/if}
 																		{#if diffState.loading}
 																			<p class="text-slate-500">Computing diff…</p>
 																		{:else if diffState.error}
 																			<p class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-500">
 																				{diffState.error}
 																			</p>
-																		{:else if diffState.diff}
+																		{:else if currentDiff}
 																			{#if diffLayout === 'unified'}
 																				<pre class="overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-[0.7rem] text-slate-600">
-{diffState.diff}</pre>
+{currentDiff}</pre>
 																			{:else}
 																				<div class="grid grid-cols-2 gap-1 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-[0.7rem] text-slate-600">
-																					{#each buildSplitRows(diffState.diff) as row, idx (idx)}
+																					{#each buildSplitRows(currentDiff) as row, idx (idx)}
 																						<div class={`whitespace-pre-wrap ${row.type === 'added' ? 'bg-emerald-100' : row.type === 'removed' ? 'bg-rose-100' : ''}`}>
 																							{row.left}
 																						</div>
@@ -2079,13 +2354,16 @@ $effect(() => {
 													{/if}
 												</div>
 											</li>
-										{/each}
-									</ul>
-								{:else}
-									<p class="text-sm text-slate-500">
-										No library assets yet. Promote artifacts from recent runs to build a reusable library.
-									</p>
-								{/if}
+								{/each}
+							</ul>
+						{:else}
+							<p class="text-sm text-slate-500">No assets match the current filter.</p>
+						{/if}
+					{:else}
+						<p class="text-sm text-slate-500">
+							No library assets yet. Promote artifacts from recent runs to build a reusable library.
+						</p>
+					{/if}
 							</section>
 						{:else if activeTab === 'settings'}
 							<section class="space-y-4">

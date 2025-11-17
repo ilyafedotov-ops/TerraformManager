@@ -2,17 +2,22 @@ from __future__ import annotations
 
 import base64
 import binascii
-from datetime import datetime
+from datetime import datetime, timezone
+import hashlib
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session
 
 from api.routes.auth import CurrentUser
 from api.dependencies import require_current_user
+from backend.generators.blueprints import render_blueprint_bundle
+from backend.generators.models import BlueprintRequest
+from backend.generators.registry import get_generator_definition
 from backend.db.session import get_session_dependency
 from backend.storage import (
     create_project,
@@ -38,6 +43,7 @@ from backend.storage import (
     get_generated_asset_version,
     get_generated_asset_version_path,
     diff_generated_asset_versions,
+    list_generated_asset_version_files,
     list_project_configs,
     create_project_config,
     get_project_config,
@@ -50,6 +56,7 @@ from backend.storage import (
     ArtifactPathError,
     get_project_overview,
 )
+from backend.terraform_validation import TerraformSourceFile, validate_terraform_sources
 
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -59,6 +66,99 @@ def _value_error_to_http(exc: ValueError) -> HTTPException:
     detail = str(exc)
     status_code_value = status.HTTP_404_NOT_FOUND if "not found" in detail.lower() else status.HTTP_400_BAD_REQUEST
     return HTTPException(status_code=status_code_value, detail=detail)
+
+
+def _merge_tags(*tag_lists: Optional[List[str]]) -> List[str]:
+    merged: List[str] = []
+    seen: set[str] = set()
+    for tags in tag_lists:
+        for tag in tags or []:
+            cleaned = (tag or "").strip()
+            if not cleaned or cleaned in seen:
+                continue
+            merged.append(cleaned)
+            seen.add(cleaned)
+    return merged
+
+
+def _extract_environment(payload: Dict[str, Any]) -> Optional[str]:
+    value = payload.get("environment")
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if cleaned:
+            return cleaned
+    return None
+
+
+def _build_generator_asset_name(definition, payload: Dict[str, Any], *, options: ProjectGeneratorRunOptions, generated_at: datetime) -> str:
+    candidate = (options.asset_name or "").strip() if options.asset_name else ""
+    if candidate:
+        return candidate
+    environment = _extract_environment(payload)
+    base = definition.title
+    if environment:
+        base = f"{base} [{environment}]"
+    return f"{base} - {generated_at.strftime('%Y-%m-%d %H:%M:%S')}"
+
+
+def _build_blueprint_asset_name(name: str, *, options: ProjectGeneratorRunOptions, generated_at: datetime) -> str:
+    candidate = (options.asset_name or "").strip() if options.asset_name else ""
+    if candidate:
+        return candidate
+    base = name.strip() or "Blueprint"
+    return f"{base} bundle - {generated_at.strftime('%Y-%m-%d %H:%M:%S')}"
+
+
+def _build_generator_metadata(
+    definition,
+    payload: Dict[str, Any],
+    *,
+    generated_at: datetime,
+    options: ProjectGeneratorRunOptions,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    metadata = dict(options.metadata or {})
+    generator_meta = dict(metadata.get("generator") or {})
+    generator_meta.update(
+        {
+            "slug": definition.slug,
+            "title": definition.title,
+            "provider": definition.provider,
+            "service": definition.service,
+            "template_path": definition.template_path,
+        }
+    )
+    metadata["generator"] = generator_meta
+    metadata["payload"] = payload
+    metadata["generated_at"] = generated_at.replace(microsecond=0).isoformat()
+    if extra:
+        for key, value in extra.items():
+            metadata.setdefault(key, value)
+    return metadata
+
+
+def _fingerprint_payload(payload: Dict[str, Any]) -> str:
+    serialised = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialised.encode("utf-8")).hexdigest()
+
+
+def _mark_run_failure(
+    run_id: str,
+    project_id: str,
+    *,
+    message: str,
+    started_at: datetime,
+    session: Session,
+) -> None:
+    update_project_run(
+        run_id,
+        project_id=project_id,
+        status="failed",
+        summary={"error": message},
+        started_at=started_at,
+        finished_at=datetime.now(timezone.utc),
+        session=session,
+    )
 
 
 class ProjectBaseResponse(BaseModel):
@@ -168,6 +268,21 @@ class GeneratedAssetVersionSummary(BaseModel):
     media_type: Optional[str] = None
     notes: Optional[str] = None
     created_at: Optional[str] = None
+    validation_summary: Optional[Dict[str, Any]] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    payload_fingerprint: Optional[str] = None
+
+
+class GeneratedAssetVersionFileResponse(BaseModel):
+    id: str
+    version_id: str
+    project_id: str
+    path: str
+    storage_path: str
+    checksum: Optional[str] = None
+    size_bytes: Optional[int] = None
+    media_type: Optional[str] = None
+    created_at: Optional[str] = None
 
 
 class GeneratedAssetSummary(BaseModel):
@@ -208,6 +323,51 @@ class GeneratedAssetCreateRequest(BaseModel):
 class GeneratedAssetRegisterResponse(BaseModel):
     asset: GeneratedAssetSummary
     version: GeneratedAssetVersionSummary
+
+
+class ProjectGeneratorRunOptions(BaseModel):
+    asset_name: Optional[str] = Field(default=None, max_length=160)
+    description: Optional[str] = Field(default=None, max_length=1024)
+    tags: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    notes: Optional[str] = Field(default=None, max_length=2048)
+    run_label: Optional[str] = Field(default=None, max_length=128)
+    force_save: bool = Field(default=False)
+
+
+class ProjectGeneratorRunRequest(BaseModel):
+    payload: Dict[str, Any]
+    options: ProjectGeneratorRunOptions = Field(default_factory=ProjectGeneratorRunOptions)
+
+
+class ProjectGeneratorRunResponse(BaseModel):
+    output: GeneratorResponse
+    asset: GeneratedAssetSummary
+    version: GeneratedAssetVersionSummary
+    run: ProjectRunResponse
+
+
+class BlueprintArtifactFile(BaseModel):
+    path: str
+    content: str
+
+
+class ProjectBlueprintArtifact(BaseModel):
+    archive_name: str
+    archive_base64: str
+    files: List[BlueprintArtifactFile]
+
+
+class ProjectBlueprintRunRequest(BaseModel):
+    blueprint: BlueprintRequest
+    options: ProjectGeneratorRunOptions = Field(default_factory=ProjectGeneratorRunOptions)
+
+
+class ProjectBlueprintRunResponse(BaseModel):
+    artifact: ProjectBlueprintArtifact
+    asset: GeneratedAssetSummary
+    version: GeneratedAssetVersionSummary
+    run: ProjectRunResponse
 
 
 class GeneratedAssetVersionCreateRequest(BaseModel):
@@ -845,6 +1005,283 @@ def project_artifact_update(
     return ProjectArtifactResponse.model_validate(updated)
 
 
+@router.post(
+    "/{project_id}/generators/blueprints",
+    response_model=ProjectBlueprintRunResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def project_generate_blueprint(
+    project_id: str,
+    payload: ProjectBlueprintRunRequest,
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> ProjectBlueprintRunResponse:
+    project = get_project(project_id=project_id, session=session)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+
+    options = payload.options
+    blueprint = payload.blueprint
+    generated_at = datetime.now(timezone.utc)
+    run_label = options.run_label or f"Blueprint {blueprint.name} ({generated_at.strftime('%Y-%m-%d %H:%M:%S')})"
+
+    try:
+        run_record = create_project_run(
+            project_id=project_id,
+            label=run_label,
+            kind="generator/blueprint",
+            status="running",
+            parameters={
+                "blueprint": blueprint.model_dump(),
+            },
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    started_at = generated_at
+    try:
+        rendered = render_blueprint_bundle(blueprint)
+    except Exception as exc:  # noqa: BLE001
+        _mark_run_failure(run_record["id"], project_id, message=str(exc), started_at=started_at, session=session)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    asset_name = _build_blueprint_asset_name(blueprint.name, options=options, generated_at=generated_at)
+    tags = _merge_tags(options.tags, ["generator", "blueprint"])
+    metadata = dict(options.metadata or {})
+    metadata.setdefault("blueprint", blueprint.model_dump())
+    metadata.setdefault("generated_at", generated_at.replace(microsecond=0).isoformat())
+    metadata.setdefault(
+        "files",
+        [
+            file_info["path"]
+            for file_info in rendered.get("files", [])
+        ],
+    )
+    file_inputs = [
+        {"path": file_info["path"], "content": file_info["content"], "media_type": "text/plain"}
+        for file_info in rendered.get("files", [])
+    ]
+    validation_files = [
+        TerraformSourceFile(path=file_info["path"], content=file_info["content"].encode("utf-8"))
+        for file_info in rendered.get("files", [])
+    ]
+    validation_summary = validate_terraform_sources(validation_files)
+    payload_fingerprint = _fingerprint_payload(blueprint.model_dump())
+    version_metadata = {
+        "blueprint_name": blueprint.name,
+        "environments": list(blueprint.environments),
+        "component_slugs": [component.slug for component in blueprint.components],
+        "force_save": options.force_save,
+    }
+    metadata.setdefault("validation", validation_summary)
+
+    validation_status = (validation_summary.get("status") or "").lower() if isinstance(validation_summary, dict) else ""
+    if validation_status == "failed" and not options.force_save:
+        _mark_run_failure(
+            run_record["id"],
+            project_id,
+            message="Terraform validation failed",
+            started_at=started_at,
+            session=session,
+        )
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "validation_failed",
+                "validation_summary": validation_summary,
+            },
+        )
+
+    try:
+        asset_result = register_generated_asset(
+            project_id=project_id,
+            name=asset_name,
+            asset_type="blueprint_bundle",
+            description=options.description,
+            tags=tags,
+            metadata=metadata,
+            run_id=run_record["id"],
+            storage_filename=rendered["archive_name"],
+            data=rendered["archive_bytes"],
+            media_type="application/zip",
+            notes=options.notes,
+            files=file_inputs,
+            version_metadata=version_metadata,
+            payload_fingerprint=payload_fingerprint,
+            validation_summary=validation_summary,
+            session=session,
+        )
+    except (ValueError, FileExistsError) as exc:
+        _mark_run_failure(run_record["id"], project_id, message=str(exc), started_at=started_at, session=session)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    finished_at = datetime.now(timezone.utc)
+    summary = {
+        "asset_id": asset_result["asset"]["id"],
+        "version_id": asset_result["version"]["id"],
+        "artifact_type": "blueprint_bundle",
+        "archive_name": rendered["archive_name"],
+        "file_count": len(rendered.get("files", [])),
+        "validation": validation_summary,
+    }
+    updated_run = update_project_run(
+        run_record["id"],
+        project_id=project_id,
+        status="completed",
+        summary=summary,
+        started_at=started_at,
+        finished_at=finished_at,
+        session=session,
+    ) or run_record
+
+    files = [BlueprintArtifactFile(**item) for item in rendered.get("files", [])]
+    artifact = ProjectBlueprintArtifact(
+        archive_name=rendered["archive_name"],
+        archive_base64=rendered["archive_base64"],
+        files=files,
+    )
+    asset_payload = GeneratedAssetSummary.model_validate(asset_result["asset"])
+    version_payload = GeneratedAssetVersionSummary.model_validate(asset_result["version"])
+    run_payload = ProjectRunResponse.model_validate(updated_run)
+    return ProjectBlueprintRunResponse(
+        artifact=artifact,
+        asset=asset_payload,
+        version=version_payload,
+        run=run_payload,
+    )
+
+
+@router.post(
+    "/{project_id}/generators/{slug:path}",
+    response_model=ProjectGeneratorRunResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def project_generator_run(
+    project_id: str,
+    slug: str,
+    payload: ProjectGeneratorRunRequest,
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> ProjectGeneratorRunResponse:
+    project = get_project(project_id=project_id, session=session)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+
+    try:
+        definition = get_generator_definition(slug)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    try:
+        typed_payload = definition.model.model_validate(payload.payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()) from exc
+
+    options = payload.options
+    generated_at = datetime.now(timezone.utc)
+    payload_dump = typed_payload.model_dump(exclude_none=True)
+    run_label = options.run_label or f"{definition.title} ({generated_at.strftime('%Y-%m-%d %H:%M:%S')})"
+
+    try:
+        run_record = create_project_run(
+            project_id=project_id,
+            label=run_label,
+            kind=f"generator/{definition.slug}",
+            status="running",
+            parameters={
+                "generator_slug": definition.slug,
+                "payload": payload_dump,
+            },
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    started_at = generated_at
+    try:
+        rendered = definition.render(typed_payload)
+    except ValueError as exc:
+        _mark_run_failure(run_record["id"], project_id, message=str(exc), started_at=started_at, session=session)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        _mark_run_failure(run_record["id"], project_id, message=str(exc), started_at=started_at, session=session)
+        raise
+
+    asset_name = _build_generator_asset_name(definition, payload_dump, options=options, generated_at=generated_at)
+    tags = _merge_tags(definition.tags, options.tags, ["generator", f"generator:{definition.slug}"])
+    metadata = _build_generator_metadata(
+        definition,
+        payload_dump,
+        generated_at=generated_at,
+        options=options,
+        extra={"output_filename": rendered["filename"]},
+    )
+    validation_files = [
+        TerraformSourceFile(path=rendered["filename"], content=rendered["content"].encode("utf-8"))
+    ]
+    validation_summary = validate_terraform_sources(validation_files)
+    metadata.setdefault("validation", validation_summary)
+    payload_fingerprint = _fingerprint_payload(payload_dump)
+    version_metadata = {
+        "generator_slug": definition.slug,
+        "environment": _extract_environment(payload_dump),
+        "output_filename": rendered["filename"],
+        "force_save": options.force_save,
+    }
+
+    try:
+        asset_result = register_generated_asset(
+            project_id=project_id,
+            name=asset_name,
+            asset_type="terraform_config",
+            description=options.description,
+            tags=tags,
+            metadata=metadata,
+            run_id=run_record["id"],
+            storage_filename=rendered["filename"],
+            data=rendered["content"].encode("utf-8"),
+            media_type="text/plain",
+            notes=options.notes,
+            version_metadata=version_metadata,
+            payload_fingerprint=payload_fingerprint,
+            validation_summary=validation_summary,
+            session=session,
+        )
+    except (ValueError, FileExistsError) as exc:
+        _mark_run_failure(run_record["id"], project_id, message=str(exc), started_at=started_at, session=session)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    finished_at = datetime.now(timezone.utc)
+    summary = {
+        "asset_id": asset_result["asset"]["id"],
+        "version_id": asset_result["version"]["id"],
+        "filename": rendered["filename"],
+        "generator_slug": definition.slug,
+        "validation": validation_summary,
+    }
+    updated_run = update_project_run(
+        run_record["id"],
+        project_id=project_id,
+        status="completed",
+        summary=summary,
+        started_at=started_at,
+        finished_at=finished_at,
+        session=session,
+    ) or run_record
+
+    asset_payload = GeneratedAssetSummary.model_validate(asset_result["asset"])
+    version_payload = GeneratedAssetVersionSummary.model_validate(asset_result["version"])
+    run_payload = ProjectRunResponse.model_validate(updated_run)
+    output_payload = GeneratorResponse(**rendered)
+    return ProjectGeneratorRunResponse(
+        output=output_payload,
+        asset=asset_payload,
+        version=version_payload,
+        run=run_payload,
+    )
+
+
 @router.get("/{project_id}/library", response_model=ProjectLibraryListResponse)
 def project_library_index(
     project_id: str,
@@ -1186,6 +1623,32 @@ def project_library_version_download(
 
     filename = version["display_path"] or path.name
     return FileResponse(path, filename=filename)
+
+
+@router.get(
+    "/{project_id}/library/{asset_id}/versions/{version_id}/files",
+    response_model=List[GeneratedAssetVersionFileResponse],
+)
+def project_library_version_files(
+    project_id: str,
+    asset_id: str,
+    version_id: str,
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> List[GeneratedAssetVersionFileResponse]:
+    project = get_project(project_id=project_id, session=session)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    try:
+        files = list_generated_asset_version_files(
+            asset_id=asset_id,
+            version_id=version_id,
+            project_id=project_id,
+            session=session,
+        )
+    except ValueError as exc:
+        raise _value_error_to_http(exc) from exc
+    return [GeneratedAssetVersionFileResponse.model_validate(item) for item in files]
 
 
 @router.get("/{project_id}/library/{asset_id}/versions/{version_id}/diff")

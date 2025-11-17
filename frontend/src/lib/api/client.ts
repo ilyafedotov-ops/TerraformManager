@@ -299,6 +299,9 @@ export interface GeneratedAssetVersionSummary {
 	media_type?: string | null;
 	notes?: string | null;
 	created_at?: string | null;
+	validation_summary?: Record<string, unknown> | null;
+	metadata: Record<string, unknown>;
+	payload_fingerprint?: string | null;
 }
 
 export interface GeneratedAssetSummary {
@@ -320,11 +323,42 @@ export interface GeneratedAssetRegisterResponse {
 	version: GeneratedAssetVersionSummary;
 }
 
+export interface GeneratedAssetDiffFileEntry {
+	path: string;
+	status: string;
+	base?: {
+		storage_path: string;
+		checksum?: string | null;
+		size_bytes?: number | null;
+		media_type?: string | null;
+	} | null;
+	compare?: {
+		storage_path: string;
+		checksum?: string | null;
+		size_bytes?: number | null;
+		media_type?: string | null;
+	} | null;
+	diff?: string | null;
+}
+
 export interface GeneratedAssetDiffResponse {
 	base: GeneratedAssetVersionSummary;
 	compare: GeneratedAssetVersionSummary;
 	diff: string;
 	ignore_whitespace?: boolean;
+	files?: GeneratedAssetDiffFileEntry[];
+}
+
+export interface GeneratedAssetVersionFile {
+	id: string;
+	version_id: string;
+	project_id: string;
+	path: string;
+	storage_path: string;
+	checksum?: string | null;
+	size_bytes?: number | null;
+	media_type?: string | null;
+	created_at?: string | null;
 }
 
 export interface GeneratedAssetCreatePayload {
@@ -1016,13 +1050,49 @@ export async function generateAzureFunctionApp(
 }
 
 export async function generateAzureApiManagement(
-    fetchFn: typeof fetch,
-    payload: AzureApiManagementGeneratorPayload
+	fetchFn: typeof fetch,
+	payload: AzureApiManagementGeneratorPayload
 ): Promise<GeneratorResult> {
-    return apiFetch(fetchFn, '/generators/azure/api-management', {
-        method: 'POST',
-        body: payload
-    });
+	return apiFetch(fetchFn, '/generators/azure/api-management', {
+		method: 'POST',
+		body: payload
+	});
+}
+
+export interface ProjectGeneratorRunOptions {
+	asset_name?: string | null;
+	description?: string | null;
+	tags?: string[];
+	metadata?: Record<string, unknown>;
+	notes?: string | null;
+	run_label?: string | null;
+	force_save?: boolean;
+}
+
+export interface ProjectGeneratorRunRequest {
+	payload: Record<string, unknown>;
+	options?: ProjectGeneratorRunOptions;
+}
+
+export interface ProjectGeneratorRunResponse {
+	output: GeneratorResult;
+	asset: GeneratedAssetSummary;
+	version: GeneratedAssetVersionSummary;
+	run: ProjectRunSummary;
+}
+
+export async function runProjectGenerator(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	slug: string,
+	request: ProjectGeneratorRunRequest
+): Promise<ProjectGeneratorRunResponse> {
+	return apiFetch(fetchFn, `/projects/${projectId}/generators/${slug}`, {
+		method: 'POST',
+		token,
+		body: request
+	});
 }
 
 export interface AzureServiceBusGeneratorPayload {
@@ -1691,6 +1761,18 @@ export async function diffProjectLibraryAssetVersions(
 	return apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}/versions/${versionId}/diff`, {
 		token,
 		searchParams
+	});
+}
+
+export async function listProjectLibraryVersionFiles(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	assetId: string,
+	versionId: string
+): Promise<GeneratedAssetVersionFile[]> {
+	return apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}/versions/${versionId}/files`, {
+		token
 	});
 }
 

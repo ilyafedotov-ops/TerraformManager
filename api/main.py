@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import zipfile
@@ -7,13 +8,13 @@ import uuid
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Depends, UploadFile, File, Form, Response
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from backend.db import get_session_dependency
 from backend.scanner import scan_paths
@@ -44,6 +45,10 @@ from backend.storage import (
     resolve_workspace_paths,
     resolve_workspace_file,
     WorkspacePathError,
+    create_project_run,
+    update_project_run,
+    save_run_artifact,
+    register_generated_asset,
 )
 from backend.preview_html import render_preview_html
 from backend.report_csv import render_csv_report
@@ -138,6 +143,144 @@ def _require_project_record(session: Session, project_id: str | None, project_sl
         raise HTTPException(404, "project not found")
     return record
 
+
+def _merge_tags(*tag_groups: Optional[List[str]]) -> List[str]:
+    merged: List[str] = []
+    seen: set[str] = set()
+    for tags in tag_groups:
+        for tag in tags or []:
+            cleaned = (tag or "").strip()
+            if not cleaned or cleaned in seen:
+                continue
+            merged.append(cleaned)
+            seen.add(cleaned)
+    return merged
+
+
+def _start_scan_run(
+    project: Dict[str, Any],
+    *,
+    run_label: str | None,
+    run_kind: str | None,
+    paths: List[str],
+    terraform_validate: bool,
+    cost_enabled: bool,
+    plan_path: str | None,
+    session: Session,
+) -> Dict[str, Any]:
+    label = (run_label or "").strip() or f"API scan {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}"
+    kind = (run_kind or "").strip() or "review"
+    parameters = {
+        "paths": paths,
+        "terraform_validate": terraform_validate,
+        "cost_enabled": cost_enabled,
+        "plan_path": plan_path,
+    }
+    return create_project_run(
+        project_id=project["id"],
+        label=label,
+        kind=kind,
+        status="running",
+        parameters=parameters,
+        session=session,
+    )
+
+
+def _mark_scan_run_failure(
+    run_id: str,
+    project_id: str,
+    *,
+    message: str,
+    session: Session,
+) -> None:
+    update_project_run(
+        run_id,
+        project_id=project_id,
+        status="failed",
+        summary={"error": message},
+        finished_at=datetime.now(timezone.utc),
+        session=session,
+    )
+
+
+def _persist_scan_outputs(
+    project: Dict[str, Any],
+    run: Dict[str, Any],
+    *,
+    report: Dict[str, Any],
+    paths: List[str],
+    asset_name: str | None,
+    asset_description: str | None,
+    asset_tags: Optional[List[str]],
+    asset_metadata: Optional[Dict[str, Any]],
+    source: str,
+    session: Session,
+) -> Dict[str, Any]:
+    summary = dict(report.get("summary", {}))
+    report_id = report.get("id") or str(uuid.uuid4())
+    save_report(report_id, summary, report, session=session)
+    report["id"] = report_id
+
+    json_bytes = json.dumps(report, indent=2).encode("utf-8")
+    json_artifact_path = f"reports/{report_id}.json"
+    save_run_artifact(
+        project_id=project["id"],
+        run_id=run["id"],
+        path=json_artifact_path,
+        data=json_bytes,
+        session=session,
+    )
+
+    html_text = render_html_report(report)
+    html_bytes = html_text.encode("utf-8")
+    html_artifact_path = f"reports/{report_id}.html"
+    save_run_artifact(
+        project_id=project["id"],
+        run_id=run["id"],
+        path=html_artifact_path,
+        data=html_bytes,
+        session=session,
+    )
+
+    generated_at = datetime.now(timezone.utc)
+    resolved_asset_name = (asset_name or "").strip() or f"Scan report {generated_at.strftime('%Y-%m-%d %H:%M:%S')}"
+    tags = _merge_tags(["scan", "report", source], asset_tags)
+    metadata = dict(asset_metadata or {})
+    metadata.setdefault("summary", summary)
+    metadata.setdefault("source", source)
+    metadata.setdefault("paths", paths)
+
+    asset_result = register_generated_asset(
+        project_id=project["id"],
+        name=resolved_asset_name,
+        asset_type="scan_report",
+        description=asset_description.strip() if asset_description else None,
+        tags=tags,
+        metadata=metadata,
+        run_id=run["id"],
+        storage_filename=f"{report_id}.json",
+        data=json_bytes,
+        media_type="application/json",
+        notes="Saved automatically from API scan.",
+        files=[
+            {
+                "path": f"{report_id}.html",
+                "content": html_bytes,
+                "media_type": "text/html",
+            }
+        ],
+        version_metadata={"report_id": report_id, "source": source},
+        session=session,
+    )
+
+    return {
+        "report_id": report_id,
+        "asset": asset_result["asset"],
+        "version": asset_result["version"],
+        "artifacts": [json_artifact_path, html_artifact_path],
+        "summary": summary,
+    }
+
 @api_router.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
@@ -153,6 +296,12 @@ class ScanRequest(BaseModel):
     plan_path: Optional[str] = None
     project_id: Optional[str] = None
     project_slug: Optional[str] = None
+    run_label: Optional[str] = None
+    run_kind: Optional[str] = None
+    asset_name: Optional[str] = None
+    asset_description: Optional[str] = None
+    asset_tags: List[str] = Field(default_factory=list)
+    asset_metadata: Optional[Dict[str, Any]] = None
 
 
 class ReportReviewUpdatePayload(BaseModel):
@@ -199,24 +348,79 @@ def scan(
         except WorkspacePathError as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    run_record: Optional[Dict[str, Any]] = None
+    if req.save:
+        try:
+            run_record = _start_scan_run(
+                project,
+                run_label=req.run_label,
+                run_kind=req.run_kind,
+                paths=req.paths,
+                terraform_validate=req.terraform_validate,
+                cost_enabled=req.cost,
+                plan_path=req.plan_path,
+                session=session,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     scan_context = {
         "source": "api.scan",
         "user": current_user.user.email if current_user.user else None,
         "project_id": project["id"],
         "project_slug": project.get("slug"),
     }
-    report = scan_paths(
-        path_objs,
-        use_terraform_validate=req.terraform_validate,
-        llm_options=req.llm,
-        cost_options=cost_options,
-        plan_path=plan_path,
-        context=scan_context,
-    )
-    if req.save:
-        rid = str(uuid.uuid4())
-        save_report(rid, report.get("summary", {}), report, session=session)
-        report["id"] = rid
+    try:
+        report = scan_paths(
+            path_objs,
+            use_terraform_validate=req.terraform_validate,
+            llm_options=req.llm,
+            cost_options=cost_options,
+            plan_path=plan_path,
+            context=scan_context,
+        )
+    except Exception as exc:  # noqa: BLE001
+        if run_record:
+            _mark_scan_run_failure(run_record["id"], project["id"], message=str(exc), session=session)
+        raise
+
+    if req.save and run_record:
+        try:
+            persist = _persist_scan_outputs(
+                project,
+                run_record,
+                report=report,
+                paths=req.paths,
+                asset_name=req.asset_name,
+                asset_description=req.asset_description,
+                asset_tags=req.asset_tags,
+                asset_metadata=req.asset_metadata,
+                source="api.scan",
+                session=session,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _mark_scan_run_failure(run_record["id"], project["id"], message=str(exc), session=session)
+            raise
+
+        summary_payload = dict(persist["summary"])
+        summary_payload.update(
+            {
+                "report_id": persist["report_id"],
+                "asset_id": persist["asset"]["id"],
+                "version_id": persist["version"]["id"],
+                "artifacts": persist["artifacts"],
+            }
+        )
+        update_project_run(
+            run_record["id"],
+            project_id=project["id"],
+            status="completed",
+            summary=summary_payload,
+            finished_at=datetime.now(timezone.utc),
+            session=session,
+            report_id=persist["report_id"],
+        )
+        report["id"] = persist["report_id"]
     return report
 
 
@@ -395,6 +599,12 @@ async def scan_upload(
     plan_file: UploadFile | None = File(None),
     project_id: str | None = Form(None),
     project_slug: str | None = Form(None),
+    run_label: str | None = Form(None),
+    run_kind: str | None = Form(None),
+    asset_name: str | None = Form(None),
+    asset_description: str | None = Form(None),
+    asset_tags: str | None = Form(None, description="Comma-separated list of tags for the saved report asset"),
+    asset_metadata: str | None = Form(None, description="JSON object describing custom asset metadata"),
     session: Session = Depends(get_session_dependency),
     current_user: auth_routes.CurrentUser = Depends(require_current_user),
 ) -> Dict[str, Any]:
@@ -414,6 +624,20 @@ async def scan_upload(
     usage_path: Optional[Path] = None
     plan_path: Optional[Path] = None
     report_id: Optional[str] = None
+
+    parsed_asset_tags: List[str] = []
+    if asset_tags:
+        parsed_asset_tags = [tag.strip() for tag in asset_tags.split(",") if tag.strip()]
+    parsed_asset_metadata: Dict[str, Any] = {}
+    if asset_metadata:
+        try:
+            parsed_asset_metadata = json.loads(asset_metadata)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "asset_metadata must be valid JSON") from exc
+        if not isinstance(parsed_asset_metadata, dict):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "asset_metadata must be a JSON object")
+
+    run_record: Optional[Dict[str, Any]] = None
 
     try:
         for upload in files:
@@ -462,24 +686,79 @@ async def scan_upload(
         if include_cost:
             cost_options = {"usage_file": usage_path}
 
+        run_paths = [str(path) for path in targets]
+        if save:
+            try:
+                run_record = _start_scan_run(
+                    project,
+                    run_label=run_label,
+                    run_kind=run_kind,
+                    paths=run_paths,
+                    terraform_validate=terraform_validate,
+                    cost_enabled=include_cost,
+                    plan_path=str(plan_path) if plan_path else None,
+                    session=session,
+                )
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+
         scan_context = {
             "source": "api.scan_upload",
             "user": current_user.user.email if current_user.user else None,
             "project_id": project["id"],
             "project_slug": project.get("slug"),
         }
-        report = scan_paths(
-            targets,
-            use_terraform_validate=terraform_validate,
-            llm_options=llm,
-            cost_options=cost_options,
-            plan_path=plan_path,
-            context=scan_context,
-        )
+        try:
+            report = scan_paths(
+                targets,
+                use_terraform_validate=terraform_validate,
+                llm_options=llm,
+                cost_options=cost_options,
+                plan_path=plan_path,
+                context=scan_context,
+            )
+        except Exception as exc:  # noqa: BLE001
+            if run_record:
+                _mark_scan_run_failure(run_record["id"], project["id"], message=str(exc), session=session)
+            raise
 
-        if save:
-            report_id = str(uuid.uuid4())
-            save_report(report_id, report.get("summary", {}), report, session=session)
+        if save and run_record:
+            try:
+                persist = _persist_scan_outputs(
+                    project,
+                    run_record,
+                    report=report,
+                    paths=run_paths,
+                    asset_name=asset_name,
+                    asset_description=asset_description,
+                    asset_tags=parsed_asset_tags,
+                    asset_metadata=parsed_asset_metadata,
+                    source="api.scan_upload",
+                    session=session,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _mark_scan_run_failure(run_record["id"], project["id"], message=str(exc), session=session)
+                raise
+
+            report_id = persist["report_id"]
+            summary_payload = dict(persist["summary"])
+            summary_payload.update(
+                {
+                    "report_id": persist["report_id"],
+                    "asset_id": persist["asset"]["id"],
+                    "version_id": persist["version"]["id"],
+                    "artifacts": persist["artifacts"],
+                }
+            )
+            update_project_run(
+                run_record["id"],
+                project_id=project["id"],
+                status="completed",
+                summary=summary_payload,
+                finished_at=datetime.now(timezone.utc),
+                session=session,
+                report_id=report_id,
+            )
             report["id"] = report_id
     finally:
         shutil.rmtree(upload_root, ignore_errors=True)

@@ -118,6 +118,31 @@ def _print_json(data: Any) -> None:
     print(json.dumps(data, indent=2, sort_keys=False, default=str))
 
 
+def _load_cli_auth_credentials(logger):
+    credentials_file = Path(os.getenv("TM_AUTH_FILE", "tm_auth.json"))
+    auth_credentials = _load_cli_auth(credentials_file, logger)
+    if not auth_credentials:
+        logger.error(
+            "CLI authentication is required. Run `python -m backend.cli auth login --email you@example.com` first."
+        )
+        sys.exit(1)
+    refreshed = _maybe_refresh_access_token(dict(auth_credentials), logger)
+    try:
+        credentials_file.write_text(json.dumps(refreshed, indent=2), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        logger.debug("Unable to update credential file %s", credentials_file)
+    if not refreshed.get("access_token") or not refreshed.get("base_url"):
+        logger.error("Credential file is missing access_token/base_url fields. Re-run the auth login command.")
+        sys.exit(1)
+    return refreshed
+
+
+def _parse_cli_tags(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    return [tag.strip() for tag in value.split(",") if tag.strip()]
+
+
 def _run_terraform_fmt(target_dirs: Sequence[Path], write: bool, logger) -> None:
     binary = shutil.which("terraform")
     if not binary:
@@ -506,6 +531,35 @@ def main() -> None:
         action="store_true",
         help="Output JSON instead of human-readable summary",
     )
+    project_generator = project_sub.add_parser("generator", help="Invoke a registered generator via the API")
+    project_generator.add_argument("--project-id", required=True, help="Project identifier")
+    project_generator.add_argument("--slug", required=True, help="Generator slug (e.g., aws/s3-secure-bucket)")
+    project_generator.add_argument(
+        "--payload",
+        required=True,
+        help="Inline JSON payload or path to a JSON file describing generator inputs",
+    )
+    project_generator.add_argument(
+        "--out",
+        help="Path to write the rendered Terraform (defaults to the filename returned by the API)",
+    )
+    project_generator.add_argument("--asset-name", help="Override the saved library asset name")
+    project_generator.add_argument("--description", help="Override the saved asset description")
+    project_generator.add_argument(
+        "--tags",
+        help="Comma-separated asset tags to apply (e.g., 'terraform,baseline')",
+    )
+    project_generator.add_argument(
+        "--metadata",
+        help="Inline JSON object or path describing additional asset metadata",
+    )
+    project_generator.add_argument("--notes", help="Optional notes stored with the asset version")
+    project_generator.add_argument("--run-label", help="Custom run label for the project log entry")
+    project_generator.add_argument(
+        "--force-save",
+        action="store_true",
+        help="Save the generated asset even if server-side validation fails",
+    )
 
     args = parser.parse_args()
     auth_credentials: dict | None = None
@@ -841,6 +895,61 @@ def main() -> None:
                     for entry in entries:
                         marker = "<dir>" if entry["is_dir"] else f"{entry.get('size', 0)} bytes"
                         print(f"{entry['path'] or '.'}  {marker}  modified={entry.get('modified_at')}")
+            elif args.project_cmd == "generator":
+                auth_payload = _load_cli_auth_credentials(logger)
+                payload = _load_json_payload(args.payload)
+                asset_metadata: Dict[str, Any] = {}
+                if args.metadata:
+                    asset_metadata = _load_json_payload(args.metadata)
+                options = {
+                    "asset_name": args.asset_name,
+                    "description": args.description,
+                    "tags": _parse_cli_tags(args.tags),
+                    "metadata": asset_metadata,
+                    "notes": args.notes,
+                    "run_label": args.run_label,
+                    "force_save": args.force_save,
+                }
+                filtered_options = {key: value for key, value in options.items() if value not in (None, [], {})}
+                body = {
+                    "payload": payload,
+                    "options": filtered_options,
+                }
+                timeout = httpx.Timeout(60.0)
+                base_url = auth_payload["base_url"].rstrip("/")
+                headers = {
+                    "Authorization": f"Bearer {auth_payload['access_token']}",
+                    "Accept": "application/json",
+                }
+                url = f"/projects/{args.project_id}/generators/{args.slug}"
+                try:
+                    with httpx.Client(base_url=base_url, timeout=timeout, follow_redirects=False) as client:
+                        response = client.post(url, json=body, headers=headers)
+                except httpx.HTTPError as exc:
+                    logger.error("Generator request failed: %s", exc)
+                    sys.exit(1)
+                if response.status_code >= 400:
+                    try:
+                        detail = response.json()
+                    except Exception:  # noqa: BLE001
+                        detail = response.text
+                    logger.error("Generator request failed (%s): %s", response.status_code, detail)
+                    sys.exit(response.status_code)
+                payload = response.json()
+                output = payload.get("output") or {}
+                if not output.get("content"):
+                    logger.error("Generator response did not include output content.")
+                    sys.exit(1)
+                out_path = Path(args.out or output.get("filename") or f"{args.slug.split('/')[-1]}.tf")
+                _ensure_parent(out_path)
+                out_path.write_text(output["content"], encoding="utf-8")
+                print(f"Wrote Terraform to {out_path}")
+                asset = payload.get("asset") or {}
+                version = payload.get("version") or {}
+                run = payload.get("run") or {}
+                print(f"Saved asset {asset.get('name')} (id={asset.get('id')}) version={version.get('id')}")
+                if run:
+                    print(f"Logged run {run.get('id')} status={run.get('status')}")
         except ValueError as exc:
             logger.error(str(exc))
             sys.exit(1)
