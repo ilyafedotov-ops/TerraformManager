@@ -6,6 +6,7 @@ TerraformManager is an IaC co-pilot that pairs a SvelteKit workspace, FastAPI se
 - Opinionated Terraform generators and blueprint bundles for AWS, Azure, and Kubernetes workloads with metadata-aware inputs.
 - Drift, policy, and cost scanning with autofix suggestions, HTML/CSV exports, terraform validate hooks, and Infracost deltas.
 - Knowledge base search (TF‑IDF RAG), Markdown sync from GitHub, and optional LLM-backed explanations or remediation patches.
+- Contextual workspace guidance via dashboard toasts and a CLI help modal that links to curated workflows (`knowledge/cli-workspace-workflows.md`).
 - Authenticated API with SQL-backed storage for projects, runs, reports, configs, generator assets, knowledge articles, and LLM settings.
 - Browser workspace for managing projects end-to-end—edit metadata, browse run artifacts, promote outputs into versioned assets, and cross-link reviews with saved reports.
 - Automation-friendly CLI covering scans, baselines, docs generation, blueprint bundles, auth helpers, and knowledge reindexing for CI/CD.
@@ -43,6 +44,12 @@ graph TD
 - **API guardrails** — Endpoints such as `POST /scan`, `/projects/{id}/runs`, and the artifact APIs resolve user-supplied paths relative to the workspace and reject absolute/parent-traversal paths. Upload flows (e.g., `/scan/upload`) first materialise files inside the owning project’s run directory before scanning.
 - **CLI alignment** — The CLI still supports scanning arbitrary local directories, but when you want parity with the hosted workflow point commands at the appropriate workspace path (for example, `python -m backend.cli scan --path data/projects/my-project`).
 - **Runtime configuration** — Override the root via `TERRAFORM_MANAGER_PROJECTS_ROOT` (consumed by `backend.storage.get_projects_root`) if you mount persistent storage elsewhere. All documentation below assumes the default `data/projects` root is available.
+
+## Knowledge & CLI guidance
+
+- **Contextual knowledge panel** — Each project dashboard now calls `GET /knowledge/search` with keywords derived from project metadata and generator tags, surfacing remediation snippets and quick links to Markdown docs.
+- **Inline notifications** — When a project’s latest run includes drift or unresolved findings the dashboard raises toasts (via `frontend/src/lib/stores/notifications.ts`) nudging reviewers toward the Review tab or a follow-up scan.
+- **CLI workflow modal** — The dashboard’s “CLI help” button opens a modal populated with `backend.cli` snippets and a manual-verification checklist. The underlying runbook lives in [`knowledge/cli-workspace-workflows.md`](knowledge/cli-workspace-workflows.md) so you can extend or redistribute it.
 
 ## Tech stack
 
@@ -205,14 +212,14 @@ python -m backend.cli scan --path . --out report.json \
 # Capture autofixable diffs alongside the JSON report
 python -m backend.cli scan --path . --out report.json --patch-out autofix.patch
 
-# Generate a baseline waiver file (YAML)
+# Generate a baseline waiver file (YAML). Add --project-id/--project-slug to scope paths to a workspace.
 python -m backend.cli baseline --path .
 
 # Scaffold pre-commit hooks (fmt/validate/tflint/checkov/infracost/docs)
 python -m backend.cli precommit --out .pre-commit-config.yaml
 
-# Generate template documentation (mirrors into docs/ and knowledge/)
-python -m backend.cli docs --out docs/generators --knowledge-out knowledge/generated
+# Generate template documentation (mirrors into docs/ and knowledge/). Use --project-id for workspace-scoped docs.
+python -m backend.cli docs --project-id <uuid>
 
 # Authenticate against running API (stores access/refresh data in tm_auth.json)
 python -m backend.cli auth login --email you@example.com --base-url http://localhost:8890
@@ -231,9 +238,20 @@ python -m backend.cli project generator \
   --slug aws/s3-secure-bucket \
   --payload payloads/s3-secure-bucket.json \
   --force-save
+
+# Upload a local artifact into a managed project run (stores metadata/tags with the file)
+python -m backend.cli project upload \
+  --project-id <uuid> \
+  --run-id <run-id> \
+  --file terraform_review_report.json \
+  --dest reports/terraform_review_report.json \
+  --tags "report,ci" \
+  --metadata '{"source": "ci"}'
 ```
 
 > Tip: The Projects UI in the SvelteKit dashboard now covers workspace creation, editing, deletion, artifact browsing, and uploading new files. Reach for the CLI when you want automation, CI integration, or scripted workloads.
+
+All project-aware CLI commands accept either `--project-id` or `--project-slug`, aligning with the new `/projects/:slug/*` URLs in the dashboard.
 
 ### CLI commands at a glance
 - `scan` — run the reviewer with optional `terraform fmt`, `terraform validate`, Infracost cost data, drift summary (`--plan-json`), and HTML/patch artifacts.
@@ -242,6 +260,7 @@ python -m backend.cli project generator \
 - `docs` — render Terraform-docs output for registered generators and mirror Markdown into `knowledge/` (reindexes RAG by default).
 - `auth login` — capture access/refresh tokens for automation workflows (`tm_auth.json`).
 - `reindex` — warm the TF-IDF knowledge index if you add Markdown outside the docs command.
+- `project upload` — copy local files into a run's managed artifact directory (with optional tags/metadata) so the dashboard and API can surface them.
 
 To run template smoke tests with `terraform validate`, export `TFM_RUN_TERRAFORM_VALIDATE=1` before executing `python -m unittest` or the new pytest-based smoke test (`TFM_RUN_TERRAFORM_VALIDATE=1 pytest tests/test_terraform_validate_smoke.py`). Terraform must be on `PATH`; tests fall back gracefully if it is absent.
 
