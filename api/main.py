@@ -39,6 +39,7 @@ from backend.storage import (
     list_report_comments,
     delete_report_comment,
     ReportNotFoundError,
+    get_project,
 )
 from backend.preview_html import render_preview_html
 from backend.report_csv import render_csv_report
@@ -55,12 +56,15 @@ from backend.generators.models import (
     AzureStorageGeneratorPayload,
 )
 from backend.generators.registry import get_generator_definition, list_generator_metadata
+from backend.utils.logging import setup_logging
 from api.dependencies import require_current_user
+from api.middleware.logging import RequestLoggingMiddleware
 from api.routes import auth as auth_routes
 from api.routes import projects as project_routes
 
 KNOWLEDGE_ROOT = Path("knowledge").resolve()
 
+setup_logging(service="terraform-manager-api")
 
 app = FastAPI(title="Terraform Manager API", version=__version__)
 app.include_router(auth_routes.router)
@@ -73,6 +77,62 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestLoggingMiddleware)
+
+
+def _require_project_record(session: Session, project_id: str | None, project_slug: str | None) -> Dict[str, Any]:
+    if not project_id and not project_slug:
+        raise HTTPException(400, "project_id or project_slug is required")
+    record = get_project(project_id=project_id, slug=project_slug, session=session)
+    if not record:
+        raise HTTPException(404, "project not found")
+    return record
+
+
+def _project_workspace_root(project: Dict[str, Any]) -> Path:
+    raw_root = project.get("root_path")
+    if not raw_root:
+        raise HTTPException(500, "project is missing workspace metadata")
+    root = Path(raw_root).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _normalise_relative_token(value: Optional[str]) -> str:
+    token = (value or "").strip()
+    return token or "."
+
+
+def _resolve_workspace_target(root: Path, token: Optional[str], *, label: str) -> Path:
+    rel_value = _normalise_relative_token(token)
+    rel_path = Path(rel_value)
+    if rel_path.is_absolute():
+        raise ValueError(f"{label} must be project-relative (got absolute path)")
+    candidate = (root / rel_path).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"{label} escapes the project workspace") from exc
+    if not candidate.exists():
+        raise ValueError(f"{label} '{rel_value}' not found in project workspace")
+    return candidate
+
+
+def _resolve_workspace_targets(root: Path, tokens: Optional[List[str]]) -> List[Path]:
+    values = tokens or []
+    if not values:
+        values = ["."]
+    resolved: List[Path] = []
+    for index, token in enumerate(values, start=1):
+        resolved.append(_resolve_workspace_target(root, token, label=f"path #{index}"))
+    return resolved
+
+
+def _resolve_workspace_file(root: Path, token: Optional[str], *, label: str) -> Path:
+    path = _resolve_workspace_target(root, token, label=label)
+    if not path.is_file():
+        raise ValueError(f"{label} must refer to a file within the project workspace")
+    return path
 
 
 @app.on_event("startup")
@@ -93,6 +153,8 @@ class ScanRequest(BaseModel):
     cost: bool = False
     cost_usage_file: Optional[str] = None
     plan_path: Optional[str] = None
+    project_id: Optional[str] = None
+    project_slug: Optional[str] = None
 
 
 class ReportReviewUpdatePayload(BaseModel):
@@ -111,23 +173,47 @@ class ReportCommentCreatePayload(BaseModel):
 def scan(
     req: ScanRequest,
     session: Session = Depends(get_session_dependency),
-    _current_user: auth_routes.CurrentUser = Depends(require_current_user),
+    current_user: auth_routes.CurrentUser = Depends(require_current_user),
 ) -> Dict[str, Any]:
-    path_objs = [Path(p) for p in req.paths]
+    project = _require_project_record(session, req.project_id, req.project_slug)
+    project_root = _project_workspace_root(project)
+    try:
+        path_objs = _resolve_workspace_targets(project_root, req.paths)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
     cost_options = None
     if req.cost:
         cost_options = {}
         if req.cost_usage_file:
-            cost_options["usage_file"] = Path(req.cost_usage_file)
+            try:
+                usage_path = _resolve_workspace_file(
+                    project_root, req.cost_usage_file, label="cost_usage_file"
+                )
+            except ValueError as exc:
+                raise HTTPException(400, str(exc)) from exc
+            cost_options["usage_file"] = usage_path
 
-    plan_path = Path(req.plan_path) if req.plan_path else None
+    plan_path: Optional[Path] = None
+    if req.plan_path:
+        try:
+            plan_path = _resolve_workspace_file(project_root, req.plan_path, label="plan_path")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
+    scan_context = {
+        "source": "api.scan",
+        "user": current_user.user.email if current_user.user else None,
+        "project_id": project["id"],
+        "project_slug": project.get("slug"),
+    }
     report = scan_paths(
         path_objs,
         use_terraform_validate=req.terraform_validate,
         llm_options=req.llm,
         cost_options=cost_options,
         plan_path=plan_path,
+        context=scan_context,
     )
     if req.save:
         rid = str(uuid.uuid4())
@@ -148,7 +234,7 @@ def reports(
     order: str = Query("desc", description="Sort direction: asc or desc"),
     project_id: Optional[str] = Query(None, description="Restrict results to a specific project"),
     session: Session = Depends(get_session_dependency),
-    _current_user: auth_routes.CurrentUser = Depends(require_current_user),
+    current_user: auth_routes.CurrentUser = Depends(require_current_user),
 ) -> Dict[str, Any]:
     order_normalised = order.lower()
     if order_normalised not in {"asc", "desc"}:
@@ -352,12 +438,17 @@ async def scan_upload(
         if include_cost:
             cost_options = {"usage_file": usage_path}
 
+        scan_context = {
+            "source": "api.scan_upload",
+            "user": current_user.user.email if current_user.user else None,
+        }
         report = scan_paths(
             targets,
             use_terraform_validate=terraform_validate,
             llm_options=llm,
             cost_options=cost_options,
             plan_path=plan_path,
+            context=scan_context,
         )
 
         report_id: Optional[str] = None
@@ -441,7 +532,11 @@ def preview_config(
             raise HTTPException(404, "report not found")
         report = rec["report"]
     elif req.paths:
-        report = scan_paths([Path(p) for p in req.paths], use_terraform_validate=False)
+        report = scan_paths(
+            [Path(p) for p in req.paths],
+            use_terraform_validate=False,
+            context={"source": "api.preview", "path_count": len(req.paths)},
+        )
     else:
         raise HTTPException(400, "either report_id or paths must be provided")
 
@@ -488,7 +583,11 @@ def preview_config_html(
             raise HTTPException(404, "report not found")
         report = rec["report"]
     elif paths:
-        report = scan_paths([Path(p) for p in paths], use_terraform_validate=False)
+        report = scan_paths(
+            [Path(p) for p in paths],
+            use_terraform_validate=False,
+            context={"source": "api.preview_html", "path_count": len(paths)},
+        )
     else:
         raise HTTPException(400, "either report_id or paths must be provided")
 
