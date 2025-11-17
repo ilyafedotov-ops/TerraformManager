@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import zipfile
 import uuid
@@ -8,9 +9,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Query, Depends, UploadFile, File, Form, Response
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Depends, UploadFile, File, Form, Response
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from backend.db import get_session_dependency
@@ -68,18 +70,64 @@ KNOWLEDGE_ROOT = Path("knowledge").resolve()
 
 setup_logging(service="terraform-manager-api")
 
-app = FastAPI(title="Terraform Manager API", version=__version__)
-app.include_router(auth_routes.router)
-app.include_router(project_routes.router)
-app.mount("/docs", StaticFiles(directory="docs"), name="docs")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-app.add_middleware(RequestLoggingMiddleware)
+DEFAULT_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+]
+
+
+def _parse_env_list(var_name: str) -> List[str]:
+    raw = os.getenv(var_name)
+    if not raw:
+        return []
+    items = [value.strip() for value in raw.split(",")]
+    unique = []
+    for item in items:
+        if not item or item in unique:
+            continue
+        unique.append(item)
+    return unique
+
+
+def _allowed_origins() -> List[str]:
+    configured = _parse_env_list("TFM_ALLOWED_ORIGINS")
+    if configured:
+        return configured
+    return list(DEFAULT_ALLOWED_ORIGINS)
+
+
+def _trusted_hosts() -> List[str]:
+    return _parse_env_list("TFM_TRUSTED_HOSTS")
+
+
+api_router = APIRouter()
+
+
+def _startup() -> None:
+    init_db(DEFAULT_DB_PATH)
+
+
+def create_app() -> FastAPI:
+    application = FastAPI(title="Terraform Manager API", version=__version__)
+    application.include_router(auth_routes.router)
+    application.include_router(project_routes.router)
+    application.include_router(api_router)
+    application.mount("/docs", StaticFiles(directory="docs"), name="docs")
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=_allowed_origins(),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    trusted_hosts = _trusted_hosts()
+    if trusted_hosts:
+        application.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
+    application.add_middleware(RequestLoggingMiddleware)
+    application.add_event_handler("startup", _startup)
+    return application
 
 
 def _require_project_record(session: Session, project_id: str | None, project_slug: str | None) -> Dict[str, Any]:
@@ -90,13 +138,7 @@ def _require_project_record(session: Session, project_id: str | None, project_sl
         raise HTTPException(404, "project not found")
     return record
 
-
-@app.on_event("startup")
-def _startup() -> None:
-    init_db(DEFAULT_DB_PATH)
-
-
-@app.get("/health")
+@api_router.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
 
@@ -125,7 +167,7 @@ class ReportCommentCreatePayload(BaseModel):
     author: Optional[str] = None
 
 
-@app.post("/scan")
+@api_router.post("/scan")
 def scan(
     req: ScanRequest,
     session: Session = Depends(get_session_dependency),
@@ -178,7 +220,7 @@ def scan(
     return report
 
 
-@app.get("/reports")
+@api_router.get("/reports")
 def reports(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -212,7 +254,7 @@ def reports(
         raise HTTPException(400, str(exc)) from exc
 
 
-@app.get("/reports/{report_id}")
+@api_router.get("/reports/{report_id}")
 def get_report_json(
     report_id: str,
     session: Session = Depends(get_session_dependency),
@@ -224,7 +266,7 @@ def get_report_json(
     return rec
 
 
-@app.patch("/reports/{report_id}")
+@api_router.patch("/reports/{report_id}")
 def update_report_review_metadata(
     report_id: str,
     payload: ReportReviewUpdatePayload,
@@ -257,7 +299,7 @@ def update_report_review_metadata(
     return result
 
 
-@app.get("/reports/{report_id}/comments")
+@api_router.get("/reports/{report_id}/comments")
 def list_report_comments_api(
     report_id: str,
     session: Session = Depends(get_session_dependency),
@@ -270,7 +312,7 @@ def list_report_comments_api(
     return {"items": comments}
 
 
-@app.post("/reports/{report_id}/comments", status_code=201)
+@api_router.post("/reports/{report_id}/comments", status_code=201)
 def create_report_comment_api(
     report_id: str,
     payload: ReportCommentCreatePayload,
@@ -290,7 +332,7 @@ def create_report_comment_api(
         raise HTTPException(400, str(exc)) from exc
 
 
-@app.delete("/reports/{report_id}/comments/{comment_id}")
+@api_router.delete("/reports/{report_id}/comments/{comment_id}")
 def delete_report_comment_api(
     report_id: str,
     comment_id: str,
@@ -303,7 +345,7 @@ def delete_report_comment_api(
     return {"status": "deleted", "id": comment_id}
 
 
-@app.get("/reports/{report_id}/html", response_class=HTMLResponse)
+@api_router.get("/reports/{report_id}/html", response_class=HTMLResponse)
 def get_report_html(
     report_id: str,
     session: Session = Depends(get_session_dependency),
@@ -314,7 +356,7 @@ def get_report_html(
     return render_html_report(rec["report"])  # type: ignore[arg-type]
 
 
-@app.delete("/reports/{report_id}")
+@api_router.delete("/reports/{report_id}")
 def delete_report_api(
     report_id: str,
     session: Session = Depends(get_session_dependency),
@@ -343,7 +385,7 @@ def _safe_extract_zip(data: bytes, destination: Path) -> None:
                 shutil.copyfileobj(src, handle)
 
 
-@app.post("/scan/upload")
+@api_router.post("/scan/upload")
 async def scan_upload(
     files: List[UploadFile] = File(...),
     terraform_validate: bool = Form(False),
@@ -455,7 +497,7 @@ class ConfigPayload(BaseModel):
     kind: str = "tfreview"
 
 
-@app.get("/configs")
+@api_router.get("/configs")
 def configs_list(
     session: Session = Depends(get_session_dependency),
     _current_user: auth_routes.CurrentUser = Depends(require_current_user),
@@ -463,7 +505,7 @@ def configs_list(
     return list_configs(session=session)
 
 
-@app.post("/configs")
+@api_router.post("/configs")
 def configs_upsert(
     cfg: ConfigPayload,
     session: Session = Depends(get_session_dependency),
@@ -473,7 +515,7 @@ def configs_upsert(
     return {"status": "saved", "name": cfg.name}
 
 
-@app.get("/configs/{name}")
+@api_router.get("/configs/{name}")
 def configs_get(
     name: str,
     session: Session = Depends(get_session_dependency),
@@ -485,7 +527,7 @@ def configs_get(
     return rec
 
 
-@app.delete("/configs/{name}")
+@api_router.delete("/configs/{name}")
 def configs_delete(
     name: str,
     session: Session = Depends(get_session_dependency),
@@ -503,7 +545,7 @@ class PreviewRequest(BaseModel):
     report_id: Optional[str] = None
 
 
-@app.post("/preview/config-application")
+@api_router.post("/preview/config-application")
 def preview_config(
     req: PreviewRequest,
     session: Session = Depends(get_session_dependency),
@@ -553,7 +595,7 @@ def preview_config(
     }
 
 
-@app.get("/preview/config-application/html", response_class=HTMLResponse)
+@api_router.get("/preview/config-application/html", response_class=HTMLResponse)
 def preview_config_html(
     report_id: str | None = None,
     config_name: str | None = None,
@@ -595,7 +637,7 @@ class KnowledgeSyncRequest(BaseModel):
     sources: Optional[List[str]] = None
 
 
-@app.post("/knowledge/sync")
+@api_router.post("/knowledge/sync")
 def knowledge_sync(
     req: KnowledgeSyncRequest,
     _current_user: auth_routes.CurrentUser = Depends(require_current_user),
@@ -621,7 +663,7 @@ class KnowledgeSearchResponse(BaseModel):
     items: List[Dict[str, Any]]
 
 
-@app.get("/knowledge/search")
+@api_router.get("/knowledge/search")
 def knowledge_search(q: str, top_k: int = Query(3, ge=1, le=10)) -> KnowledgeSearchResponse:
     snippets = retrieve_snippets(q, top_k=top_k, max_chars=800)
     return KnowledgeSearchResponse(items=[
@@ -634,7 +676,7 @@ def knowledge_search(q: str, top_k: int = Query(3, ge=1, le=10)) -> KnowledgeSea
     ])
 
 
-@app.get("/knowledge/doc")
+@api_router.get("/knowledge/doc")
 def knowledge_doc(
     path: str,
     _current_user: auth_routes.CurrentUser = Depends(require_current_user),
@@ -700,12 +742,12 @@ class BlueprintResponse(BaseModel):
     files: List[BlueprintFile]
 
 
-@app.get("/generators/metadata", response_model=List[GeneratorMetadataResponse])
+@api_router.get("/generators/metadata", response_model=List[GeneratorMetadataResponse])
 def list_generators_metadata() -> List[GeneratorMetadataResponse]:
     return [GeneratorMetadataResponse(**item) for item in list_generator_metadata()]
 
 
-@app.post("/generators/blueprints", response_model=BlueprintResponse)
+@api_router.post("/generators/blueprints", response_model=BlueprintResponse)
 def generate_blueprint(payload: BlueprintRequest) -> BlueprintResponse:
     result = render_blueprint_bundle(payload)
     files = [BlueprintFile(**item) for item in result["files"]]
@@ -716,7 +758,7 @@ def generate_blueprint(payload: BlueprintRequest) -> BlueprintResponse:
     )
 
 
-@app.post("/generators/aws/s3", response_model=GeneratorResponse)
+@api_router.post("/generators/aws/s3", response_model=GeneratorResponse)
 def generate_aws_s3(payload: AwsS3GeneratorPayload) -> GeneratorResponse:
     generator = get_generator_definition("aws/s3-secure-bucket")
     try:
@@ -726,7 +768,7 @@ def generate_aws_s3(payload: AwsS3GeneratorPayload) -> GeneratorResponse:
         raise HTTPException(400, str(exc)) from exc
 
 
-@app.post("/generators/azure/storage-account", response_model=GeneratorResponse)
+@api_router.post("/generators/azure/storage-account", response_model=GeneratorResponse)
 def generate_azure_storage(payload: AzureStorageGeneratorPayload) -> GeneratorResponse:
     generator = get_generator_definition("azure/storage-secure-account")
     try:
@@ -736,7 +778,7 @@ def generate_azure_storage(payload: AzureStorageGeneratorPayload) -> GeneratorRe
         raise HTTPException(400, str(exc)) from exc
 
 
-@app.post("/generators/azure/servicebus", response_model=GeneratorResponse)
+@api_router.post("/generators/azure/servicebus", response_model=GeneratorResponse)
 def generate_azure_servicebus(payload: AzureServiceBusGeneratorPayload) -> GeneratorResponse:
     generator = get_generator_definition("azure/servicebus-namespace")
     try:
@@ -746,7 +788,7 @@ def generate_azure_servicebus(payload: AzureServiceBusGeneratorPayload) -> Gener
         raise HTTPException(400, str(exc)) from exc
 
 
-@app.post("/generators/azure/function-app", response_model=GeneratorResponse)
+@api_router.post("/generators/azure/function-app", response_model=GeneratorResponse)
 def generate_azure_function_app(payload: AzureFunctionAppGeneratorPayload) -> GeneratorResponse:
     generator = get_generator_definition("azure/function-app")
     try:
@@ -756,7 +798,7 @@ def generate_azure_function_app(payload: AzureFunctionAppGeneratorPayload) -> Ge
         raise HTTPException(400, str(exc)) from exc
 
 
-@app.post("/generators/azure/api-management", response_model=GeneratorResponse)
+@api_router.post("/generators/azure/api-management", response_model=GeneratorResponse)
 def generate_azure_api_management(payload: AzureApiManagementGeneratorPayload) -> GeneratorResponse:
     generator = get_generator_definition("azure/api-management")
     try:
@@ -766,7 +808,7 @@ def generate_azure_api_management(payload: AzureApiManagementGeneratorPayload) -
         raise HTTPException(400, str(exc)) from exc
 
 
-@app.get("/settings/llm")
+@api_router.get("/settings/llm")
 def get_llm_settings_api(
     session: Session = Depends(get_session_dependency),
     _current_user: auth_routes.CurrentUser = Depends(require_current_user),
@@ -784,7 +826,7 @@ class LLMSettingsPayload(BaseModel):
     deployment_name: Optional[str] = None  # for Azure
 
 
-@app.post("/settings/llm")
+@api_router.post("/settings/llm")
 def save_llm_settings_api(
     payload: LLMSettingsPayload,
     session: Session = Depends(get_session_dependency),
@@ -798,7 +840,7 @@ class LLMTestPayload(BaseModel):
     live: bool = False
 
 
-@app.post("/settings/llm/test")
+@api_router.post("/settings/llm/test")
 def test_llm_settings_api(
     payload: LLMTestPayload,
     _current_user: auth_routes.CurrentUser = Depends(require_current_user),
@@ -814,7 +856,7 @@ def test_llm_settings_api(
     return {"ok": True, "stage": "ping", "response": probe.get("response")}
 
 
-@app.get("/")
+@api_router.get("/")
 def index_root() -> Dict[str, str]:
     return {
         "message": "Terraform Manager API. The HTML dashboard has been retired; use the SvelteKit frontend or integrate directly with these endpoints.",
@@ -822,7 +864,7 @@ def index_root() -> Dict[str, str]:
     }
 
 
-@app.get("/reports/{report_id}/csv")
+@api_router.get("/reports/{report_id}/csv")
 def get_report_csv(
     report_id: str,
     session: Session = Depends(get_session_dependency),
@@ -833,3 +875,6 @@ def get_report_csv(
     csv_text = render_csv_report(rec["report"])  # type: ignore[arg-type]
     headers = {"Content-Disposition": f"attachment; filename=report-{report_id}.csv"}
     return Response(content=csv_text, media_type="text/csv", headers=headers)
+
+
+app = create_app()
