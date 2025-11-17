@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-import { goto } from '$app/navigation';
-import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import AuthEventTimeline from '$lib/components/dashboard/AuthEventTimeline.svelte';
 	import StatCard from '$lib/components/dashboard/StatCard.svelte';
 	import StepBar from '$lib/components/dashboard/StepBar.svelte';
 	import SeverityDistribution from '$lib/components/dashboard/SeverityDistribution.svelte';
-import ProjectKnowledgePanel from '$lib/components/projects/ProjectKnowledgePanel.svelte';
+	import ProjectKnowledgePanel from '$lib/components/projects/ProjectKnowledgePanel.svelte';
+	import ProjectHelpModal from '$lib/components/projects/ProjectHelpModal.svelte';
 	import type { AuthEvent } from '$lib/api/client';
 	import type { DashboardStats } from '$lib/types/dashboard';
 	import { activeProject, activeProjectRuns, projectState } from '$lib/stores/project';
@@ -24,12 +25,13 @@ const projectGenerateHref = $derived(projectSlug ? `${projectBasePath}/generate`
 	const isPromise = <T>(value: T | Promise<T>): value is Promise<T> =>
 		typeof value === 'object' && value !== null && typeof (value as Promise<T>).then === 'function';
 
-let stats = $state<DashboardStats | null>(null);
-let resolvedError = $state<string | null>(null);
-let isLoading = $state<boolean>(isPromise(statsSource));
-let authEvents = $state<AuthEvent[]>(Array.isArray(authEventsSource) ? authEventsSource : []);
-let eventsLoading = $state<boolean>(isPromise(authEventsSource));
-let authEventsError = $state<string | null>(null);
+	let stats = $state<DashboardStats | null>(null);
+	let resolvedError = $state<string | null>(null);
+	let isLoading = $state<boolean>(isPromise(statsSource));
+	let authEvents = $state<AuthEvent[]>(Array.isArray(authEventsSource) ? authEventsSource : []);
+	let eventsLoading = $state<boolean>(isPromise(authEventsSource));
+	let authEventsError = $state<string | null>(null);
+	let helpModalOpen = $state(false);
 
 	if (isPromise(statsSource)) {
 		let active = true;
@@ -238,6 +240,13 @@ const hasSeverityData = $derived(topSeverityCount > 0);
 				>
 					Start New Run
 				</button>
+				<button
+					type="button"
+					class="rounded-xl border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-600 shadow-sm shadow-indigo-100 transition hover:bg-indigo-50"
+					onclick={() => (helpModalOpen = true)}
+				>
+					CLI help
+				</button>
 			</div>
 		</div>
 		{#if recentRuns.length}
@@ -322,6 +331,7 @@ const hasSeverityData = $derived(topSeverityCount > 0);
 	{/if}
 
 	<ProjectKnowledgePanel project={activeProjectSummary} />
+	<ProjectHelpModal open={helpModalOpen} project={activeProjectSummary} on:close={() => (helpModalOpen = false)} />
 
 	<div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40">
 		<header class="mb-4 space-y-2">

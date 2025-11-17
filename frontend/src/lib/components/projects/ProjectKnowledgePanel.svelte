@@ -16,8 +16,9 @@
 		limit?: number;
 	} = $props();
 
-	const libraryAssets = $derived($activeProjectLibrary);
-	const generatorSlugs = $derived(() => {
+const libraryAssets = $derived($activeProjectLibrary);
+const generatorSlugs = $derived<string[]>(
+	(() => {
 		const slugs = new Set<string>();
 		for (const asset of libraryAssets) {
 			for (const tag of asset.tags ?? []) {
@@ -27,7 +28,8 @@
 			}
 		}
 		return Array.from(slugs);
-	});
+	})()
+);
 
 	let items = $state<KnowledgeItem[]>([]);
 	let loading = $state(false);
