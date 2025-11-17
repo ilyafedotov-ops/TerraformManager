@@ -22,11 +22,6 @@ def _finding_row(f: Dict[str, Any]) -> str:
 def render_preview_html(applied: Dict[str, Any], original_summary: Dict[str, Any]) -> str:
     active = applied.get("active", [])
     waived = applied.get("waived", [])
-    after = {
-        "issues_found": len(active),
-        "severity_counts": applied.get("severity_counts", {}),
-        "thresholds": applied.get("thresholds", {}),
-    }
     before = original_summary or {}
 
     html = [
@@ -61,4 +56,3 @@ def render_preview_html(applied: Dict[str, Any], original_summary: Dict[str, Any
 
     html.append("</body></html>")
     return "\n".join(html)
-

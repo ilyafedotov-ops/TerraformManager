@@ -7,7 +7,7 @@ import re
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Sequence
 from uuid import uuid4
 import shutil
 
@@ -50,6 +50,10 @@ class ReportNotFoundError(Exception):
     """Raised when a report cannot be located in the database."""
 
 
+class WorkspacePathError(ValueError):
+    """Raised when resolving project workspace paths fails."""
+
+
 REVIEW_STATUS_CHOICES: set[str] = {
     "pending",
     "in_review",
@@ -64,6 +68,75 @@ def get_projects_root(base_path: Path | None = None) -> Path:
     root = (base_path or DEFAULT_PROJECTS_ROOT).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def get_project_workspace(project: Project | Dict[str, Any], base_path: Path | None = None) -> Path:
+    """
+    Return the on-disk workspace root for the provided project, ensuring it exists.
+    """
+
+    if isinstance(project, dict):
+        raw = project.get("root_path")
+        slug = project.get("slug")
+    else:
+        raw = project.root_path
+        slug = project.slug
+
+    if raw:
+        root = Path(str(raw))
+    else:
+        derived_slug = slug or f"project-{uuid4().hex[:8]}"
+        root = get_projects_root(base_path) / derived_slug
+
+    root = root.expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def resolve_workspace_path(
+    project_root: Path,
+    token: str | None,
+    *,
+    label: str = "path",
+    require_file: bool | None = None,
+) -> Path:
+    """
+    Resolve a project-relative path to an absolute location inside the workspace, enforcing boundaries.
+    """
+
+    relative_value = (token or "").strip() or "."
+    relative_path = Path(relative_value)
+    if relative_path.is_absolute():
+        raise WorkspacePathError(f"{label} must be relative to the project workspace")
+
+    candidate = (project_root / relative_path).resolve()
+    try:
+        candidate.relative_to(project_root)
+    except ValueError as exc:
+        raise WorkspacePathError(f"{label} '{relative_value}' escapes the project workspace") from exc
+
+    if not candidate.exists():
+        raise WorkspacePathError(f"{label} '{relative_value}' not found in project workspace")
+
+    if require_file is True and not candidate.is_file():
+        raise WorkspacePathError(f"{label} '{relative_value}' must be an existing file in the project workspace")
+    if require_file is False and not candidate.is_dir():
+        raise WorkspacePathError(f"{label} '{relative_value}' must be a directory in the project workspace")
+    return candidate
+
+
+def resolve_workspace_paths(project_root: Path, tokens: Sequence[str] | None) -> List[Path]:
+    values = list(tokens or [])
+    if not values:
+        values = ["."]
+    resolved: List[Path] = []
+    for index, value in enumerate(values, start=1):
+        resolved.append(resolve_workspace_path(project_root, value, label=f"path #{index}"))
+    return resolved
+
+
+def resolve_workspace_file(project_root: Path, token: str | None, *, label: str) -> Path:
+    return resolve_workspace_path(project_root, token, label=label, require_file=True)
 
 
 def _slugify(value: str) -> str:

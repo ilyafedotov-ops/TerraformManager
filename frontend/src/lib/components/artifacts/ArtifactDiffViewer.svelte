@@ -61,7 +61,7 @@
 		</p>
 	{:else}
 		<pre class="overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-3 font-mono text-[0.75rem] leading-relaxed">
-			{#each diffChunks as [type, text], index}
+			{#each diffChunks as [type, text], _index}
 				<span
 					class={type === 0
 						? 'text-slate-700'

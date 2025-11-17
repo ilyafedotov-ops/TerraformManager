@@ -2,11 +2,15 @@ import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get, type Readable } from 'svelte/store';
 import MainNav from '../MainNav.svelte';
-import { navigationState } from '$lib/stores/navigation';
+import { navigationState, type NavigationState } from '$lib/stores/navigation';
 
 type NavigationReadable<T> = Readable<T>;
 
-const readNavigation = () => get(navigationState as unknown as NavigationReadable<any>);
+const navigationReadable: NavigationReadable<NavigationState> = {
+	subscribe: navigationState.subscribe
+};
+
+const readNavigation = () => get(navigationReadable);
 
 afterEach(() => {
 	navigationState.reset();

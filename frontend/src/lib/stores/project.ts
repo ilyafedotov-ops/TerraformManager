@@ -89,7 +89,7 @@ interface ProjectArtifactIndexEntry {
 	fetchedAt: string;
 }
 
-interface ProjectState {
+export interface ProjectState {
 	projects: ProjectSummary[];
 	activeProjectId: string | null;
 	runs: Record<string, ProjectRunCacheEntry>;

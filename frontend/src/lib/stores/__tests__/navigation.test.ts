@@ -1,12 +1,16 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import { get, type Readable } from 'svelte/store';
 import { navigationSections } from '$lib/navigation/data';
-import { navigationState, navigationSectionsStore, commandResults } from '../navigation';
+import { navigationState, navigationSectionsStore, commandResults, type NavigationState } from '../navigation';
 import { projectState } from '$lib/stores/project';
 
 type NavigationReadable<T> = Readable<T>;
 
-const readState = () => get(navigationState as unknown as NavigationReadable<any>);
+const navigationReadable: NavigationReadable<NavigationState> = {
+	subscribe: navigationState.subscribe
+};
+
+const readState = () => get(navigationReadable);
 
 afterEach(() => {
 	navigationState.reset();

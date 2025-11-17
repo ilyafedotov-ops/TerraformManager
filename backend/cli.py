@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from getpass import getpass
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import httpx
 import yaml
@@ -32,6 +32,10 @@ from backend.storage import (
     save_report,
     save_run_artifact,
     update_project_run,
+    get_project_workspace,
+    resolve_workspace_paths,
+    resolve_workspace_file,
+    WorkspacePathError,
 )
 
 
@@ -445,7 +449,7 @@ def main() -> None:
         help="Where to write the resulting credential payload",
     )
 
-    reindex = sub.add_parser("reindex", help="Build the TF-IDF knowledge index (optional)")
+    sub.add_parser("reindex", help="Build the TF-IDF knowledge index (optional)")
 
     project = sub.add_parser("project", help="Manage Terraform Manager projects and runs")
     project_sub = project.add_subparsers(dest="project_cmd", required=True)
@@ -516,23 +520,38 @@ def main() -> None:
             except Exception:  # noqa: BLE001
                 logger.warning("Unable to update credential file %s", credentials_file)
 
-        paths = [Path(p) for p in args.path]
         project_record: Dict[str, Any] | None = None
         project_run_parameters: Dict[str, Any] | None = None
         project_run_record: Dict[str, Any] | None = None
+        project_workspace: Path | None = None
+        metadata_payload: Dict[str, Any] = {}
         if args.project_id or args.project_slug:
             try:
                 project_record = _resolve_project_reference(args.project_id, args.project_slug)
             except ValueError as exc:
                 logger.error(str(exc))
                 sys.exit(1)
-            metadata_payload: Dict[str, Any] = {}
+            try:
+                project_workspace = get_project_workspace(project_record)
+            except WorkspacePathError as exc:
+                logger.error("Failed to resolve project workspace: %s", exc)
+                sys.exit(1)
             if args.project_run_metadata:
                 try:
                     metadata_payload = _load_json_payload(args.project_run_metadata)
                 except ValueError as exc:
                     logger.error("Invalid JSON for --project-run-metadata: %s", exc)
                     sys.exit(1)
+        try:
+            if project_workspace:
+                paths = resolve_workspace_paths(project_workspace, args.path)
+            else:
+                paths = [Path(p).expanduser().resolve() for p in args.path]
+        except WorkspacePathError as exc:
+            logger.error("Invalid project path: %s", exc)
+            sys.exit(1)
+
+        if project_record:
             project_run_parameters = {
                 "paths": [str(p) for p in paths],
                 "terraform_validate": args.terraform_validate,
@@ -543,6 +562,7 @@ def main() -> None:
                 "plan_json": args.plan_json,
             }
             project_run_parameters.update(metadata_payload)
+
         if args.terraform_fmt or args.terraform_fmt_write:
             fmt_targets = _collect_fmt_targets(paths)
             _run_terraform_fmt(fmt_targets, write=args.terraform_fmt_write, logger=logger)
@@ -574,13 +594,35 @@ def main() -> None:
         ):
             llm_options = final_llm
 
+        cost_usage_path: Optional[Path] = None
+        if args.cost_usage_file:
+            try:
+                if project_workspace:
+                    cost_usage_path = resolve_workspace_file(
+                        project_workspace, args.cost_usage_file, label="cost usage file"
+                    )
+                else:
+                    cost_usage_path = Path(args.cost_usage_file).expanduser().resolve()
+            except WorkspacePathError as exc:
+                logger.error("Invalid cost usage file: %s", exc)
+                sys.exit(1)
+
         cost_opts = None
         if args.cost:
             cost_opts = {}
-            if args.cost_usage_file:
-                cost_opts["usage_file"] = Path(args.cost_usage_file)
+            if cost_usage_path:
+                cost_opts["usage_file"] = cost_usage_path
 
-        plan_path = Path(args.plan_json).resolve() if args.plan_json else None
+        plan_path: Optional[Path] = None
+        if args.plan_json:
+            try:
+                if project_workspace:
+                    plan_path = resolve_workspace_file(project_workspace, args.plan_json, label="plan file")
+                else:
+                    plan_path = Path(args.plan_json).expanduser().resolve()
+            except WorkspacePathError as exc:
+                logger.error("Invalid plan file: %s", exc)
+                sys.exit(1)
 
         run_label = None
         scan_context = {"source": "cli.scan"}

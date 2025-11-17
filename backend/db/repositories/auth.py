@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Iterable, Sequence
+from typing import Sequence
 from uuid import uuid4
 
 from sqlalchemy import Select, select

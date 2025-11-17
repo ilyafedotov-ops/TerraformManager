@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional
 from urllib.request import urlopen
-from urllib.error import URLError, HTTPError
+from urllib.error import HTTPError
 
 
 DEFAULT_DEST = Path("knowledge/external")

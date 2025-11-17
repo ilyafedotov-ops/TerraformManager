@@ -1,6 +1,6 @@
-from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Any
 import re
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 from backend.llm_service import KBPassage
 
@@ -83,8 +83,6 @@ def _score_docs_tfidf(query: str, top_k: int) -> List[Tuple[float, str, str]]:
         return []
     try:
         qvec = _tfidf_vectorizer.transform([query])
-        import numpy as np  # type: ignore
-
         scores = (qvec @ _tfidf_matrix.T).toarray().ravel()
         top_idx = scores.argsort()[::-1][:top_k]
         results: List[Tuple[float, str, str]] = []

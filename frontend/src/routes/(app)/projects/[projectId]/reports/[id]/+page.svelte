@@ -9,7 +9,7 @@ import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBan
 
 	const { data, params } = $props();
 	const report = data.report as ReportDetail | null;
-	const error = data.error as string | undefined;
+	const loadError = data.error as string | undefined;
 	const token = data.token as string | null;
 	const projectReportsHref = `/projects/${params.projectId}/reports`;
 	let deleting = $state(false);
@@ -47,7 +47,7 @@ import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBan
 		if (!costCurrency) return value.toFixed(2);
 		try {
 			return new Intl.NumberFormat(undefined, { style: 'currency', currency: costCurrency }).format(value);
-		} catch (error) {
+		} catch (_error) {
 			return `${costCurrency} ${value.toFixed(2)}`;
 		}
 	};
@@ -108,10 +108,10 @@ const displayedFindings = findings.slice(0, 50);
 		</p>
 	</header>
 
-	{#if error}
+	{#if loadError}
 		<div class="rounded-3xl border border-rose-300 bg-rose-50 px-6 py-4 text-sm text-rose-700">
 			<strong class="font-semibold">Unable to load report.</strong>
-			<span class="ml-2 text-rose-600">{error}</span>
+			<span class="ml-2 text-rose-600">{loadError}</span>
 		</div>
 	{/if}
 
@@ -359,7 +359,7 @@ const displayedFindings = findings.slice(0, 50);
 				</div>
 			{/if}
 		</div>
-	{:else if !error}
+	{:else if !loadError}
 		<div class="rounded-3xl border border-slate-200 bg-white px-6 py-6 text-sm text-slate-500">
 			Loading report details...
 		</div>

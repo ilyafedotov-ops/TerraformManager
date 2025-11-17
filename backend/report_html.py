@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import html
-from pathlib import Path
-from typing import Dict, Any, Iterable, Optional
+from typing import Any, Dict, Optional
 
 
 def _escape(value: Any) -> str:

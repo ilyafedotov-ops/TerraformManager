@@ -7,7 +7,7 @@
 	import { API_BASE } from '$lib/api/client';
 import MainNav from '$lib/components/navigation/MainNav.svelte';
 import { navigationSectionsStore, navigationState, commandResults, materialiseNavigationSections } from '$lib/stores/navigation';
-import { projectState, activeProject, activeProjectRuns } from '$lib/stores/project';
+import { projectState, activeProject } from '$lib/stores/project';
 import type { NavigationItem } from '$lib/navigation/types';
 
 	const { children, data } = $props();

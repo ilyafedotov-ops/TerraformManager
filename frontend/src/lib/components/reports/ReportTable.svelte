@@ -43,11 +43,11 @@ const formatCurrency = (amount: number | null | undefined, currency?: string | n
     if (!currency) {
         return amount.toFixed(2);
     }
-    try {
-        return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount);
-    } catch (error) {
-        return `${currency} ${amount.toFixed(2)}`;
-    }
+	try {
+		return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount);
+	} catch (_error) {
+		return `${currency} ${amount.toFixed(2)}`;
+	}
 };
 
 const costDelta = (summary?: ReportSummary['summary']) => {

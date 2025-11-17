@@ -41,11 +41,11 @@ const formatCurrency = (value: unknown) => {
         value = parsed;
     }
     if (costCurrency) {
-        try {
-            return new Intl.NumberFormat(undefined, { style: 'currency', currency: costCurrency }).format(value as number);
-        } catch (err) {
-            return `${costCurrency} ${(value as number).toFixed(2)}`;
-        }
+		try {
+			return new Intl.NumberFormat(undefined, { style: 'currency', currency: costCurrency }).format(value as number);
+		} catch (_error) {
+			return `${costCurrency} ${(value as number).toFixed(2)}`;
+		}
     }
     return (value as number).toFixed(2);
 };

@@ -40,11 +40,11 @@
         | 'azure_function_app'
         | 'azure_api_management';
 
-    type GeneratorMetadata = {
-        slug: string;
-        example_payload?: Record<string, any>;
-        presets?: Array<{ id?: string; label?: string; description?: string; payload?: Record<string, any> }>;
-    };
+	type GeneratorMetadata = {
+		slug: string;
+		example_payload?: Record<string, unknown>;
+		presets?: Array<{ id?: string; label?: string; description?: string; payload?: Record<string, unknown> }>;
+	};
 
     const metadataBySlug: Record<string, GeneratorMetadata> = Object.fromEntries(
         (data.metadata as GeneratorMetadata[]).map((item) => [item.slug, item])
@@ -138,14 +138,24 @@
     const apimMetadata = metadataBySlug['azure/api-management'];
     const apimExample = apimMetadata?.example_payload ?? {};
 
+	const stringifyNamedEntries = (items: unknown): string =>
+		Array.isArray(items)
+			? items
+					.map((entry) => {
+						if (entry && typeof entry === 'object' && 'name' in entry) {
+							const value = (entry as { name?: unknown }).name;
+							return typeof value === 'string' ? value : '';
+						}
+						return '';
+					})
+					.filter(Boolean)
+					.join('\n')
+			: '';
+
     const metadataServiceBusPresets = (serviceBusMetadata?.presets ?? []).map((preset, index) => {
         const payload = preset.payload ?? {};
-        const queues = Array.isArray(payload.queues)
-            ? payload.queues.map((queue: any) => queue.name).join('\n')
-            : '';
-        const topics = Array.isArray(payload.topics)
-            ? payload.topics.map((topic: any) => topic.name).join('\n')
-            : '';
+        const queues = stringifyNamedEntries(payload.queues);
+        const topics = stringifyNamedEntries(payload.topics);
         return {
             id: preset.id ?? `preset-${index}`,
             label: preset.label ?? `Preset ${index + 1}`,
@@ -400,12 +410,8 @@
     let azureBusy = $state(false);
 
     // Service Bus state
-    const serviceBusExampleQueues = Array.isArray(serviceBusExample.queues)
-        ? serviceBusExample.queues.map((queue: any) => queue.name).join('\n')
-        : 'orders';
-    const serviceBusExampleTopics = Array.isArray(serviceBusExample.topics)
-        ? serviceBusExample.topics.map((topic: any) => topic.name).join('\n')
-        : 'events';
+	const serviceBusExampleQueues = stringifyNamedEntries(serviceBusExample.queues) || 'orders';
+	const serviceBusExampleTopics = stringifyNamedEntries(serviceBusExample.topics) || 'events';
 
     let sbPresetId = $state<ServiceBusPreset['id']>('custom');
     let sbRgName = $state(serviceBusExample.resource_group_name ?? 'rg-integration');
