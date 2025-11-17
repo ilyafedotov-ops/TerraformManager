@@ -19,12 +19,12 @@
 	const navigationSlug = $derived(projectSlug ?? project?.slug ?? projectId ?? '');
 	const baseProjectPath = $derived(navigationSlug ? `/projects/${navigationSlug}` : '/projects');
 
-	const tabs = [
-		{ id: 'dashboard', label: 'Overview', href: `${baseProjectPath}/dashboard`, match: /\/dashboard/ },
-		{ id: 'generate', label: 'Generate', href: `${baseProjectPath}/generate`, match: /\/generate/ },
-		{ id: 'review', label: 'Review', href: `${baseProjectPath}/review`, match: /\/review/ },
-		{ id: 'reports', label: 'Reports', href: `${baseProjectPath}/reports`, match: /\/reports/ }
-	];
+const tabs = [
+	{ id: 'dashboard', label: 'Overview', path: '/dashboard', match: /\/dashboard/ },
+	{ id: 'generate', label: 'Generate', path: '/generate', match: /\/generate/ },
+	{ id: 'review', label: 'Review', path: '/review', match: /\/review/ },
+	{ id: 'reports', label: 'Reports', path: '/reports', match: /\/reports/ }
+];
 
 	const activeTabId = $derived(
 		tabs.find((entry) => entry.match.test($page.url.pathname))?.id ?? 'dashboard'
@@ -50,7 +50,7 @@
 							? 'border-sky-300 bg-sky-50 text-sky-600'
 							: 'border-slate-200 bg-white hover:border-sky-200 hover:text-sky-600'
 					}`}
-					href={tab.href}
+					href={`${baseProjectPath}${tab.path}`}
 				>
 					{tab.label}
 				</a>

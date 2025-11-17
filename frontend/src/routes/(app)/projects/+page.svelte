@@ -18,13 +18,7 @@ import {
 	diffProjectLibraryAssetVersions,
 	listProjectLibraryVersionFiles
 } from '$lib/api/client';
-	import {
-		projectState,
-		activeProject,
-		activeProjectRuns,
-		activeProjectLibrary,
-		activeProjectOverview
-	} from '$lib/stores/project';
+import { projectState, activeProject, activeProjectRuns, activeProjectOverview } from '$lib/stores/project';
 	import { notifyError, notifySuccess } from '$lib/stores/notifications';
 
 	const { data } = $props();
@@ -59,49 +53,37 @@ type ArtifactIndexCacheEntry = ReturnType<typeof projectState.getCachedArtifactI
 const projects = $derived($projectState.projects as ProjectSummary[]);
 const activeProjectValue = $derived($activeProject as ProjectDetail | null);
 const projectRuns = $derived($activeProjectRuns as ProjectRunSummary[]);
-const libraryCache = $derived(() => {
-	const project = activeProjectValue;
-	if (!project) {
-		return null;
-	}
-	return $projectState.library[project.id] ?? null;
-});
-const libraryAssets = $derived(libraryCache?.assets ?? []);
-const libraryAssetTypes = $derived(() => {
-	const values = Array.from(new Set((libraryAssets ?? []).map((asset) => asset.asset_type))).filter(Boolean);
-	return values.sort((a, b) => a.localeCompare(b));
-});
-const libraryGeneratorTags = $derived(() => {
-	const tags = new Set<string>();
-	for (const asset of libraryAssets ?? []) {
-		for (const tag of asset.tags ?? []) {
-			if (typeof tag === 'string' && tag.startsWith('generator:')) {
-				tags.add(tag.replace(/^generator:/, ''));
+const libraryCache = $derived<LibraryCacheEntry>(
+	(() => {
+		const project = activeProjectValue;
+		if (!project) {
+			return null;
+		}
+		return $projectState.library[project.id] ?? null;
+	})()
+);
+const libraryAssets = $derived<GeneratedAssetSummary[]>(libraryCache?.assets ?? []);
+const libraryAssetTypes = $derived<string[]>(
+	(() => {
+		const values = Array.from(new Set(libraryAssets.map((asset) => asset.asset_type))).filter(
+			(value): value is string => Boolean(value)
+		);
+		return values.sort((a, b) => a.localeCompare(b));
+	})()
+);
+const libraryGeneratorTags = $derived<string[]>(
+	(() => {
+		const tags = new Set<string>();
+		for (const asset of libraryAssets) {
+			for (const tag of asset.tags ?? []) {
+				if (typeof tag === 'string' && tag.startsWith('generator:')) {
+					tags.add(tag.replace(/^generator:/, ''));
+				}
 			}
 		}
-	}
-	return Array.from(tags).sort((a, b) => a.localeCompare(b));
-});
-const filteredLibraryAssets = $derived(() => {
-	if (!libraryAssets) {
-		return [];
-	}
-	const generatorFilter = libraryGeneratorFilter;
-	return libraryAssets.filter((asset) => {
-		const matchesType = libraryTypeFilter === 'all' || asset.asset_type === libraryTypeFilter;
-		if (!matchesType) {
-			return false;
-		}
-		if (generatorFilter === 'all') {
-			return true;
-		}
-		const slugs =
-			asset.tags
-				?.filter((tag) => typeof tag === 'string' && tag.startsWith('generator:'))
-				.map((tag) => tag.replace(/^generator:/, '')) ?? [];
-		return slugs.includes(generatorFilter);
-	});
-});
+		return Array.from(tags).sort((a, b) => a.localeCompare(b));
+	})()
+);
 const overview = $derived($activeProjectOverview as ProjectOverview | null);
 
 let runCache = $state<RunsCacheEntry>(null);
@@ -122,7 +104,26 @@ let createError = $state<string | null>(null);
 let createBusy = $state(false);
 let libraryTypeFilter = $state('all');
 let libraryGeneratorFilter = $state('all');
-const libraryTypeOptions = $derived(() => ['all', ...libraryAssetTypes]);
+const libraryTypeOptions = $derived<string[]>(['all', ...libraryAssetTypes]);
+const filteredLibraryAssets = $derived<GeneratedAssetSummary[]>(
+	(() => {
+		const generatorFilter = libraryGeneratorFilter;
+		return libraryAssets.filter((asset) => {
+			const matchesType = libraryTypeFilter === 'all' || asset.asset_type === libraryTypeFilter;
+			if (!matchesType) {
+				return false;
+			}
+			if (generatorFilter === 'all') {
+				return true;
+			}
+			const slugs =
+				asset.tags
+					?.filter((tag) => typeof tag === 'string' && tag.startsWith('generator:'))
+					.map((tag) => tag.replace(/^generator:/, '')) ?? [];
+			return slugs.includes(generatorFilter);
+		});
+	})()
+);
 
 	let editName = $state('');
 	let editDescription = $state('');
@@ -927,6 +928,10 @@ let versionFileState = $state<Record<string, VersionFileState>>({});
 	};
 
 	const handleDownloadDiffText = () => {
+		if (!diffState) {
+			notifyError('No diff available to download.');
+			return;
+		}
 		const diffText = getCurrentDiffText();
 		if (!diffText) {
 			notifyError('No diff available to download.');
@@ -1007,10 +1012,11 @@ const buildSplitRows = (diffText: string): SplitRow[] => {
 };
 
 const getSelectedDiffEntry = (): GeneratedAssetDiffFileEntry | null => {
-	if (!diffState || !diffState.selectedPath) {
+	const current = diffState;
+	if (!current || !current.selectedPath) {
 		return null;
 	}
-	return diffState.files.find((file) => file.path === diffState.selectedPath) ?? null;
+	return current.files.find((file) => file.path === current.selectedPath) ?? null;
 };
 
 const getCurrentDiffText = (): string | null => {

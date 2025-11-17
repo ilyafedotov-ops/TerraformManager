@@ -44,6 +44,8 @@ type GeneratorMetadata = {
         generatorId: GeneratorId;
         summary: Record<string, unknown> | null;
         message: string | null;
+        assetName?: string | null;
+        metadata?: Record<string, unknown> | null;
     };
 
     const metadataBySlug: Record<string, GeneratorMetadata> = Object.fromEntries(
@@ -129,14 +131,19 @@ type GeneratorMetadata = {
         return result;
     };
 
-    const s3Example = metadataBySlug['aws/s3-secure-bucket']?.example_payload ?? {};
-    const storageExample = metadataBySlug['azure/storage-secure-account']?.example_payload ?? {};
+    const s3Example =
+        (metadataBySlug['aws/s3-secure-bucket']?.example_payload ?? {}) as Partial<AwsS3GeneratorPayload>;
+    const storageExample =
+        (metadataBySlug['azure/storage-secure-account']?.example_payload ?? {}) as Partial<AzureStorageGeneratorPayload>;
     const serviceBusMetadata = metadataBySlug['azure/servicebus-namespace'];
-    const serviceBusExample = serviceBusMetadata?.example_payload ?? {};
+    const serviceBusExample =
+        (serviceBusMetadata?.example_payload ?? {}) as Partial<AzureServiceBusGeneratorPayload>;
     const functionMetadata = metadataBySlug['azure/function-app'];
-    const functionExample = functionMetadata?.example_payload ?? {};
+    const functionExample =
+        (functionMetadata?.example_payload ?? {}) as Partial<AzureFunctionAppGeneratorPayload>;
     const apimMetadata = metadataBySlug['azure/api-management'];
-    const apimExample = apimMetadata?.example_payload ?? {};
+    const apimExample =
+        (apimMetadata?.example_payload ?? {}) as Partial<AzureApiManagementGeneratorPayload>;
 
 	const stringifyNamedEntries = (items: unknown): string =>
 		Array.isArray(items)
@@ -153,7 +160,7 @@ type GeneratorMetadata = {
 			: '';
 
     const metadataServiceBusPresets = (serviceBusMetadata?.presets ?? []).map((preset, index) => {
-        const payload = preset.payload ?? {};
+        const payload = (preset.payload ?? {}) as Partial<AzureServiceBusGeneratorPayload>;
         const queues = stringifyNamedEntries(payload.queues);
         const topics = stringifyNamedEntries(payload.topics);
         return {
@@ -306,50 +313,60 @@ type GeneratorMetadata = {
     const formatBoolean = (value: boolean, trueLabel = 'Enabled', falseLabel = 'Disabled') =>
         value ? trueLabel : falseLabel;
 
+    const summaryValue = (value: unknown): string => {
+        if (typeof value === 'string') return value;
+        if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+        if (value == null) return '';
+        return String(value);
+    };
+
     const getSummaryForGenerator = (id: GeneratorId): Array<{ label: string; value: string }> => {
         switch (id) {
             case 'aws_s3':
                 return [
-                    { label: 'Bucket', value: awsBucketName },
-                    { label: 'Region', value: awsRegion },
-                    { label: 'Environment', value: awsEnvironment },
-                    { label: 'Remote state', value: awsIncludeBackend ? `${awsBackendBucket}/${awsBackendKey}` : 'Disabled' },
+                    { label: 'Bucket', value: summaryValue(awsBucketName) },
+                    { label: 'Region', value: summaryValue(awsRegion) },
+                    { label: 'Environment', value: summaryValue(awsEnvironment) },
+                    {
+                        label: 'Remote state',
+                        value: summaryValue(awsIncludeBackend ? `${awsBackendBucket}/${awsBackendKey}` : 'Disabled')
+                    },
                     { label: 'Versioning', value: formatBoolean(awsVersioning) },
                     { label: 'TLS enforcement', value: formatBoolean(awsEnforceSecureTransport, 'Enforced', 'Not enforced') }
                 ];
             case 'azure_storage':
                 return [
-                    { label: 'Storage account', value: azureSaName },
-                    { label: 'Location', value: azureLocation },
-                    { label: 'Environment', value: azureEnvironment },
-                    { label: 'Replication', value: azureReplication },
+                    { label: 'Storage account', value: summaryValue(azureSaName) },
+                    { label: 'Location', value: summaryValue(azureLocation) },
+                    { label: 'Environment', value: summaryValue(azureEnvironment) },
+                    { label: 'Replication', value: summaryValue(azureReplication) },
                     { label: 'Network access', value: azureRestrictNetwork ? 'Restricted' : 'Public allowed' },
                     { label: 'Private endpoint', value: formatBoolean(azureIncludePrivateEndpoint, 'Provisioned', 'Not provisioned') }
                 ];
             case 'azure_servicebus':
                 return [
-                    { label: 'Namespace', value: sbNamespace },
-                    { label: 'Location', value: sbLocation },
-                    { label: 'SKU', value: sbSku },
+                    { label: 'Namespace', value: summaryValue(sbNamespace) },
+                    { label: 'Location', value: summaryValue(sbLocation) },
+                    { label: 'SKU', value: summaryValue(sbSku) },
                     { label: 'Queues', value: `${parseList(sbQueueNames).length} configured` },
                     { label: 'Topics', value: `${parseList(sbTopicNames).length} configured` },
                     { label: 'Private endpoint', value: formatBoolean(sbPrivateEndpointEnabled, 'Enabled', 'Disabled') }
                 ];
             case 'azure_function_app':
                 return [
-                    { label: 'Function App', value: funcAppName },
+                    { label: 'Function App', value: summaryValue(funcAppName) },
                     { label: 'Runtime', value: `${funcRuntime} ${funcRuntimeVersion}` },
-                    { label: 'Plan SKU', value: funcSku },
+                    { label: 'Plan SKU', value: summaryValue(funcSku) },
                     { label: 'Application Insights', value: formatBoolean(funcEnableInsights) },
                     { label: 'VNet integration', value: formatBoolean(funcEnableVnet, 'Attached', 'Not attached') }
                 ];
             case 'azure_api_management':
                 return [
-                    { label: 'API Management', value: apimName },
-                    { label: 'Location', value: apimLocation },
-                    { label: 'SKU', value: apimSku },
-                    { label: 'Capacity', value: apimCapacity || 'Default (1)' },
-                    { label: 'Virtual network', value: apimVnetType },
+                    { label: 'API Management', value: summaryValue(apimName) },
+                    { label: 'Location', value: summaryValue(apimLocation) },
+                    { label: 'SKU', value: summaryValue(apimSku) },
+                    { label: 'Capacity', value: summaryValue(apimCapacity || 'Default (1)') },
+                    { label: 'Virtual network', value: summaryValue(apimVnetType) },
                     { label: 'Diagnostics', value: formatBoolean(apimDiagnosticsEnabled) }
                 ];
             default:
@@ -681,14 +698,15 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
             sbTopicNames = preset.topics;
         }
         if (preset.payload) {
-            if (preset.payload.sku) {
-                sbSku = preset.payload.sku;
+            const payload = preset.payload as Partial<AzureServiceBusGeneratorPayload>;
+            if (payload.sku) {
+                sbSku = payload.sku;
             }
-            if (preset.payload.restrict_network !== undefined) {
-                sbRestrictNetwork = Boolean(preset.payload.restrict_network);
+            if (payload.restrict_network !== undefined) {
+                sbRestrictNetwork = Boolean(payload.restrict_network);
             }
-            if (preset.payload.zone_redundant !== undefined) {
-                sbZoneRedundant = Boolean(preset.payload.zone_redundant);
+            if (payload.zone_redundant !== undefined) {
+                sbZoneRedundant = Boolean(payload.zone_redundant);
             }
         }
         if (presetId !== 'custom') {
@@ -724,7 +742,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 return;
             }
             const response = await runProjectGenerator(fetch, context.token, context.project.id, 'aws/s3-secure-bucket', {
-                payload,
+                payload: payload as unknown as Record<string, unknown>,
                 options: {
                     run_label: `${generatorLabels.aws_s3} • ${new Date().toLocaleString()}`,
                     force_save: forceSave
@@ -738,6 +756,9 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 awsStatus = 'Terraform validation failed.';
                 notifyError(details ?? 'Terraform validation failed in the API. Adjust inputs or run locally for details.');
                 generatorOverride = {
+                    generatorId: 'aws_s3',
+                    summary: response.version.validation_summary ?? null,
+                    message: details ?? 'Terraform validation failed.',
                     assetName: payload.bucket_name,
                     metadata: {
                         generator: 'aws_s3-secure-bucket',
@@ -803,7 +824,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 return;
             }
             const response = await runProjectGenerator(fetch, context.token, context.project.id, 'azure/storage-secure-account', {
-                payload,
+                payload: payload as unknown as Record<string, unknown>,
                 options: {
                     run_label: `${generatorLabels.azure_storage} • ${new Date().toLocaleString()}`,
                     force_save: forceSave
@@ -817,6 +838,9 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 azureStatus = 'Terraform validation failed.';
                 notifyError(details ?? 'Terraform validation failed in the API. Adjust inputs or run locally for details.');
                 generatorOverride = {
+                    generatorId: 'azure_storage',
+                    summary: response.version.validation_summary ?? null,
+                    message: details ?? 'Terraform validation failed.',
                     assetName: payload.storage_account_name,
                     metadata: {
                         generator: 'azure/storage-secure-account',
@@ -892,7 +916,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 return;
             }
             const response = await runProjectGenerator(fetch, context.token, context.project.id, 'azure/servicebus-namespace', {
-                payload,
+                payload: payload as unknown as Record<string, unknown>,
                 options: {
                     run_label: `${generatorLabels.azure_servicebus} • ${new Date().toLocaleString()}`,
                     force_save: forceSave
@@ -906,6 +930,9 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 sbStatus = 'Terraform validation failed.';
                 notifyError(details ?? 'Terraform validation failed in the API. Adjust inputs or run locally for details.');
                 generatorOverride = {
+                    generatorId: 'azure_servicebus',
+                    summary: response.version.validation_summary ?? null,
+                    message: details ?? 'Terraform validation failed.',
                     assetName: payload.namespace_name,
                     metadata: {
                         generator: 'azure/servicebus-namespace',
@@ -963,7 +990,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 return;
             }
             const response = await runProjectGenerator(fetch, context.token, context.project.id, 'azure/function-app', {
-                payload,
+                payload: payload as unknown as Record<string, unknown>,
                 options: {
                     run_label: `${generatorLabels.azure_function_app} • ${new Date().toLocaleString()}`,
                     force_save: forceSave
@@ -977,6 +1004,9 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 funcStatus = 'Terraform validation failed.';
                 notifyError(details ?? 'Terraform validation failed in the API. Adjust inputs or run locally for details.');
                 generatorOverride = {
+                    generatorId: 'azure_function_app',
+                    summary: response.version.validation_summary ?? null,
+                    message: details ?? 'Terraform validation failed.',
                     assetName: payload.function_app_name,
                     metadata: {
                         generator: 'azure/function-app',
@@ -1039,7 +1069,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 return;
             }
             const response = await runProjectGenerator(fetch, context.token, context.project.id, 'azure/api-management', {
-                payload,
+                payload: payload as unknown as Record<string, unknown>,
                 options: {
                     run_label: `${generatorLabels.azure_api_management} • ${new Date().toLocaleString()}`,
                     force_save: forceSave
@@ -1053,6 +1083,9 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 apimStatus = 'Terraform validation failed.';
                 notifyError(details ?? 'Terraform validation failed in the API. Adjust inputs or run locally for details.');
                 generatorOverride = {
+                    generatorId: 'azure_api_management',
+                    summary: response.version.validation_summary ?? null,
+                    message: details ?? 'Terraform validation failed.',
                     assetName: payload.name,
                     metadata: {
                         generator: 'azure/api-management',

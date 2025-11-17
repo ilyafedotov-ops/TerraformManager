@@ -137,6 +137,7 @@ Goal: simplify the entire product around a single “Project” hub so users can
   - 🔄 Added `frontend/src/lib/api/knowledge.ts` plus a dashboard knowledge panel that queries `/knowledge/search` using project metadata + generator tags, surfacing tailored remediation docs directly within each project workspace.
 - [ ] Add guided toasts/checklists for high-value actions (e.g., drift detected → run review). Use the shared notification store for consistent messaging.
 - [ ] Offer embedded help modals describing CLI equivalents and manual verification steps, populated from `docs/` or `knowledge/`.
+  - 🔄 Project dashboard now ships with a CLI help modal featuring curated `backend.cli` snippets plus a manual verification checklist sourced from `knowledge/cli-workspace-workflows.md`.
 
 ### Phase 7 – Testing, Documentation, and Rollout
 - [ ] Expand backend pytest coverage for new project endpoints/storage plus CLI integration tests ensuring artifacts land in project folders.
