@@ -75,8 +75,23 @@ TerraformManager emits structured JSON logs via `backend/utils/logging.py`. By d
 | `TFM_PORT` / `PORT` | `8890` | Backend bind port (supervisor + frontend detection honor it). |
 | `PUBLIC_API_BASE` | auto-detected | Force the frontend to hit a specific API origin (e.g., `https://reviewer.example.com`). |
 | `PUBLIC_API_PORT` | derived from `TFM_PORT` | When auto-detecting, override just the port exposed by the API. |
+| `TFM_ALLOWED_ORIGINS` | local dev hosts | Comma-separated dashboard origins allowed when browsers send credentialed requests. |
+| `TFM_TRUSTED_HOSTS` | unset | Optional comma-separated hostnames/patterns enforced via FastAPI's `TrustedHostMiddleware`. |
 
 The log payload already carries request IDs, HTTP metadata, scan summaries, etc. Ship them to your aggregator by tailing `logs/terraform-manager.log` with Fluent Bit/Vector/Logstash or by binding `stdout` into your container logging pipeline. All JSON lines conform to a stable schema: `timestamp`, `level`, `logger`, `message`, and nested `context` / `extra` dictionaries.
+
+### API origin policy
+
+When the frontend is deployed on a different domain, browsers include cookies and bearer tokens in cross-origin calls only if the API explicitly allows the requesting origin. TerraformManager now reads `TFM_ALLOWED_ORIGINS` (comma-delimited) before wiring FastAPI's CORS middleware; the default covers local SvelteKit hosts (`http://localhost:5173`, `http://127.0.0.1:5173`, etc.). Override it in production so only your dashboard URLs receive credentialed responses:
+
+```bash
+export TFM_ALLOWED_ORIGINS="https://reviewer.example.com, https://ops.example.com"
+
+# Optional: reject requests whose Host header is not on this list
+export TFM_TRUSTED_HOSTS="reviewer.example.com, api.review.example.com"
+```
+
+Restart the API after changing these variables. If you expose the API publicly (e.g., via a load balancer), keep the allowlist tight so browsers cannot relay credentials from other origins.
 
 **Common tasks**
 
