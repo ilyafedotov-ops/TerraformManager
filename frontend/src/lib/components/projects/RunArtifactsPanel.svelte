@@ -4,6 +4,8 @@ import { onMount } from 'svelte';
 import { downloadRunArtifact, type ArtifactEntry, type ProjectRunSummary } from '$lib/api/client';
 import { notifyError, notifySuccess } from '$lib/stores/notifications';
 import { activeProject, activeProjectRuns, activeProjectLibrary, projectState } from '$lib/stores/project';
+import ArtifactPreviewPane from '$lib/components/artifacts/ArtifactPreviewPane.svelte';
+import ArtifactDiffViewer from '$lib/components/artifacts/ArtifactDiffViewer.svelte';
 
 interface Props {
 	token: string | null;
@@ -589,13 +591,22 @@ const textLikeContentTypes = ['text/', 'application/json', 'application/x-yaml',
 		return nonPrintable / limit < 0.1;
 	};
 
-	const findPreviousRunId = () => {
-		if (!selectedRunId) return null;
-		const index = projectRuns.findIndex((run) => run.id === selectedRunId);
-		if (index === -1) return null;
-		const candidate = projectRuns[index + 1];
-		return candidate?.id ?? null;
-	};
+const findPreviousRunId = () => {
+	if (!selectedRunId) return null;
+	const index = projectRuns.findIndex((run) => run.id === selectedRunId);
+	if (index === -1) return null;
+	const candidate = projectRuns[index + 1];
+	return candidate?.id ?? null;
+};
+
+const findRunLabel = (runId: string | null) => {
+	if (!runId) return null;
+	const match = projectRuns.find((run) => run.id === runId);
+	return match?.label ?? null;
+};
+
+const currentRunLabel = $derived(findRunLabel(selectedRunId));
+const previousRunLabel = $derived(findRunLabel(previousRunId));
 
 	const fetchArtifactText = async (runId: string, path: string) => {
 		if (!token || !activeProjectValue) {
@@ -1124,5 +1135,31 @@ const textLikeContentTypes = ['text/', 'application/json', 'application/x-yaml',
 				</div>
 			</form>
 		</div>
+	</div>
+
+	<div class="mt-6 grid gap-4 lg:grid-cols-2">
+		<ArtifactPreviewPane
+			label={`Current run · ${currentRunLabel ?? 'selected'}`}
+			content={previewContent}
+			loading={previewLoading}
+			error={previewError}
+		/>
+		<ArtifactPreviewPane
+			label={`Previous run · ${previousRunLabel ?? 'n/a'}`}
+			content={previousContent}
+			loading={previousLoading}
+			error={previousError}
+		/>
+	</div>
+
+	<div class="mt-6">
+		<ArtifactDiffViewer
+			currentKey={currentRunLabel ?? 'current'}
+			currentContent={previewContent}
+			previousKey={previousRunLabel ?? 'previous'}
+			previousContent={previousContent}
+			loading={previewLoading || previousLoading}
+			error={previewError ?? previousError}
+		/>
 	</div>
 {/if}
