@@ -133,11 +133,11 @@ Goal: simplify the entire product around a single “Project” hub so users can
 - [ ] Provide inline diff/file-browser components for run artifacts, referencing helper components under `frontend/src/lib/components/artifacts/`.
 
 ### Phase 6 – Knowledge, Guidance, and Notifications
-- [ ] Surface contextual knowledge articles linked to the project’s generator/policy tags; update `frontend/src/lib/api/knowledge.ts` to filter by project metadata.
+- [x] Surface contextual knowledge articles linked to the project’s generator/policy tags; update `frontend/src/lib/api/knowledge.ts` to filter by project metadata.
   - 🔄 Added `frontend/src/lib/api/knowledge.ts` plus a dashboard knowledge panel that queries `/knowledge/search` using project metadata + generator tags, surfacing tailored remediation docs directly within each project workspace.
-- [ ] Add guided toasts/checklists for high-value actions (e.g., drift detected → run review). Use the shared notification store for consistent messaging.
+- [x] Add guided toasts/checklists for high-value actions (e.g., drift detected → run review). Use the shared notification store for consistent messaging.
   - 🔄 Dashboard now triggers toast guidance whenever the latest run reports drift or open findings, nudging reviewers toward the Review tab.
-- [ ] Offer embedded help modals describing CLI equivalents and manual verification steps, populated from `docs/` or `knowledge/`.
+- [x] Offer embedded help modals describing CLI equivalents and manual verification steps, populated from `docs/` or `knowledge/`.
   - 🔄 Project dashboard now ships with a CLI help modal featuring curated `backend.cli` snippets plus a manual verification checklist sourced from `knowledge/cli-workspace-workflows.md`.
 
 ### Phase 7 – Testing, Documentation, and Rollout
