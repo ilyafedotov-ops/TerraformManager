@@ -23,10 +23,13 @@ from backend.auth import auth_settings
 from backend.generators.docs import generate_docs
 from backend.storage import (
     create_project,
-    list_projects,
-    list_project_runs,
     create_project_run,
+    get_project,
+    list_project_runs,
+    list_projects,
     list_run_artifacts,
+    save_run_artifact,
+    update_project_run,
 )
 
 
@@ -81,6 +84,28 @@ def _load_json_payload(value: str) -> Dict[str, Any]:
         return json.loads(value)
     except Exception as exc:  # noqa: BLE001
         raise ValueError(f"failed to parse JSON payload: {exc}") from exc
+
+
+def _resolve_project_reference(project_id: str | None, project_slug: str | None) -> Dict[str, Any]:
+    if not project_id and not project_slug:
+        raise ValueError("project_id or project_slug is required")
+    project = get_project(project_id=project_id, slug=project_slug)
+    if not project:
+        identifier = project_id or project_slug or "<unknown>"
+        raise ValueError(f"project '{identifier}' not found")
+    return project
+
+
+def _save_run_artifact_from_path(
+    project_id: str,
+    run_id: str,
+    source: Path,
+    relative_path: str,
+) -> None:
+    if not source.exists() or not source.is_file():
+        return
+    data = source.read_bytes()
+    save_run_artifact(project_id, run_id, path=relative_path, data=data)
 
 
 def _print_json(data: Any) -> None:
@@ -297,6 +322,23 @@ def main() -> None:
         "--html-out",
         help="Optional file path to write an HTML summary report",
     )
+    project_group = scan.add_argument_group("Project logging")
+    project_ref = project_group.add_mutually_exclusive_group()
+    project_ref.add_argument("--project-id", help="Log this scan under the specified project id")
+    project_ref.add_argument("--project-slug", help="Log this scan under the specified project slug")
+    project_group.add_argument(
+        "--project-run-label",
+        help="Custom label for the run entry (defaults to a timestamped label)",
+    )
+    project_group.add_argument(
+        "--project-run-kind",
+        default="review",
+        help="Run kind label when logging scans (default: review)",
+    )
+    project_group.add_argument(
+        "--project-run-metadata",
+        help="Inline JSON or path to JSON merged into logged run parameters",
+    )
     scan.add_argument(
         "--llm",
         choices=("off", "openai", "azure"),
@@ -468,6 +510,31 @@ def main() -> None:
                 logger.warning("Unable to update credential file %s", credentials_file)
 
         paths = [Path(p) for p in args.path]
+        project_record: Dict[str, Any] | None = None
+        project_run_parameters: Dict[str, Any] | None = None
+        if args.project_id or args.project_slug:
+            try:
+                project_record = _resolve_project_reference(args.project_id, args.project_slug)
+            except ValueError as exc:
+                logger.error(str(exc))
+                sys.exit(1)
+            metadata_payload: Dict[str, Any] = {}
+            if args.project_run_metadata:
+                try:
+                    metadata_payload = _load_json_payload(args.project_run_metadata)
+                except ValueError as exc:
+                    logger.error("Invalid JSON for --project-run-metadata: %s", exc)
+                    sys.exit(1)
+            project_run_parameters = {
+                "paths": [str(p) for p in paths],
+                "terraform_validate": args.terraform_validate,
+                "terraform_fmt": "write"
+                if args.terraform_fmt_write
+                else ("check" if args.terraform_fmt else "skip"),
+                "cost": args.cost,
+                "plan_json": args.plan_json,
+            }
+            project_run_parameters.update(metadata_payload)
         if args.terraform_fmt or args.terraform_fmt_write:
             fmt_targets = _collect_fmt_targets(paths)
             _run_terraform_fmt(fmt_targets, write=args.terraform_fmt_write, logger=logger)
@@ -525,6 +592,8 @@ def main() -> None:
         _ensure_parent(out_path)
         out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
         print(f"Wrote {args.out}")
+        generated_artifacts: List[tuple[Path, str]] = []
+        generated_artifacts.append((out_path, f"reports/{out_path.name}"))
 
         if args.patch_out:
             patches = collect_patches(report.get("findings", []))
@@ -533,6 +602,7 @@ def main() -> None:
                 _ensure_parent(patch_path)
                 patch_path.write_text(format_patch_bundle(patches), encoding="utf-8")
                 print(f"Wrote autofix patch bundle to {args.patch_out}")
+                generated_artifacts.append((patch_path, f"reports/{patch_path.name}"))
             else:
                 print("No autofixable findings with diffs; no patch bundle created.")
 
@@ -541,7 +611,28 @@ def main() -> None:
             _ensure_parent(html_path)
             html_path.write_text(render_html_report(report), encoding="utf-8")
             print(f"Wrote HTML report to {args.html_out}")
+            generated_artifacts.append((html_path, f"reports/{html_path.name}"))
 
+        if project_record:
+            run_label = args.project_run_label or f"CLI scan {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}"
+            run = create_project_run(
+                project_id=project_record["id"],
+                label=run_label,
+                kind=args.project_run_kind or "review",
+                parameters=project_run_parameters or {},
+            )
+            summary_payload = dict(report.get("summary", {}))
+            summary_payload["artifacts"] = [rel for _, rel in generated_artifacts]
+            update_project_run(
+                run_id=run["id"],
+                project_id=project_record["id"],
+                status="completed",
+                summary=summary_payload,
+                finished_at=datetime.now(timezone.utc),
+            )
+            for artifact_path, relative in generated_artifacts:
+                _save_run_artifact_from_path(project_record["id"], run["id"], artifact_path, relative)
+            print(f"Logged run {run['id']} under project {project_record['name']}")
         thresholds = report.get("summary", {}).get("thresholds", {})
         if thresholds.get("triggered"):
             violated = ", ".join(thresholds.get("violated_ids", []))
