@@ -6,6 +6,11 @@ import {
 	type GeneratedAssetSummary,
 	type GeneratedAssetVersionCreatePayload,
 	type GeneratedAssetUpdatePayload,
+	type ProjectArtifactRecord,
+	type ProjectArtifactUpdatePayload,
+	type ProjectConfigCreatePayload,
+	type ProjectConfigRecord,
+	type ProjectConfigUpdatePayload,
 	type ProjectCreatePayload,
 	type ProjectDetail,
 	type ProjectRunCreatePayload,
@@ -13,23 +18,31 @@ import {
 	type ProjectSummary,
 	type ProjectOverview,
 	type ProjectUpdatePayload,
+	addProjectLibraryAssetVersion as apiAddProjectLibraryAssetVersion,
 	createProject as apiCreateProject,
+	createProjectConfig as apiCreateProjectConfig,
 	createProjectRun as apiCreateProjectRun,
+	deleteProject as apiDeleteProject,
+	deleteProjectConfig as apiDeleteProjectConfig,
+	deleteProjectLibraryAsset as apiDeleteProjectLibraryAsset,
+	deleteProjectLibraryAssetVersion as apiDeleteProjectLibraryAssetVersion,
+	deleteRunArtifact as apiDeleteRunArtifact,
+	getProjectConfig as apiGetProjectConfig,
+	getProjectLibraryAsset as apiGetProjectLibraryAsset,
+	getProjectOverview as apiGetProjectOverview,
+	listProjectArtifacts as apiListProjectArtifacts,
+	listProjectConfigs as apiListProjectConfigs,
+	listProjectLibrary as apiListProjectLibrary,
 	listProjectRuns as apiListProjectRuns,
 	listProjects as apiListProjects,
 	listRunArtifacts as apiListRunArtifacts,
-	uploadRunArtifact as apiUploadRunArtifact,
-	deleteRunArtifact as apiDeleteRunArtifact,
-	updateProject as apiUpdateProject,
-	deleteProject as apiDeleteProject,
-	listProjectLibrary as apiListProjectLibrary,
 	registerProjectLibraryAsset as apiRegisterProjectLibraryAsset,
-	addProjectLibraryAssetVersion as apiAddProjectLibraryAssetVersion,
-	deleteProjectLibraryAssetVersion as apiDeleteProjectLibraryAssetVersion,
-	deleteProjectLibraryAsset as apiDeleteProjectLibraryAsset,
-	getProjectLibraryAsset as apiGetProjectLibraryAsset,
+	syncProjectRunArtifacts as apiSyncProjectRunArtifacts,
+	updateProject as apiUpdateProject,
+	updateProjectArtifact as apiUpdateProjectArtifact,
+	updateProjectConfig as apiUpdateProjectConfig,
 	updateProjectLibraryAsset as apiUpdateProjectLibraryAsset,
-	getProjectOverview as apiGetProjectOverview
+	uploadRunArtifact as apiUploadRunArtifact
 } from '$lib/api/client';
 
 type FetchFn = typeof fetch;
@@ -61,6 +74,21 @@ interface ProjectOverviewCacheEntry {
 	fetchedAt: string;
 }
 
+interface ProjectConfigCacheEntry {
+	items: ProjectConfigRecord[];
+	includePayload: boolean;
+	fetchedAt: string;
+}
+
+interface ProjectArtifactIndexEntry {
+	projectId: string;
+	runId: string | null;
+	items: ProjectArtifactRecord[];
+	nextCursor: string | null;
+	totalCount: number;
+	fetchedAt: string;
+}
+
 interface ProjectState {
 	projects: ProjectSummary[];
 	activeProjectId: string | null;
@@ -68,6 +96,8 @@ interface ProjectState {
 	artifacts: Record<string, ArtifactCacheEntry>;
 	library: Record<string, ProjectLibraryCacheEntry>;
 	overview: Record<string, ProjectOverviewCacheEntry>;
+	configs: Record<string, ProjectConfigCacheEntry>;
+	artifactIndex: Record<string, ProjectArtifactIndexEntry>;
 	loading: boolean;
 	error: string | null;
 }
@@ -79,6 +109,8 @@ const initialState: ProjectState = {
 	artifacts: {},
 	library: {},
 	overview: {},
+	configs: {},
+	artifactIndex: {},
 	loading: false,
 	error: null
 };
@@ -87,6 +119,9 @@ const makeArtifactKey = (runId: string, path = ''): string => {
 	const normalised = !path || path === '.' ? '.' : path.replace(/^(\.\/|\/)+/, '').trim() || '.';
 	return `${runId}::${normalised}`;
 };
+
+const makeProjectArtifactIndexKey = (projectId: string, runId: string | null = null): string =>
+	`${projectId}::${runId ?? 'all'}`;
 
 const extractDirectory = (path: string): string => {
 	const cleaned = path.replace(/\\/g, '/').replace(/^(\.\/|\/)+/, '');
@@ -158,9 +193,13 @@ function createProjectStore() {
 				const overview = Object.fromEntries(
 					Object.entries(state.overview).filter(([key]) => key !== projectId)
 				);
+				const configs = Object.fromEntries(Object.entries(state.configs).filter(([key]) => key !== projectId));
+				const artifactIndex = Object.fromEntries(
+					Object.entries(state.artifactIndex).filter(([, entry]) => entry.projectId !== projectId)
+				);
 				const activeProjectId =
 					state.activeProjectId === projectId ? (projects[0]?.id ?? null) : state.activeProjectId;
-				return { ...state, projects, runs, artifacts, library, overview, activeProjectId };
+				return { ...state, projects, runs, artifacts, library, overview, configs, artifactIndex, activeProjectId };
 			});
 		},
 		setRuns(projectId: string, runs: ProjectRunSummary[]) {
@@ -237,6 +276,12 @@ function createProjectStore() {
 	},
 	getCachedOverview(projectId: string) {
 		return currentState.overview[projectId] ?? null;
+	},
+	getCachedConfigs(projectId: string) {
+		return currentState.configs[projectId] ?? null;
+	},
+	getCachedArtifactIndex(projectId: string, runId: string | null = null) {
+		return currentState.artifactIndex[makeProjectArtifactIndexKey(projectId, runId)] ?? null;
 	},
 		clearLibrary(projectId?: string) {
 			if (!projectId) {
@@ -341,6 +386,135 @@ function createProjectStore() {
 					loading: false
 				}));
 				return overview;
+			} catch (error) {
+				const message = normaliseError(error);
+				update((state) => ({ ...state, loading: false, error: message }));
+				throw error;
+			}
+		},
+		async loadConfigs(fetchFn: FetchFn, token: string, projectId: string, includePayload = true) {
+			update((state) => ({ ...state, loading: true, error: null }));
+			try {
+				const configs = await apiListProjectConfigs(fetchFn, token, projectId, { includePayload });
+				update((state) => ({
+					...state,
+					configs: {
+						...state.configs,
+						[projectId]: {
+							items: configs,
+							includePayload,
+							fetchedAt: new Date().toISOString()
+						}
+					},
+					loading: false
+				}));
+				return configs;
+			} catch (error) {
+				const message = normaliseError(error);
+				update((state) => ({ ...state, loading: false, error: message }));
+				throw error;
+			}
+		},
+		async createProjectConfig(
+			fetchFn: FetchFn,
+			token: string,
+			projectId: string,
+			payload: ProjectConfigCreatePayload
+		) {
+			update((state) => ({ ...state, loading: true, error: null }));
+			try {
+				const created = await apiCreateProjectConfig(fetchFn, token, projectId, payload);
+				update((state) => {
+					const cache = state.configs[projectId];
+					const items = cache?.items ?? [];
+					return {
+						...state,
+						configs: {
+							...state.configs,
+							[projectId]: {
+								items: [created, ...items.filter((item) => item.id !== created.id)],
+								includePayload: cache?.includePayload ?? true,
+								fetchedAt: new Date().toISOString()
+							}
+						},
+						loading: false
+					};
+				});
+				return created;
+			} catch (error) {
+				const message = normaliseError(error);
+				update((state) => ({ ...state, loading: false, error: message }));
+				throw error;
+			}
+		},
+		async updateProjectConfig(
+			fetchFn: FetchFn,
+			token: string,
+			projectId: string,
+			configId: string,
+			payload: ProjectConfigUpdatePayload
+		) {
+			update((state) => ({ ...state, loading: true, error: null }));
+			try {
+				let record: ProjectConfigRecord | null = null;
+				if (!currentState.configs[projectId]?.includePayload && payload.payload === undefined) {
+					record = await apiGetProjectConfig(fetchFn, token, projectId, configId, { includePayload: true });
+				}
+				const updated =
+					record ??
+					(await apiUpdateProjectConfig(fetchFn, token, projectId, configId, payload));
+				update((state) => {
+					const cache = state.configs[projectId];
+					const items = cache?.items ?? [];
+					const nextItems = items.some((item) => item.id === updated.id)
+						? items.map((item) => (item.id === updated.id ? updated : item))
+						: [updated, ...items];
+					return {
+						...state,
+						configs: {
+							...state.configs,
+							[projectId]: {
+								items: nextItems,
+								includePayload: cache?.includePayload ?? true,
+								fetchedAt: new Date().toISOString()
+							}
+						},
+						loading: false
+					};
+				});
+				return updated;
+			} catch (error) {
+				const message = normaliseError(error);
+				update((state) => ({ ...state, loading: false, error: message }));
+				throw error;
+			}
+		},
+		async deleteProjectConfig(fetchFn: FetchFn, token: string, projectId: string, configId: string) {
+			update((state) => ({ ...state, loading: true, error: null }));
+			try {
+				await apiDeleteProjectConfig(fetchFn, token, projectId, configId);
+				update((state) => {
+					const cache = state.configs[projectId];
+					if (!cache) {
+						return { ...state, loading: false };
+					}
+					const items = cache.items.filter((item) => item.id !== configId);
+					const nextConfigs = { ...state.configs };
+					if (items.length) {
+						nextConfigs[projectId] = {
+							items,
+							includePayload: cache.includePayload,
+							fetchedAt: new Date().toISOString()
+						};
+					} else {
+						delete nextConfigs[projectId];
+					}
+					return {
+						...state,
+						configs: nextConfigs,
+						loading: false
+					};
+				});
 			} catch (error) {
 				const message = normaliseError(error);
 				update((state) => ({ ...state, loading: false, error: message }));
@@ -595,6 +769,145 @@ function createProjectStore() {
 			throw error;
 		}
 	},
+	async loadProjectArtifactIndex(
+		fetchFn: FetchFn,
+		token: string,
+		projectId: string,
+		options: { runId?: string | null; limit?: number } = {}
+	) {
+		update((state) => ({ ...state, loading: true, error: null }));
+		try {
+			const runFilter = options.runId ?? null;
+			const response = await apiListProjectArtifacts(fetchFn, token, projectId, {
+				runId: runFilter ?? undefined,
+				limit: options.limit
+			});
+			const key = makeProjectArtifactIndexKey(projectId, runFilter);
+			update((state) => ({
+				...state,
+				artifactIndex: {
+					...state.artifactIndex,
+					[key]: {
+						projectId,
+						runId: runFilter,
+						items: response.items,
+						nextCursor: response.nextCursor ?? null,
+						totalCount: response.totalCount,
+						fetchedAt: new Date().toISOString()
+					}
+				},
+				loading: false
+			}));
+			return response.items;
+		} catch (error) {
+			const message = normaliseError(error);
+			update((state) => ({ ...state, loading: false, error: message }));
+			throw error;
+		}
+	},
+	async loadMoreProjectArtifactIndex(
+		fetchFn: FetchFn,
+		token: string,
+		projectId: string,
+		options: { runId?: string | null; limit?: number } = {}
+	) {
+		const runFilter = options.runId ?? null;
+		const key = makeProjectArtifactIndexKey(projectId, runFilter);
+		const cache = currentState.artifactIndex[key];
+		if (!cache?.nextCursor) {
+			return [] as ProjectArtifactRecord[];
+		}
+		update((state) => ({ ...state, error: null }));
+		try {
+			const response = await apiListProjectArtifacts(fetchFn, token, projectId, {
+				runId: runFilter ?? undefined,
+				limit: options.limit,
+				cursor: cache.nextCursor ?? undefined
+			});
+			update((state) => {
+				const existing = state.artifactIndex[key];
+				const existingItems = existing?.items ?? [];
+				const existingIds = new Set(existingItems.map((item) => item.id));
+				const merged = [...existingItems, ...response.items.filter((item) => !existingIds.has(item.id))];
+				return {
+					...state,
+					artifactIndex: {
+						...state.artifactIndex,
+						[key]: {
+							projectId,
+							runId: runFilter,
+							items: merged,
+							nextCursor: response.nextCursor ?? null,
+							totalCount: response.totalCount,
+							fetchedAt: new Date().toISOString()
+						}
+					}
+				};
+			});
+			return response.items;
+		} catch (error) {
+			const message = normaliseError(error);
+			update((state) => ({ ...state, error: message }));
+			throw error;
+		}
+	},
+	async updateProjectArtifactMetadata(
+		fetchFn: FetchFn,
+		token: string,
+		projectId: string,
+		artifactId: string,
+		payload: ProjectArtifactUpdatePayload
+	) {
+		update((state) => ({ ...state, loading: true, error: null }));
+		try {
+			const updated = await apiUpdateProjectArtifact(fetchFn, token, projectId, artifactId, payload);
+			update((state) => {
+				const nextIndex = { ...state.artifactIndex };
+				for (const [key, entry] of Object.entries(nextIndex)) {
+					if (entry.projectId !== projectId) {
+						continue;
+					}
+					if (entry.runId && entry.runId !== (updated.run_id ?? null)) {
+						continue;
+					}
+					const idx = entry.items.findIndex((item) => item.id === updated.id);
+					if (idx >= 0) {
+						const items = [...entry.items];
+						items[idx] = updated;
+						nextIndex[key] = { ...entry, items, fetchedAt: new Date().toISOString() };
+					}
+				}
+				return {
+					...state,
+					artifactIndex: nextIndex,
+					loading: false
+				};
+			});
+			return updated;
+		} catch (error) {
+			const message = normaliseError(error);
+			update((state) => ({ ...state, loading: false, error: message }));
+			throw error;
+		}
+	},
+	async syncRunArtifacts(
+		fetchFn: FetchFn,
+		token: string,
+		projectId: string,
+		runId: string,
+		options: { pruneMissing?: boolean } = {}
+	) {
+		update((state) => ({ ...state, loading: true, error: null }));
+		try {
+			const result = await apiSyncProjectRunArtifacts(fetchFn, token, projectId, runId, options);
+			update((state) => ({ ...state, loading: false }));
+			return result;
+		} catch (error) {
+			const message = normaliseError(error);
+			update((state) => ({ ...state, loading: false, error: message }));
+			throw error;
+		}
+	},
 	async updateProject(fetchFn: FetchFn, token: string, projectId: string, payload: ProjectUpdatePayload) {
 		update((state) => ({ ...state, loading: true, error: null }));
 		try {
@@ -635,6 +948,10 @@ function createProjectStore() {
 				const overview = Object.fromEntries(
 					Object.entries(state.overview).filter(([key]) => key !== projectId)
 				);
+				const configs = Object.fromEntries(Object.entries(state.configs).filter(([key]) => key !== projectId));
+				const artifactIndex = Object.fromEntries(
+					Object.entries(state.artifactIndex).filter(([, entry]) => entry.projectId !== projectId)
+				);
 				const activeProjectId =
 					state.activeProjectId === projectId ? (updatedProjects[0]?.id ?? null) : state.activeProjectId;
 				return {
@@ -644,6 +961,8 @@ function createProjectStore() {
 					artifacts,
 					library,
 					overview,
+					configs,
+					artifactIndex,
 					activeProjectId,
 					loading: false
 				};

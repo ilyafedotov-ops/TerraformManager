@@ -3,13 +3,15 @@
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
-	import {
+import {
 		type GeneratedAssetSummary,
 		type GeneratedAssetVersionSummary,
 		type ProjectDetail,
 		type ProjectRunSummary,
 		type ProjectSummary,
 		type ProjectOverview,
+		type ProjectConfigRecord,
+		type ProjectArtifactRecord,
 		downloadProjectLibraryAssetVersion,
 		diffProjectLibraryAssetVersions
 	} from '$lib/api/client';
@@ -46,26 +48,26 @@
 		}
 	});
 
-	type RunsCacheEntry = ReturnType<typeof projectState.getCachedRuns>;
-	type LibraryCacheEntry = ReturnType<typeof projectState.getCachedLibrary>;
+type RunsCacheEntry = ReturnType<typeof projectState.getCachedRuns> | null;
+type LibraryCacheEntry = ReturnType<typeof projectState.getCachedLibrary> | null;
+type ConfigCacheEntry = ReturnType<typeof projectState.getCachedConfigs> | null;
+type ArtifactIndexCacheEntry = ReturnType<typeof projectState.getCachedArtifactIndex> | null;
 
 	const projects = $derived($projectState.projects as ProjectSummary[]);
 	const activeProjectValue = $derived($activeProject as ProjectDetail | null);
 	const projectRuns = $derived($activeProjectRuns as ProjectRunSummary[]);
 	const libraryAssets = $derived($activeProjectLibrary as GeneratedAssetSummary[]);
 	const overview = $derived($activeProjectOverview as ProjectOverview | null);
+	const projectConfigs = $derived(configCache?.items ?? []);
+	const projectArtifacts = $derived(artifactIndexCache?.items ?? []);
 
-	const runCache = $derived(
-		(): RunsCacheEntry =>
-			activeProjectValue ? projectState.getCachedRuns(activeProjectValue.id) : null
-	);
-	const libraryCache = $derived(
-		(): LibraryCacheEntry =>
-			activeProjectValue ? projectState.getCachedLibrary(activeProjectValue.id) : null
-	);
+let runCache = $state<RunsCacheEntry>(null);
+let libraryCache = $state<LibraryCacheEntry>(null);
+let configCache = $state<ConfigCacheEntry>(null);
+let artifactIndexCache = $state<ArtifactIndexCacheEntry>(null);
 
 	let searchQuery = $state('');
-	let activeTab = $state<'overview' | 'runs' | 'artifacts' | 'library' | 'settings'>('overview');
+let activeTab = $state<'overview' | 'runs' | 'files' | 'configs' | 'artifacts' | 'library' | 'settings'>('overview');
 	let createModalOpen = $state(false);
 
 	let createName = $state('');
@@ -89,6 +91,29 @@
 	let libraryError = $state<string | null>(null);
 	let overviewLoading = $state(false);
 	let overviewError = $state<string | null>(null);
+	let configsLoading = $state(false);
+	let configsError = $state<string | null>(null);
+	let configFormBusy = $state(false);
+	let configFormError = $state<string | null>(null);
+	let editingConfigId = $state<string | null>(null);
+	let configNameInput = $state('');
+	let configDescriptionInput = $state('');
+	let configKindInput = $state('tfreview');
+	let configRefInput = $state('');
+	let configPayloadInput = $state('');
+	let configTagsInput = $state('');
+	let configMetadataInput = $state('{\n\n}');
+	let configIsDefault = $state(false);
+let artifactRunFilter = $state('');
+	let artifactTableLoading = $state(false);
+	let artifactTableError = $state<string | null>(null);
+	let artifactEditTarget = $state<ProjectArtifactRecord | null>(null);
+	let artifactTagsInput = $state('');
+	let artifactMetadataInput = $state('{\n\n}');
+	let artifactMediaTypeInput = $state('');
+	let artifactEditBusy = $state(false);
+	let artifactEditError = $state<string | null>(null);
+	let artifactSyncBusy = $state(false);
 
 	type DiffState = {
 		assetId: string;
@@ -121,6 +146,8 @@
 	const tabs: { id: typeof activeTab; label: string }[] = [
 		{ id: 'overview', label: 'Overview' },
 		{ id: 'runs', label: 'Runs' },
+		{ id: 'files', label: 'Run files' },
+		{ id: 'configs', label: 'Configs' },
 		{ id: 'artifacts', label: 'Artifacts' },
 		{ id: 'library', label: 'Library' },
 		{ id: 'settings', label: 'Settings' }
@@ -321,6 +348,266 @@
 		}
 	};
 
+	const resetConfigForm = () => {
+		editingConfigId = null;
+		configNameInput = '';
+		configDescriptionInput = '';
+		configKindInput = 'tfreview';
+		configRefInput = '';
+		configPayloadInput = '';
+		configTagsInput = '';
+		configMetadataInput = '{\n\n}';
+		configIsDefault = false;
+		configFormError = null;
+	};
+
+	const handleEditConfig = (record: ProjectConfigRecord) => {
+		editingConfigId = record.id;
+		configNameInput = record.name;
+		configDescriptionInput = record.description ?? '';
+		configKindInput = record.kind ?? 'tfreview';
+		configRefInput = record.config_name ?? '';
+		configPayloadInput = record.payload ?? '';
+		configTagsInput = record.tags.join(', ');
+		configMetadataInput = JSON.stringify(record.metadata ?? {}, null, 2);
+		configIsDefault = record.is_default;
+		configFormError = null;
+	};
+
+	const handleConfigSubmit = async (event: SubmitEvent) => {
+		event.preventDefault();
+		const project = $activeProject as ProjectDetail | null;
+		if (!project || !token) {
+			notifyError('Select a project to manage configs.');
+			return;
+		}
+		configFormError = null;
+		const name = configNameInput.trim();
+		const kind = configKindInput.trim() || 'tfreview';
+		const configName = configRefInput.trim();
+		const payload = configPayloadInput.trim();
+		if (!name) {
+			configFormError = 'Config name is required.';
+			return;
+		}
+		if (!configName && !payload) {
+			configFormError = 'Provide either a saved config reference or inline payload.';
+			return;
+		}
+		let metadata: Record<string, unknown>;
+		try {
+			metadata = parseMetadata(configMetadataInput);
+		} catch (error) {
+			console.warn('Invalid config metadata', error);
+			configFormError = 'Metadata must be valid JSON.';
+			return;
+		}
+		const tags = configTagsInput
+			.split(',')
+			.map((tag) => tag.trim())
+			.filter(Boolean);
+
+		configFormBusy = true;
+		try {
+			if (editingConfigId) {
+				await projectState.updateProjectConfig(fetch, token, project.id, editingConfigId, {
+					name,
+					description: configDescriptionInput.trim() || undefined,
+					config_name: configName || undefined,
+					payload: payload || undefined,
+					kind,
+					tags,
+					metadata,
+					is_default: configIsDefault
+				});
+				notifySuccess('Config updated.');
+			} else {
+				await projectState.createProjectConfig(fetch, token, project.id, {
+					name,
+					description: configDescriptionInput.trim() || undefined,
+					config_name: configName || undefined,
+					payload: payload || undefined,
+					kind,
+					tags,
+					metadata,
+					is_default: configIsDefault
+				});
+				notifySuccess('Config created.');
+			}
+			resetConfigForm();
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Failed to save config.';
+			configFormError = message;
+			notifyError(message);
+		} finally {
+			configFormBusy = false;
+		}
+	};
+
+	const handleDeleteConfig = async (configId: string) => {
+		const project = $activeProject as ProjectDetail | null;
+		if (!project || !token) {
+			notifyError('Select a project to manage configs.');
+			return;
+		}
+		if (browser) {
+			const confirmed = window.confirm('Delete this project config?');
+			if (!confirmed) return;
+		}
+		configsLoading = true;
+		try {
+			await projectState.deleteProjectConfig(fetch, token, project.id, configId);
+			notifySuccess('Config deleted.');
+			if (editingConfigId === configId) {
+				resetConfigForm();
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Failed to delete config.';
+			configsError = message;
+			notifyError(message);
+		} finally {
+			configsLoading = false;
+		}
+	};
+
+	const handleReloadConfigs = async () => {
+		const project = $activeProject as ProjectDetail | null;
+		if (!project || !token) {
+			return;
+		}
+		configsLoading = true;
+		configsError = null;
+		try {
+			await projectState.loadConfigs(fetch, token, project.id);
+			notifySuccess('Configs reloaded.');
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Failed to reload configs.';
+			configsError = message;
+			notifyError(message);
+		} finally {
+			configsLoading = false;
+		}
+	};
+
+	const handleSetDefaultConfig = async (configId: string) => {
+		const project = $activeProject as ProjectDetail | null;
+		if (!project || !token) return;
+		try {
+			await projectState.updateProjectConfig(fetch, token, project.id, configId, { is_default: true });
+			notifySuccess('Default config updated.');
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Failed to update default config.';
+			notifyError(message);
+		}
+	};
+
+	const handleReloadArtifactsIndex = async () => {
+		const project = $activeProject as ProjectDetail | null;
+		if (!project || !token) return;
+		artifactTableLoading = true;
+		artifactTableError = null;
+		try {
+		await projectState.loadProjectArtifactIndex(fetch, token, project.id, { runId: artifactRunFilter || null });
+			notifySuccess('Artifacts reloaded.');
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Failed to reload artifacts.';
+			artifactTableError = message;
+			notifyError(message);
+		} finally {
+			artifactTableLoading = false;
+		}
+	};
+
+	const handleEditArtifactMetadata = (record: ProjectArtifactRecord) => {
+		artifactEditTarget = record;
+		artifactTagsInput = record.tags.join(', ');
+		artifactMetadataInput = JSON.stringify(record.metadata ?? {}, null, 2);
+		artifactMediaTypeInput = record.media_type ?? '';
+		artifactEditError = null;
+	};
+
+	const resetArtifactEdit = () => {
+		if (artifactEditBusy) return;
+		artifactEditTarget = null;
+		artifactTagsInput = '';
+		artifactMetadataInput = '{\n\n}';
+		artifactMediaTypeInput = '';
+		artifactEditError = null;
+	};
+
+	const handleArtifactMetadataSubmit = async (event: SubmitEvent) => {
+		event.preventDefault();
+		const project = $activeProject as ProjectDetail | null;
+		if (!project || !token || !artifactEditTarget) {
+			notifyError('Select a project and artifact to edit.');
+			return;
+		}
+		let metadata: Record<string, unknown>;
+		try {
+			metadata = parseMetadata(artifactMetadataInput);
+		} catch (error) {
+			artifactEditError = 'Metadata must be valid JSON.';
+			console.warn('Invalid artifact metadata', error);
+			return;
+		}
+		const tags = artifactTagsInput
+			.split(',')
+			.map((tag) => tag.trim())
+			.filter(Boolean);
+		artifactEditBusy = true;
+		try {
+			await projectState.updateProjectArtifactMetadata(fetch, token, project.id, artifactEditTarget.id, {
+				tags,
+				metadata,
+				media_type: artifactMediaTypeInput.trim() || undefined
+			});
+			notifySuccess('Artifact metadata updated.');
+			resetArtifactEdit();
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Failed to update artifact.';
+			artifactEditError = message;
+			notifyError(message);
+		} finally {
+			artifactEditBusy = false;
+		}
+	};
+
+	const handleLoadMoreProjectArtifacts = async () => {
+		const project = $activeProject as ProjectDetail | null;
+		if (!project || !token) return;
+		if (!artifactIndexCache?.nextCursor) return;
+		artifactTableLoading = true;
+		try {
+			await projectState.loadMoreProjectArtifactIndex(fetch, token, project.id, { runId: artifactRunFilter || null });
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Failed to load more artifacts.';
+			artifactTableError = message;
+			notifyError(message);
+		} finally {
+			artifactTableLoading = false;
+		}
+	};
+
+	const handleSyncArtifacts = async () => {
+		const project = $activeProject as ProjectDetail | null;
+		if (!project || !token || !artifactRunFilter) {
+			notifyError('Select a run filter to sync artifacts.');
+			return;
+		}
+		artifactSyncBusy = true;
+		try {
+			await projectState.syncRunArtifacts(fetch, token, project.id, artifactRunFilter);
+			await projectState.loadProjectArtifactIndex(fetch, token, project.id, { runId: artifactRunFilter });
+			await projectState.loadProjectArtifactIndex(fetch, token, project.id, { runId: null });
+			notifySuccess('Artifacts synced.');
+		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Failed to sync artifacts.';
+			artifactTableError = message;
+			notifyError(message);
+		} finally {
+			artifactSyncBusy = false;
+		}
+	};
 	const handleRefreshRuns = async () => {
 		const project = $activeProject as ProjectDetail | null;
 		if (!project || !token) {
@@ -695,13 +982,75 @@
 		);
 	};
 
-	const sortedProjects = $derived((): ProjectSummary[] => {
-		const items = projects ?? [];
-		const sorted = [...items].sort((a, b) =>
-			(b.last_activity_at ?? '').localeCompare(a.last_activity_at ?? '')
-		);
-		return sorted.filter(matchesSearch);
-	});
+let sortedProjects = $state<ProjectSummary[]>([]);
+
+$effect(() => {
+	runCache = activeProjectValue ? projectState.getCachedRuns(activeProjectValue.id) : null;
+});
+
+$effect(() => {
+	libraryCache = activeProjectValue ? projectState.getCachedLibrary(activeProjectValue.id) : null;
+});
+
+$effect(() => {
+	configCache = activeProjectValue ? projectState.getCachedConfigs(activeProjectValue.id) : null;
+});
+
+$effect(() => {
+	artifactIndexCache = activeProjectValue
+		? projectState.getCachedArtifactIndex(activeProjectValue.id, artifactRunFilter || null)
+		: null;
+});
+
+$effect(() => {
+	const items = projects ?? [];
+	const sorted = [...items]
+		.sort((a, b) => (b.last_activity_at ?? '').localeCompare(a.last_activity_at ?? ''))
+		.filter(matchesSearch);
+	sortedProjects = sorted;
+});
+
+$effect(() => {
+	const project = $activeProject as ProjectDetail | null;
+	if (!project || !token) {
+		return;
+	}
+	if (activeTab === 'configs' && !projectState.getCachedConfigs(project.id)) {
+		configsLoading = true;
+		configsError = null;
+		void projectState
+			.loadConfigs(fetch, token, project.id)
+			.catch((error) => {
+				const message = error instanceof Error ? error.message : 'Unable to load configs.';
+				configsError = message;
+				notifyError(message);
+			})
+			.finally(() => {
+				configsLoading = false;
+			});
+	}
+});
+
+$effect(() => {
+	const project = $activeProject as ProjectDetail | null;
+	if (!project || !token) {
+		return;
+	}
+	if (activeTab === 'artifacts' && !projectState.getCachedArtifactIndex(project.id, artifactRunFilter || null)) {
+		artifactTableLoading = true;
+		artifactTableError = null;
+		void projectState
+			.loadProjectArtifactIndex(fetch, token, project.id, { runId: artifactRunFilter || null })
+			.catch((error) => {
+				const message = error instanceof Error ? error.message : 'Unable to load artifacts.';
+				artifactTableError = message;
+				notifyError(message);
+			})
+			.finally(() => {
+				artifactTableLoading = false;
+			});
+	}
+});
 </script>
 
 <section class="space-y-8">
@@ -794,6 +1143,12 @@
 											<span class="rounded-full border border-slate-200 px-2 py-[2px] text-[0.65rem] text-slate-500">
 												{project.library_asset_count ?? 0} asset(s)
 											</span>
+											<span class="rounded-full border border-slate-200 px-2 py-[2px] text-[0.65rem] text-slate-500">
+												{project.config_count ?? 0} config(s)
+											</span>
+											<span class="rounded-full border border-slate-200 px-2 py-[2px] text-[0.65rem] text-slate-500">
+												{project.artifact_count ?? 0} artifact(s)
+											</span>
 										</div>
 									</div>
 									{#if project.latest_run}
@@ -868,7 +1223,7 @@
 							{:else if overviewError}
 								<p class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{overviewError}</p>
 							{:else if overview}
-								<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+								<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
 									<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
 										<p class="text-xs uppercase tracking-[0.3em] text-slate-400">Total runs</p>
 										<p class="mt-2 text-2xl font-semibold text-slate-700">{overview.run_count}</p>
@@ -892,6 +1247,18 @@
 										<p class="mt-1 text-xs text-slate-400">
 											{overview.latest_run ? overview.latest_run.created_at : 'Run the generator to populate summary data.'}
 										</p>
+									</div>
+									<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+										<p class="text-xs uppercase tracking-[0.3em] text-slate-400">Project configs</p>
+										<p class="mt-2 text-2xl font-semibold text-slate-700">{overview.config_count}</p>
+										<p class="mt-1 text-xs text-slate-400">
+											Default: {overview.default_config ? overview.default_config.name : 'Unset'}
+										</p>
+									</div>
+									<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+										<p class="text-xs uppercase tracking-[0.3em] text-slate-400">Tracked artifacts</p>
+										<p class="mt-2 text-2xl font-semibold text-slate-700">{overview.artifact_count}</p>
+										<p class="mt-1 text-xs text-slate-400">Artifacts promoted from run outputs.</p>
 									</div>
 								</div>
 
@@ -926,27 +1293,76 @@
 											</p>
 										{/if}
 									</section>
+								</div>
+
+								<div class="grid gap-4 lg:grid-cols-2">
 									<section class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-										<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Recent assets</h3>
-										{#if overview.recent_assets.length}
+										<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Default config</h3>
+										{#if overview.default_config}
+											<div class="mt-3 space-y-2 text-sm text-slate-600">
+												<div class="flex items-center justify-between text-xs text-slate-400">
+													<span class="font-semibold text-slate-700">{overview.default_config.name}</span>
+													<span class="rounded-full border border-slate-200 px-2 py-[2px] text-[0.65rem]">
+														{overview.default_config.kind}
+													</span>
+												</div>
+												{#if overview.default_config.description}
+													<p class="text-xs text-slate-500">{overview.default_config.description}</p>
+												{/if}
+												<p class="text-xs text-slate-400">
+													{overview.default_config.config_name
+														? `References saved config "${overview.default_config.config_name}".`
+														: 'Inline payload stored with this project.'}
+												</p>
+												{#if overview.default_config.tags.length}
+													<div class="flex flex-wrap gap-1 text-[0.65rem] text-slate-500">
+														{#each overview.default_config.tags as tag}
+															<span class="rounded-full border border-slate-200 px-2 py-[2px]">{tag}</span>
+														{/each}
+													</div>
+												{/if}
+											</div>
+										{:else}
+											<p class="mt-3 text-sm text-slate-500">
+												No project config assigned. Use the Configs tab to create one.
+											</p>
+										{/if}
+									</section>
+									<section class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+										<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Recent artifacts</h3>
+										{#if overview.recent_artifacts?.length}
 											<ul class="mt-3 space-y-2 text-sm text-slate-600">
-												{#each overview.recent_assets as asset (asset.id)}
+												{#each overview.recent_artifacts as artifact (artifact.id)}
 													<li class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-														<div class="flex items-center justify-between gap-3">
+														<div class="flex items-center justify-between">
 															<div>
-																<p class="font-semibold text-slate-700">{asset.name}</p>
-																<p class="text-xs uppercase tracking-[0.25em] text-slate-400">{asset.asset_type}</p>
+																<p class="font-semibold text-slate-700">{artifact.name}</p>
+																<p class="text-xs text-slate-400">
+																	Run: {artifact.run_id ?? 'manual'} · {artifact.relative_path}
+																</p>
 															</div>
-															<span class="text-xs text-slate-400">{asset.updated_at}</span>
+															<div class="flex flex-wrap gap-1 text-[0.65rem] text-slate-500">
+																{#if artifact.tags.length}
+																	{#each artifact.tags.slice(0, 3) as tag}
+																		<span class="rounded-full border border-slate-200 px-2 py-[2px]">{tag}</span>
+																	{/each}
+																	{#if artifact.tags.length > 3}
+																		<span class="rounded-full border border-slate-200 px-2 py-[2px]">
+																			+{artifact.tags.length - 3}
+																		</span>
+																	{/if}
+																{:else}
+																	<span class="rounded-full border border-slate-200 px-2 py-[2px]">untagged</span>
+																{/if}
+															</div>
 														</div>
-														{#if asset.description}
-															<p class="mt-2 text-xs text-slate-500">{asset.description}</p>
-														{/if}
 													</li>
 												{/each}
 											</ul>
 										{:else}
-											<p class="mt-3 text-sm text-slate-500">No promoted assets yet. Use the library tab to curate generated outputs.</p>
+											<p class="mt-3 text-sm text-slate-500">
+												No artifacts promoted yet. Upload run outputs or promote library assets to populate this list.
+											</p>
 										{/if}
 									</section>
 								</div>
@@ -1036,12 +1452,239 @@
 									</div>
 								{/if}
 							</div>
-						{:else if activeTab === 'artifacts'}
+						{:else if activeTab === 'files'}
 							<RunArtifactsPanel
 								token={token}
 								title="Run artifacts"
 								emptyMessage="Generate a run to browse its output artifacts."
 							/>
+						{:else if activeTab === 'configs'}
+							<section class="space-y-4">
+								<div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+									<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Project configs</h3>
+									<div class="flex items-center gap-2 text-xs text-slate-400">
+										<span>{projectConfigs.length} config(s)</span>
+										<button
+											type="button"
+											class="rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50"
+											onclick={handleReloadConfigs}
+											disabled={configsLoading}
+										>
+											{configsLoading ? 'Reloading…' : 'Reload'}
+										</button>
+										<button
+											type="button"
+											class="rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50"
+											onclick={resetConfigForm}
+										>
+											New config
+										</button>
+									</div>
+								</div>
+								{#if configsError}
+									<p class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">{configsError}</p>
+								{/if}
+								<div class="grid gap-6 lg:grid-cols-[minmax(0,0.55fr)_minmax(0,1fr)]">
+									<section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
+										{#if configsLoading && !projectConfigs.length}
+											<p class="text-sm text-slate-500">Loading configs…</p>
+										{:else if !projectConfigs.length}
+											<p class="text-sm text-slate-500">No configs yet. Use the form to create one.</p>
+										{:else}
+											<ul class="space-y-3 text-sm text-slate-600">
+												{#each projectConfigs as config (config.id)}
+													<li class="rounded-2xl border border-slate-200 px-4 py-3">
+														<div class="flex items-start justify-between gap-3">
+															<div>
+																<p class="text-base font-semibold text-slate-700">{config.name}</p>
+																<p class="text-xs text-slate-400">
+																	{config.kind} ·
+																	{config.config_name ? `references ${config.config_name}` : 'inline payload'}
+																</p>
+																{#if config.description}
+																	<p class="mt-1 text-xs text-slate-500">{config.description}</p>
+																{/if}
+																{#if config.tags.length}
+																	<div class="mt-2 flex flex-wrap gap-1 text-[0.65rem] text-slate-500">
+																		{#each config.tags as tag}
+																			<span class="rounded-full border border-slate-200 px-2 py-[2px]">{tag}</span>
+																		{/each}
+																	</div>
+																{/if}
+															</div>
+															<div class="flex flex-col items-end gap-1 text-xs text-slate-400">
+																{#if config.is_default}
+																	<span class="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-[2px] text-emerald-600">
+																		Default
+																	</span>
+																{/if}
+																{#if config.updated_at}<span>{config.updated_at}</span>{/if}
+															</div>
+														</div>
+														<div class="mt-3 flex flex-wrap gap-2 text-xs">
+															<button
+																type="button"
+																class="rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50"
+																onclick={() => handleEditConfig(config)}
+															>
+																Edit
+															</button>
+															<button
+																type="button"
+																class="rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50 disabled:opacity-50"
+																onclick={() => handleSetDefaultConfig(config.id)}
+																disabled={config.is_default}
+															>
+																Set default
+															</button>
+															<button
+																type="button"
+																class="rounded-xl border border-rose-200 px-3 py-1 font-semibold text-rose-600 transition hover:bg-rose-50"
+																onclick={() => handleDeleteConfig(config.id)}
+															>
+																Delete
+															</button>
+														</div>
+													</li>
+												{/each}
+											</ul>
+										{/if}
+									</section>
+									<section class="rounded-2xl border border-slate-200 bg-white p-4">
+										<h4 class="text-base font-semibold text-slate-700">
+											{editingConfigId ? 'Edit config' : 'Create config'}
+										</h4>
+										<form class="mt-4 space-y-3 text-sm text-slate-600" onsubmit={handleConfigSubmit}>
+											<label class="block space-y-1">
+												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Name</span>
+												<input
+													class="w-full rounded-2xl border border-slate-200 px-3 py-2"
+													type="text"
+													bind:value={configNameInput}
+													placeholder="production-baseline"
+												/>
+											</label>
+											<label class="block space-y-1">
+												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Description</span>
+												<textarea
+													class="w-full rounded-2xl border border-slate-200 px-3 py-2"
+													rows={2}
+													bind:value={configDescriptionInput}
+												/>
+											</label>
+											<label class="block space-y-1">
+												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Kind</span>
+												<input
+													class="w-full rounded-2xl border border-slate-200 px-3 py-2"
+													type="text"
+													bind:value={configKindInput}
+													placeholder="tfreview"
+												/>
+											</label>
+											<label class="block space-y-1">
+												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Reference config</span>
+												<input
+													class="w-full rounded-2xl border border-slate-200 px-3 py-2"
+													type="text"
+													bind:value={configRefInput}
+													placeholder="baseline"
+												/>
+											</label>
+											<label class="block space-y-1">
+												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Inline payload</span>
+												<textarea
+													class="w-full rounded-2xl border border-slate-200 px-3 py-2 font-mono text-xs"
+													rows={6}
+													bind:value={configPayloadInput}
+													placeholder="# thresholds:\n#   high: fail"
+												/>
+											</label>
+											<label class="block space-y-1">
+												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Tags</span>
+												<input
+													class="w-full rounded-2xl border border-slate-200 px-3 py-2"
+													type="text"
+													bind:value={configTagsInput}
+													placeholder="prod, baseline"
+												/>
+											</label>
+											<label class="block space-y-1">
+												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Metadata (JSON)</span>
+												<textarea
+													class="w-full rounded-2xl border border-slate-200 px-3 py-2 font-mono text-xs"
+													rows={4}
+													bind:value={configMetadataInput}
+												/>
+											</label>
+											<label class="flex items-center gap-2 text-xs text-slate-500">
+												<input type="checkbox" bind:checked={configIsDefault} />
+												Set as default config
+											</label>
+											{#if configFormError}
+												<p class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-600">
+													{configFormError}
+												</p>
+											{/if}
+											<div class="flex items-center gap-2">
+												<button
+													type="submit"
+													class="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-sky-200 transition hover:bg-sky-600 disabled:opacity-60"
+													disabled={configFormBusy}
+												>
+													{configFormBusy ? 'Saving…' : editingConfigId ? 'Update config' : 'Create config'}
+												</button>
+												{#if editingConfigId}
+													<button
+														type="button"
+														class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-50"
+														onclick={resetConfigForm}
+														disabled={configFormBusy}
+													>
+														Cancel
+													</button>
+												{/if}
+											</div>
+										</form>
+									</section>
+								</div>
+							</section>
+						{:else if activeTab === 'artifacts'}
+							<section class="space-y-4">
+								<div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+									<div>
+										<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Project artifacts</h3>
+										<p class="text-xs text-slate-500">Metadata for run outputs promoted into the workspace.</p>
+									</div>
+									<div class="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+										<select
+											class="rounded-xl border border-slate-200 px-3 py-1 text-sm text-slate-600"
+											bind:value={artifactRunFilter}
+										>
+											<option value="">All runs</option>
+											{#each projectRuns as run (run.id)}
+												<option value={run.id}>{run.label}</option>
+											{/each}
+										</select>
+										<button
+											type="button"
+											class="rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50"
+											onclick={handleReloadArtifactsIndex}
+											disabled={artifactTableLoading}
+										>
+											{artifactTableLoading ? 'Reloading…' : 'Reload'}
+										</button>
+										<button
+											type="button"
+											class="rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50 disabled:opacity-50"
+											onclick={handleSyncArtifacts}
+											disabled={!artifactRunFilter || artifactSyncBusy}
+										>
+											{artifactSyncBusy ? 'Syncing…' : 'Sync run'}
+										</button>
+									</div>
+								</div>
+								{#if artifactTableError}
+									<p class="rounded-2xl
 						{:else if activeTab === 'library'}
 							<section class="space-y-4">
 								<div class="flex items-center justify-between">

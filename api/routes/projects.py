@@ -38,12 +38,27 @@ from backend.storage import (
     get_generated_asset_version,
     get_generated_asset_version_path,
     diff_generated_asset_versions,
+    list_project_configs,
+    create_project_config,
+    get_project_config,
+    update_project_config,
+    delete_project_config,
+    list_project_artifacts,
+    get_project_artifact,
+    update_project_artifact,
+    sync_project_run_artifacts,
     ArtifactPathError,
     get_project_overview,
 )
 
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _value_error_to_http(exc: ValueError) -> HTTPException:
+    detail = str(exc)
+    status_code_value = status.HTTP_404_NOT_FOUND if "not found" in detail.lower() else status.HTTP_400_BAD_REQUEST
+    return HTTPException(status_code=status_code_value, detail=detail)
 
 
 class ProjectBaseResponse(BaseModel):
@@ -74,6 +89,8 @@ class ProjectListItemResponse(ProjectBaseResponse):
     latest_run: Optional[ProjectListLatestRun] = None
     run_count: int = 0
     library_asset_count: int = 0
+    config_count: int = 0
+    artifact_count: int = 0
     last_activity_at: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
@@ -126,6 +143,10 @@ class ArtifactEntry(BaseModel):
     is_dir: bool
     size: Optional[int] = None
     modified_at: Optional[str] = None
+    artifact_id: Optional[str] = None
+    media_type: Optional[str] = None
+    tags: Optional[List[str]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class GeneratedAssetVersionSummary(BaseModel):
@@ -226,12 +247,95 @@ class ProjectOverviewMetrics(BaseModel):
     policy: Optional[Dict[str, Any]] = None
 
 
+class ProjectConfigResponse(BaseModel):
+    id: str
+    project_id: str
+    name: str
+    slug: str
+    description: Optional[str] = None
+    config_name: Optional[str] = None
+    kind: str
+    payload: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    is_default: bool = False
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ProjectConfigCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=160)
+    slug: Optional[str] = Field(default=None, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=1024)
+    config_name: Optional[str] = Field(default=None, max_length=256)
+    payload: Optional[str] = None
+    kind: str = Field(default="tfreview", min_length=1, max_length=32)
+    tags: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    is_default: bool = False
+
+
+class ProjectConfigUpdateRequest(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=160)
+    description: Optional[str] = Field(default=None, max_length=1024)
+    config_name: Optional[str] = Field(default=None, max_length=256)
+    payload: Optional[str] = None
+    kind: Optional[str] = Field(default=None, min_length=1, max_length=32)
+    tags: Optional[List[str]] = Field(default=None)
+    metadata: Optional[Dict[str, Any]] = None
+    is_default: Optional[bool] = None
+
+
+class ProjectArtifactResponse(BaseModel):
+    id: str
+    project_id: str
+    run_id: Optional[str] = None
+    report_id: Optional[str] = None
+    name: str
+    relative_path: str
+    storage_path: str
+    media_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    checksum: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ProjectArtifactListResponse(BaseModel):
+    items: List[ProjectArtifactResponse]
+    next_cursor: Optional[str] = None
+    total_count: int
+
+
+class ProjectArtifactUpdateRequest(BaseModel):
+    tags: Optional[List[str]] = Field(default=None)
+    metadata: Optional[Dict[str, Any]] = None
+    media_type: Optional[str] = None
+
+
+class ProjectArtifactSyncRequest(BaseModel):
+    prune_missing: bool = True
+
+
+class ProjectArtifactSyncResponse(BaseModel):
+    added: int
+    updated: int
+    removed: int
+    files_indexed: int
+
+
 class ProjectOverviewResponse(BaseModel):
     project: ProjectResponse
     run_count: int
     latest_run: Optional[ProjectRunResponse] = None
     library_asset_count: int
+    config_count: int
+    default_config: Optional[ProjectConfigResponse] = None
+    artifact_count: int
     recent_assets: List[GeneratedAssetSummary]
+    recent_artifacts: List[ProjectArtifactResponse] = Field(default_factory=list)
     metrics: ProjectOverviewMetrics = Field(default_factory=ProjectOverviewMetrics)
     last_activity_at: Optional[str] = None
 
@@ -333,6 +437,105 @@ def project_delete(
     deleted = delete_project(project_id, remove_files=remove_files, session=session)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{project_id}/configs", response_model=List[ProjectConfigResponse])
+def project_configs_index(
+    project_id: str,
+    include_payload: bool = Query(default=False, description="Include inline payload bodies"),
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> List[Dict[str, Any]]:
+    try:
+        records = list_project_configs(project_id=project_id, include_payload=include_payload, session=session)
+    except ValueError as exc:
+        raise _value_error_to_http(exc) from exc
+    return [ProjectConfigResponse.model_validate(record) for record in records]
+
+
+@router.post("/{project_id}/configs", response_model=ProjectConfigResponse, status_code=status.HTTP_201_CREATED)
+def project_config_create(
+    project_id: str,
+    payload: ProjectConfigCreateRequest,
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> Dict[str, Any]:
+    if not (payload.config_name and payload.config_name.strip()) and not (payload.payload and payload.payload.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide either config_name referencing a saved config or an inline payload.",
+        )
+    try:
+        record = create_project_config(
+            project_id=project_id,
+            name=payload.name,
+            slug=payload.slug,
+            description=payload.description,
+            config_name=payload.config_name,
+            payload=payload.payload,
+            kind=payload.kind,
+            tags=payload.tags,
+            metadata=payload.metadata,
+            is_default=payload.is_default,
+            session=session,
+        )
+    except ValueError as exc:
+        raise _value_error_to_http(exc) from exc
+    return ProjectConfigResponse.model_validate(record)
+
+
+@router.get("/{project_id}/configs/{config_id}", response_model=ProjectConfigResponse)
+def project_config_detail(
+    project_id: str,
+    config_id: str,
+    include_payload: bool = Query(default=True, description="Include inline payload bodies"),
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> Dict[str, Any]:
+    record = get_project_config(config_id, project_id=project_id, include_payload=include_payload, session=session)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="config not found")
+    return ProjectConfigResponse.model_validate(record)
+
+
+@router.patch("/{project_id}/configs/{config_id}", response_model=ProjectConfigResponse)
+def project_config_update(
+    project_id: str,
+    config_id: str,
+    payload: ProjectConfigUpdateRequest,
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> Dict[str, Any]:
+    data = payload.model_dump(exclude_unset=True)
+    try:
+        updated = update_project_config(
+            config_id,
+            project_id=project_id,
+            **data,
+            session=session,
+        )
+    except ValueError as exc:
+        raise _value_error_to_http(exc) from exc
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="config not found")
+    return ProjectConfigResponse.model_validate(updated)
+
+
+@router.delete(
+    "/{project_id}/configs/{config_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def project_config_delete(
+    project_id: str,
+    config_id: str,
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> Response:
+    deleted = delete_project_config(config_id, project_id=project_id, session=session)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="config not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -543,6 +746,94 @@ def project_run_artifact_delete(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post(
+    "/{project_id}/runs/{run_id}/artifacts/sync",
+    response_model=ProjectArtifactSyncResponse,
+    status_code=status.HTTP_200_OK,
+)
+def project_run_artifact_sync(
+    project_id: str,
+    run_id: str,
+    payload: ProjectArtifactSyncRequest,
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> Dict[str, Any]:
+    try:
+        result = sync_project_run_artifacts(
+            project_id=project_id,
+            run_id=run_id,
+            prune_missing=payload.prune_missing,
+            session=session,
+        )
+    except ValueError as exc:
+        raise _value_error_to_http(exc) from exc
+    return ProjectArtifactSyncResponse.model_validate(result)
+
+
+@router.get("/{project_id}/artifacts", response_model=ProjectArtifactListResponse)
+def project_artifacts_index(
+    project_id: str,
+    run_id: Optional[str] = Query(
+        default=None,
+        description="Filter artifacts by run identifier",
+    ),
+    limit: int = Query(
+        default=100,
+        ge=1,
+        le=500,
+        description="Maximum number of artifacts to return",
+    ),
+    cursor: Optional[str] = Query(default=None, description="Opaque cursor for pagination"),
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> Dict[str, Any]:
+    try:
+        payload = list_project_artifacts(
+            project_id=project_id,
+            run_id=run_id,
+            limit=limit,
+            cursor=cursor,
+            session=session,
+        )
+    except ValueError as exc:
+        raise _value_error_to_http(exc) from exc
+    payload["items"] = [ProjectArtifactResponse.model_validate(item) for item in payload.get("items", [])]
+    return ProjectArtifactListResponse.model_validate(payload)
+
+
+@router.get("/{project_id}/artifacts/{artifact_id}", response_model=ProjectArtifactResponse)
+def project_artifact_detail(
+    project_id: str,
+    artifact_id: str,
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> Dict[str, Any]:
+    record = get_project_artifact(artifact_id, project_id=project_id, session=session)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="artifact not found")
+    return ProjectArtifactResponse.model_validate(record)
+
+
+@router.patch("/{project_id}/artifacts/{artifact_id}", response_model=ProjectArtifactResponse)
+def project_artifact_update(
+    project_id: str,
+    artifact_id: str,
+    payload: ProjectArtifactUpdateRequest,
+    _current_user: CurrentUser = Depends(require_current_user),
+    session: Session = Depends(get_session_dependency),
+) -> Dict[str, Any]:
+    data = payload.model_dump(exclude_unset=True)
+    updated = update_project_artifact(
+        artifact_id,
+        project_id=project_id,
+        **data,
+        session=session,
+    )
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="artifact not found")
+    return ProjectArtifactResponse.model_validate(updated)
+
+
 @router.get("/{project_id}/library", response_model=ProjectLibraryListResponse)
 def project_library_index(
     project_id: str,
@@ -637,6 +928,14 @@ def project_overview(
     overview["recent_assets"] = [
         GeneratedAssetSummary.model_validate(asset) for asset in overview.get("recent_assets", [])
     ]
+    overview["recent_artifacts"] = [
+        ProjectArtifactResponse.model_validate(artifact) for artifact in overview.get("recent_artifacts", [])
+    ]
+    overview["default_config"] = (
+        ProjectConfigResponse.model_validate(overview["default_config"])
+        if overview.get("default_config")
+        else None
+    )
     overview["metrics"] = ProjectOverviewMetrics.model_validate(overview.get("metrics", {}))
     return overview
 

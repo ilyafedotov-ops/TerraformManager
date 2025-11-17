@@ -96,17 +96,52 @@
 # Current Status Summary
 
 ## Initiative – Project Workspace UX (🆕 In Progress)
-- **Backend Domain Model**: add `Project` / `ProjectRun` tables with metadata, run status timestamps, and artifact pointers (`backend/db/models.py`, `backend/storage.py`). Ensure directories live under `data/projects/<slug>` with auto-creation and safe slugging.
-- **REST Surface**: expose project CRUD and run lifecycle endpoints via a new `api/routes/projects.py`, wiring authentication/authorization and using typed Pydantic models for responses. Mount router in `api/main.py` and document via `/docs`.
-- **Storage Helpers**: extend `backend/storage.py` to manage project directories, run artifact folders, and summary persistence. Provide helpers for updating run status/summary and listing runs per project.
-- **CLI/Automation**: add `backend/cli.py project create/list/run` commands to bootstrap folders, invoke generators/reviews in-context, and reuse the storage helpers for consistency (initial scaffold complete).
-- **Testing & State Management**: cover storage/routes with backend API tests (`tests/test_storage.py`, `tests/test_projects_routes.py`) and add Svelte project store + API bindings for dashboard integration.
-- **UI Integration**: surface project context across dashboard, generator/review wizards, and reports (run history, artifact browser, run logging via FastAPI).
-- **Frontend State**: introduce a SvelteKit store for active project context (`frontend/src/lib/stores/project.ts`) plus API client methods for project CRUD/run listing.
-- **Workspace UI**: redesign `(app)` shell with left-hand project navigator, multi-step run wizard (inputs → generated files → review), and accessible tabbed panels per ARIA guidance (`role="tab"` wrappers).
-- **Artifacts & Diffing**: surface generated/reviewed files inline via tree + diff viewer, with download/export actions. Persist run metadata and enable reruns that preload prior parameters.
-- ✅ Added inline workspace selector banners across generator/review/report flows, artifact upload & delete controls, and inline previews with previous-run context.
-- **Validation & Docs**: add backend tests for project/run APIs, frontend Vitest coverage for store/actions, and update `README.md` plus `docs/` to describe project workflow, noting when to reindex knowledge.
+Goal: simplify the entire product around a single “Project” hub so users can create a project and manage configs, scans, reports, generators, and knowledge without jumping between unrelated surfaces. Everything else (CLI, API, frontend, docs) aligns to that mental model.
+
+### Phase 0 – Discovery & Information Architecture
+- [x] Audit existing SvelteKit routes (`frontend/src/routes/(app)/*`) and backend endpoints to catalog every user flow touching configs, reviews, generators, knowledge, and artifacts.
+- [x] Capture user/jobs-to-be-done from README/docs/support notes and translate them into prioritized use cases for the project workspace.
+- [x] Draft an information architecture: `/projects` list, `/projects/:id/summary`, nested tabs (Configurations, Reviews, Reports, Generators, Artifacts, Knowledge, Settings). Validate via mockups/wireframes before coding.
+
+### Phase 1 – Backend Data Model & Storage
+- [x] Extend SQLAlchemy models in `backend/db/models.py` (and migrations) with `Project`, `ProjectRun`, `ProjectConfig`, and `ProjectArtifact` tables plus relationships to existing reports/configs.
+- [x] Update `backend/storage.py` to provision `data/projects/<slug>/` directories, maintain artifact manifests, and expose helpers for run summaries and project-level counters.
+- [x] Backfill existing artifacts/configs into project scope with a data migration script under `scripts/` (log mapping for rollback).
+
+### Phase 2 – API Surface & Aggregates
+- [x] Introduce `api/routes/projects.py` with CRUD, summary, run lifecycle, artifact upload/download, and generator/review triggers. Ensure dependencies enforce per-project auth/ownership.
+- [x] Add `/projects/:id/summary` aggregate endpoint combining last scan status, drift/cost deltas, config counts, outstanding actions, and linked knowledge snippets.
+- [x] Update OpenAPI docs plus `docs/` references and wire router in `api/main.py`. Include request/response models in `api/schemas/projects.py`.
+
+### Phase 3 – CLI & Automation Alignment
+- [ ] Extend `backend/cli.py` commands (`scan`, `baseline`, `docs`, etc.) to accept `--project-id/--project-slug` and persist outputs in the correct directory tree.
+- [ ] Add `project create/list/run/upload` subcommands to bootstrap a workspace locally, optionally calling API endpoints for remote state.
+- [ ] Document CLI workflows in README/knowledge and add regression tests for the new options under `tests/backend/`.
+
+### Phase 4 – Frontend Navigation & State
+- [x] Build a global project switcher store in `frontend/src/lib/stores/project.ts` plus derived selectors for summary data; hydrate via `(app)/+layout.server.ts`.
+- [ ] Refactor navigation so all authenticated routes render under `/projects/:slug/*`; update `src/lib/api` clients to default to the active project.
+- [ ] Replace fragmented top-level nav with a project-focused sidebar that exposes key actions (Create config, Run review, Upload artifact) contextually.
+
+### Phase 5 – Project Workspace Experience
+- [x] Implement `/projects` list with tiles showing latest run status, open issues, and quick actions (open dashboard, start scan, upload artifact).
+- [x] Build `/projects/:slug/summary` cards for Configurations, Reviews, Reports, Artifacts, Knowledge, and Status. Each card exposes the most recent items, status pills, and CTA buttons.
+- [ ] Consolidate Configs, Reviews, and Reports tabs so users can create/edit configs, trigger scans, review outputs, and promote artifacts without leaving the project.
+- [ ] Provide inline diff/file-browser components for run artifacts, referencing helper components under `frontend/src/lib/components/artifacts/`.
+
+### Phase 6 – Knowledge, Guidance, and Notifications
+- [ ] Surface contextual knowledge articles linked to the project’s generator/policy tags; update `frontend/src/lib/api/knowledge.ts` to filter by project metadata.
+- [ ] Add guided toasts/checklists for high-value actions (e.g., drift detected → run review). Use the shared notification store for consistent messaging.
+- [ ] Offer embedded help modals describing CLI equivalents and manual verification steps, populated from `docs/` or `knowledge/`.
+
+### Phase 7 – Testing, Documentation, and Rollout
+- [ ] Expand backend pytest coverage for new project endpoints/storage plus CLI integration tests ensuring artifacts land in project folders.
+- [ ] Add Vitest/component tests for the project store, navigation, and summary cards; include Playwright happy-path flows (create project → run review → inspect artifacts).
+- [ ] Update `README.md`, `docs/`, and `knowledge/` to highlight the project-centric UX, migration guidance, and reindex/docs steps when adding new generator inputs.
+- [ ] Plan rollout/migration checklist: data backfill, feature flag, beta preview, telemetry instrumentation, and comms.
+
+### Delivered To Date
+- ✅ Added inline workspace selector banners across generator/review/report flows, artifact upload & delete controls, and inline previews with previous-run context (sets baseline for the new dashboard).
 
 ### Frontend Migration (SvelteKit)
 - ✅ Scaffolded SvelteKit workspace with Tailwind + Notus integration and environment-aware token storage synced via cookies/localStorage.
