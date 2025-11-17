@@ -59,24 +59,52 @@ type ArtifactIndexCacheEntry = ReturnType<typeof projectState.getCachedArtifactI
 const projects = $derived($projectState.projects as ProjectSummary[]);
 const activeProjectValue = $derived($activeProject as ProjectDetail | null);
 const projectRuns = $derived($activeProjectRuns as ProjectRunSummary[]);
-const libraryAssets = $derived($activeProjectLibrary as GeneratedAssetSummary[]);
+const libraryCache = $derived(() => {
+	const project = activeProjectValue;
+	if (!project) {
+		return null;
+	}
+	return $projectState.library[project.id] ?? null;
+});
+const libraryAssets = $derived(libraryCache?.assets ?? []);
 const libraryAssetTypes = $derived(() => {
 	const values = Array.from(new Set((libraryAssets ?? []).map((asset) => asset.asset_type))).filter(Boolean);
 	return values.sort((a, b) => a.localeCompare(b));
+});
+const libraryGeneratorTags = $derived(() => {
+	const tags = new Set<string>();
+	for (const asset of libraryAssets ?? []) {
+		for (const tag of asset.tags ?? []) {
+			if (typeof tag === 'string' && tag.startsWith('generator:')) {
+				tags.add(tag.replace(/^generator:/, ''));
+			}
+		}
+	}
+	return Array.from(tags).sort((a, b) => a.localeCompare(b));
 });
 const filteredLibraryAssets = $derived(() => {
 	if (!libraryAssets) {
 		return [];
 	}
-	if (libraryTypeFilter === 'all') {
-		return libraryAssets;
-	}
-	return libraryAssets.filter((asset) => asset.asset_type === libraryTypeFilter);
+	const generatorFilter = libraryGeneratorFilter;
+	return libraryAssets.filter((asset) => {
+		const matchesType = libraryTypeFilter === 'all' || asset.asset_type === libraryTypeFilter;
+		if (!matchesType) {
+			return false;
+		}
+		if (generatorFilter === 'all') {
+			return true;
+		}
+		const slugs =
+			asset.tags
+				?.filter((tag) => typeof tag === 'string' && tag.startsWith('generator:'))
+				.map((tag) => tag.replace(/^generator:/, '')) ?? [];
+		return slugs.includes(generatorFilter);
+	});
 });
 const overview = $derived($activeProjectOverview as ProjectOverview | null);
 
 let runCache = $state<RunsCacheEntry>(null);
-let libraryCache = $state<LibraryCacheEntry>(null);
 let configCache = $state<ConfigCacheEntry>(null);
 let artifactIndexCache = $state<ArtifactIndexCacheEntry>(null);
 
@@ -93,6 +121,8 @@ let createMetadata = $state('{\n\t"owner": "platform"\n}');
 let createError = $state<string | null>(null);
 let createBusy = $state(false);
 let libraryTypeFilter = $state('all');
+let libraryGeneratorFilter = $state('all');
+const libraryTypeOptions = $derived(() => ['all', ...libraryAssetTypes]);
 
 	let editName = $state('');
 	let editDescription = $state('');
@@ -129,9 +159,40 @@ let artifactRunFilter = $state('');
 	let artifactTagsInput = $state('');
 	let artifactMetadataInput = $state('{\n\n}');
 	let artifactMediaTypeInput = $state('');
-	let artifactEditBusy = $state(false);
-	let artifactEditError = $state<string | null>(null);
-	let artifactSyncBusy = $state(false);
+let artifactEditBusy = $state(false);
+let artifactEditError = $state<string | null>(null);
+let artifactSyncBusy = $state(false);
+
+const formatAssetTypeLabel = (value: string) => {
+	if (value === 'all') return 'All types';
+	const mapping: Record<string, string> = {
+		terraform_config: 'Terraform configs',
+		scan_report: 'Scan reports',
+	};
+	return mapping[value] ?? value.replace(/_/g, ' ');
+};
+
+const formatGeneratorLabel = (value: string) => {
+	if (value === 'all') return 'All generators';
+	return value;
+};
+
+const setLibraryTypeFilterValue = (value: string) => {
+	libraryTypeFilter = value;
+};
+
+const toggleLibraryGeneratorFilter = (value: string) => {
+	libraryGeneratorFilter = libraryGeneratorFilter === value ? 'all' : value;
+};
+
+$effect(() => {
+	if (libraryTypeFilter !== 'all' && !libraryAssetTypes.includes(libraryTypeFilter)) {
+		libraryTypeFilter = 'all';
+	}
+	if (libraryGeneratorFilter !== 'all' && !libraryGeneratorTags.includes(libraryGeneratorFilter)) {
+		libraryGeneratorFilter = 'all';
+	}
+});
 
 type DiffState = {
 	assetId: string;
@@ -1168,10 +1229,6 @@ $effect(() => {
 });
 
 $effect(() => {
-	libraryCache = activeProjectValue ? projectState.getCachedLibrary(activeProjectValue.id) : null;
-});
-
-$effect(() => {
 	configCache = activeProjectValue ? projectState.getCachedConfigs(activeProjectValue.id) : null;
 });
 
@@ -2044,22 +2101,49 @@ $effect(() => {
 							<section class="space-y-4">
 								<div class="flex items-center justify-between">
 					<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Library assets</h3>
-					<div class="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+					<div class="flex flex-col gap-2 text-xs text-slate-400 lg:flex-row lg:items-center">
 						<span>
 							Showing {filteredLibraryAssets.length} of {libraryCache?.totalCount ?? libraryAssets.length} asset(s)
 						</span>
-						<label class="flex items-center gap-2 text-[0.65rem] uppercase tracking-[0.3em] text-slate-400">
-							Type
-							<select
-								class="rounded-xl border border-slate-200 bg-white px-2 py-1 text-[0.7rem] text-slate-600 focus:border-sky-400 focus:outline-none"
-								bind:value={libraryTypeFilter}
-							>
-								<option value="all">All</option>
-								{#each libraryAssetTypes as type}
-									<option value={type}>{type}</option>
+						<div class="flex flex-col gap-1 text-[0.65rem] uppercase tracking-[0.3em] text-slate-400">
+							<span>Types</span>
+							<div class="flex flex-wrap gap-2">
+								{#each libraryTypeOptions as type (type)}
+									<button
+										type="button"
+										class={`rounded-full border px-3 py-1 text-[0.65rem] font-semibold transition ${
+											libraryTypeFilter === type
+												? 'border-sky-400 bg-sky-50 text-sky-600 shadow-sky-100'
+												: 'border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-600'
+										}`}
+										onclick={() => setLibraryTypeFilterValue(type)}
+									>
+										{formatAssetTypeLabel(type)}
+									</button>
 								{/each}
-							</select>
-						</label>
+							</div>
+						</div>
+						{#if libraryGeneratorTags.length}
+							<div class="flex flex-col gap-1 text-[0.65rem] uppercase tracking-[0.3em] text-slate-400">
+								<span>Generators</span>
+								<div class="flex flex-wrap gap-2">
+									{#each ['all', ...libraryGeneratorTags] as slug (slug)}
+										<button
+											type="button"
+											class={`rounded-full border px-3 py-1 text-[0.65rem] font-semibold transition ${
+												libraryGeneratorFilter === slug
+													? 'border-violet-400 bg-violet-50 text-violet-600 shadow-violet-100'
+													: 'border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-600'
+											}`}
+											onclick={() =>
+												slug === 'all' ? (libraryGeneratorFilter = 'all') : toggleLibraryGeneratorFilter(slug)}
+										>
+											{formatGeneratorLabel(slug)}
+										</button>
+									{/each}
+								</div>
+							</div>
+						{/if}
 						{#if libraryCache?.nextCursor}
 							<button
 								type="button"
@@ -2222,11 +2306,11 @@ $effect(() => {
 																	{/if}
 																</li>
 															{/if}
-															{#if diffState && diffState.assetId === asset.id && diffState.versionId === version.id}
-																<li class="space-y-2 rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
-																	{@const currentDiff = getCurrentDiffText()}
-																		{@const selectedEntry = getSelectedDiffEntry()}
-																		<div class="flex flex-wrap items-center justify-between gap-2">
+														{#if diffState && diffState.assetId === asset.id && diffState.versionId === version.id}
+															{@const currentDiff = getCurrentDiffText()}
+															{@const selectedEntry = getSelectedDiffEntry()}
+															<li class="space-y-2 rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs text-slate-600">
+																<div class="flex flex-wrap items-center justify-between gap-2">
 																			<p class="font-semibold uppercase tracking-[0.25em] text-slate-400">
 																				Diff vs {diffState.againstVersionId}
 																			</p>
