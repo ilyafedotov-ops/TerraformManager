@@ -122,7 +122,7 @@ Goal: simplify the entire product around a single “Project” hub so users can
 ### Phase 4 – Frontend Navigation & State
 - [x] Build a global project switcher store in `frontend/src/lib/stores/project.ts` plus derived selectors for summary data; hydrate via `(app)/+layout.server.ts`.
 - [x] Refactor navigation so all authenticated routes render under `/projects/:slug/*`; update `src/lib/api` clients to default to the active project.
-- [ ] Replace fragmented top-level nav with a project-focused sidebar that exposes key actions (Create config, Run review, Upload artifact) contextually.
+- [x] Replace fragmented top-level nav with a project-focused sidebar that exposes key actions (Create config, Run review, Upload artifact) contextually.
 
 ### Phase 5 – Project Workspace Experience
 - [x] Implement `/projects` list with tiles showing latest run status, open issues, and quick actions (open dashboard, start scan, upload artifact).
@@ -130,7 +130,8 @@ Goal: simplify the entire product around a single “Project” hub so users can
 - [ ] Consolidate Configs, Reviews, and Reports tabs so users can create/edit configs, trigger scans, review outputs, and promote artifacts without leaving the project.
   - 🔄 Reports tab under `/projects/[slug]/reports` now scopes every API query to the active project ID and slug, keeping filters, pagination, and review metadata edits inside the workspace context.
   - 🔄 Review uploads from `/projects/[slug]/review` now send both `project_id` and `project_slug`, ensuring saved scans and runs stay linked to the same workspace routing model.
-- [ ] Provide inline diff/file-browser components for run artifacts, referencing helper components under `frontend/src/lib/components/artifacts/`.
+- [x] Provide inline diff/file-browser components for run artifacts, referencing helper components under `frontend/src/lib/components/artifacts/`.
+  - 🔄 Dashboard now embeds `RunArtifactsPanel`, giving direct access to run file browsers, previews, and per-file diffs without leaving the workspace.
 
 ### Phase 6 – Knowledge, Guidance, and Notifications
 - [x] Surface contextual knowledge articles linked to the project’s generator/policy tags; update `frontend/src/lib/api/knowledge.ts` to filter by project metadata.

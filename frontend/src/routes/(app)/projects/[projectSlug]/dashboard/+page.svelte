@@ -8,16 +8,18 @@
 	import SeverityDistribution from '$lib/components/dashboard/SeverityDistribution.svelte';
 import ProjectKnowledgePanel from '$lib/components/projects/ProjectKnowledgePanel.svelte';
 import ProjectHelpModal from '$lib/components/projects/ProjectHelpModal.svelte';
+import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
 import { notify, notifyError } from '$lib/stores/notifications';
 	import type { AuthEvent } from '$lib/api/client';
 	import type { DashboardStats } from '$lib/types/dashboard';
 	import { activeProject, activeProjectRuns, projectState } from '$lib/stores/project';
 
-const { data } = $props();
+const { data } = $props<{ data: Record<string, unknown> }>();
 const projectSlug = $derived($page.params.projectSlug ?? null);
 const projectBasePath = $derived(projectSlug ? `/projects/${projectSlug}` : '/projects');
 const projectReportsHref = $derived(projectSlug ? `${projectBasePath}/reports` : '/projects');
 const projectGenerateHref = $derived(projectSlug ? `${projectBasePath}/generate` : '/projects');
+const apiToken = data.token as string | null;
 	const statsSource = data.stats as DashboardStats | Promise<DashboardStats | null> | null;
 	const errorSource = data.error as string | Promise<string | null> | null;
 	const authEventsSource = data.authEvents as AuthEvent[] | Promise<AuthEvent[]> | null;
@@ -351,6 +353,13 @@ const hasSeverityData = $derived(topSeverityCount > 0);
 	{/if}
 
 	<ProjectKnowledgePanel project={activeProjectSummary} />
+
+	<RunArtifactsPanel
+		token={apiToken ?? null}
+		title="Recent run artifacts"
+		emptyMessage="Select a project to inspect artifacts and diffs."
+	/>
+
 	<ProjectHelpModal open={helpModalOpen} project={activeProjectSummary} on:close={() => (helpModalOpen = false)} />
 
 	<div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40">

@@ -221,13 +221,34 @@ const firstCommandHref = $derived(actionableCommandItems[0]?.href);
 const projectNavigationSections = $derived(
 	materialiseNavigationSections($navigationSectionsStore, $activeProject?.id ?? null)
 );
+type QuickAction = { id: string; label: string; href: string };
+const projectSlugPath = $derived($activeProject?.slug ?? null);
+const projectQuickActions = $derived<QuickAction[]>(
+	(() => {
+		const slug = projectSlugPath;
+		if (!slug) {
+			return [];
+		}
+		return [
+			{ id: 'run-scan', label: 'Start scan', href: `/projects/${slug}/review` },
+			{ id: 'generate', label: 'Generate config', href: `/projects/${slug}/generate` },
+			{ id: 'view-reports', label: 'View reports', href: `/projects/${slug}/reports` }
+		];
+	})()
+);
 
-	const handleNavNavigate = async (event: CustomEvent<{ href: string }>) => {
-		const { href } = event.detail;
-		await goto(href, { replaceState: false });
-		navigationState.setActivePath(href);
-		navigationState.closeSidebar();
-	};
+const handleNavNavigate = async (event: CustomEvent<{ href: string }>) => {
+	const { href } = event.detail;
+	await goto(href, { replaceState: false });
+	navigationState.setActivePath(href);
+	navigationState.closeSidebar();
+};
+
+const handleQuickAction = async (href: string) => {
+	if (!href) return;
+	await goto(href, { replaceState: false });
+	navigationState.setActivePath(href);
+};
 
 	let projectsInitialised = false;
 	let lastRunsProjectId: string | null = null;
@@ -275,7 +296,9 @@ const handleProjectChange = async (event: Event) => {
 		await projectState.refreshRuns(fetch, currentToken, projectId, 10).catch((err) => {
 			console.error('Failed to refresh runs', err);
 		});
-		await goto(`/projects/${projectId}/dashboard`, { replaceState: false });
+		const targetProject = projectState.getProjectById(projectId);
+		const slug = targetProject?.slug ?? null;
+		await goto(slug ? `/projects/${slug}/dashboard` : '/projects', { replaceState: false });
 	}
 };
 
@@ -362,6 +385,19 @@ const handleProjectChange = async (event: Event) => {
 						Use the Projects page to create a workspace and start tracking runs.
 					</p>
 				{/if}
+			{#if projectQuickActions.length}
+				<div class="flex flex-wrap gap-2 pt-2">
+					{#each projectQuickActions as action}
+						<button
+							type="button"
+							class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-slate-500 transition hover:border-sky-200 hover:text-sky-600"
+							onclick={() => void handleQuickAction(action.href)}
+						>
+							{action.label}
+						</button>
+					{/each}
+				</div>
+			{/if}
 		</div>
 
 	<MainNav
