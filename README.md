@@ -38,6 +38,12 @@ graph TD
 ```
 ---
 
+## Project workspace & file storage
+- **Canonical workspace** — Every project creates a folder under `data/projects/<slug>/` managed by `backend/storage.py`. All uploaded Terraform sources, rendered generators, scan artifacts, and run metadata live inside this tree.
+- **API guardrails** — Endpoints such as `POST /scan`, `/projects/{id}/runs`, and the artifact APIs resolve user-supplied paths relative to the workspace and reject absolute/parent-traversal paths. Upload flows (e.g., `/scan/upload`) first materialise files inside the owning project’s run directory before scanning.
+- **CLI alignment** — The CLI still supports scanning arbitrary local directories, but when you want parity with the hosted workflow point commands at the appropriate workspace path (for example, `python -m backend.cli scan --path data/projects/my-project`).
+- **Runtime configuration** — Override the root via `TERRAFORM_MANAGER_PROJECTS_ROOT` (consumed by `backend.storage.get_projects_root`) if you mount persistent storage elsewhere. All documentation below assumes the default `data/projects` root is available.
+
 ## Tech stack
 
 - **Backend**: Python 3.11+, FastAPI with Uvicorn, Pydantic v2, SQLAlchemy 2.0 (SQLite default), Jinja2 generators, python-jose JWT auth, Passlib (bcrypt), httpx.
@@ -54,6 +60,40 @@ python -m venv .venv && source .venv/bin/activate      # (Windows) .venv\Scripts
 pip install -r requirements.txt
 python -m api  # runs uvicorn api.main:app --reload --port 8890
 ```
+
+### Logging + Observability
+
+TerraformManager emits structured JSON logs via `backend/utils/logging.py`. By default they go to `stdout` and to `logs/terraform-manager.log` (rotating 5×5 MB). Tune with:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `TFM_LOG_LEVEL` | `INFO` | Global log level (DEBUG/INFO/WARN/ERROR). |
+| `TFM_LOG_DIR` | `logs` | Directory for the rotating file sink. |
+| `TFM_LOG_FILE` | `<TFM_LOG_DIR>/terraform-manager.log` | Override file path; set to `stdout`/`stderr`/`none` to disable. |
+| `TFM_LOG_FILE_MAX_BYTES` | `5242880` | Rotate threshold per file. |
+| `TFM_LOG_FILE_BACKUP_COUNT` | `5` | Number of rotated files to retain. |
+
+The log payload already carries request IDs, HTTP metadata, scan summaries, etc. Ship them to your aggregator by tailing `logs/terraform-manager.log` with Fluent Bit/Vector/Logstash or by binding `stdout` into your container logging pipeline. All JSON lines conform to a stable schema: `timestamp`, `level`, `logger`, `message`, and nested `context` / `extra` dictionaries.
+
+### Service manager
+
+Use the bundled supervisor to run, stop, and inspect the backend/frontend processes without juggling terminals:
+
+```bash
+# Start API + frontend
+python3 scripts/service_manager.py start all
+
+# Check process state and log locations
+python3 scripts/service_manager.py status
+
+# Tail JSON logs for a single service
+python3 scripts/service_manager.py logs api --follow
+
+# Restart just the frontend
+python3 scripts/service_manager.py restart frontend
+```
+
+The manager automatically loads `.env`, writes PID metadata under `logs/service-manager/`, and streams stdout/err to `logs/api-service.log` and `logs/frontend-service.log` so you can feed them into the same observability pipeline.
 
 - Optional tooling unlocks extra features:
   - [Terraform CLI](https://developer.hashicorp.com/terraform/cli) for `fmt` / `validate` integrations.
@@ -198,6 +238,7 @@ To run template smoke tests with `terraform validate`, export `TFM_RUN_TERRAFORM
 
 ## FastAPI endpoints (summary)
 
+- **Workspace scope**: All path-based operations are constrained to the managed workspace described above. API clients must reference project IDs/slugs or files previously uploaded into `data/projects/<slug>/…`; direct access to arbitrary filesystem paths is blocked.
 - Health: GET `/health`.
 - Scans: POST `/scan`, POST `/scan/upload` (multipart uploads with optional plan/cost artifacts).
 - Reports: GET `/reports`, GET `/reports/{id}`, GET `/reports/{id}/html`, GET `/reports/{id}/csv`, DELETE `/reports/{id}`.

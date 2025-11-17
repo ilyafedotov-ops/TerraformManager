@@ -4,6 +4,7 @@
 - Provide secure-by-default templates (AWS/Azure/Kubernetes) across generators to accelerate infrastructure provisioning.
 - Enforce best-practice policies via static analysis with clear remediation guidance.
 - Support both interactive wizard generation and CLI/CI review pipelines with optional terraform validation.
+- Guarantee that every Terraform source managed by the product lives under a dedicated workspace tree (`data/projects/<slug>/` by default) so uploads, scans, and artifacts never escape the repository-owned directories.
 
 ---
 

@@ -47,6 +47,7 @@ graph TD
 - SQLAlchemy models live in `backend/db/models.py`; `backend/storage.py` wraps CRUD for reports, configs, and settings, while `backend/db/session.py` manages session scopes and database initialisation.
 - The API seeds a service user when `TFM_API_TOKEN` is configured (`api/main.py::_ensure_service_user`) so automation can authenticate without manual signup.
 - Settings such as LLM provider choices are persisted through `upsert_setting` and surfaced via `/settings/llm`.
+- **Project workspace root** — All user-managed Terraform sources and artifacts live under `data/projects/<slug>/` (configurable via `TERRAFORM_MANAGER_PROJECTS_ROOT`). Helpers like `get_projects_root` ensure the directory tree exists, while `create_project_run` and artifact APIs keep scan uploads confined to the active project’s run directory. API endpoints that accept filesystem paths must resolve them relative to this workspace and reject any attempt to escape the managed tree.
 
 ## Knowledge search & sync
 - `backend/knowledge_sync.py` clones or updates Git repositories containing Markdown, normalises their placement under `knowledge/`, and returns metadata used by `/knowledge/sync`.
