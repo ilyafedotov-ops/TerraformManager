@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { env } from '$env/dynamic/public';
 import { deleteReport, type ReportDetail, ApiError } from '$lib/api/client';
 import ReportActions from '$lib/components/reports/ReportActions.svelte';
 import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
@@ -12,7 +11,6 @@ import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBan
 	const report = data.report as ReportDetail | null;
 	const error = data.error as string | undefined;
 	const token = data.token as string | null;
-	const apiBase = (env.PUBLIC_API_BASE ?? 'http://localhost:8890').replace(/\/$/, '');
 	const projectReportsHref = `/projects/${params.projectId}/reports`;
 	let deleting = $state(false);
 	let deleteError = $state<string | null>(null);
@@ -137,7 +135,6 @@ const displayedFindings = findings.slice(0, 50);
 				</div>
                 <ReportActions
                     id={params.id}
-                    apiBase={apiBase}
                     viewHref={null}
                     showView={false}
                     deleting={deleting}

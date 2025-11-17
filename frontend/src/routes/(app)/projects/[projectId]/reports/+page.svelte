@@ -1,5 +1,4 @@
 <script lang="ts">
-import { env } from '$env/dynamic/public';
 import {
 	listReports,
 	deleteReport,
@@ -17,9 +16,9 @@ import ReportTable from '$lib/components/reports/ReportTable.svelte';
 import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
 import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBanner.svelte';
 import { browser } from '$app/environment';
-import type { PageData, PageParams } from './$types';
+import type { PageData, PageProps } from './$types';
 
-	const { data, params } = $props<{ data: PageData; params: PageParams }>();
+	const { data, params } = $props<{ data: PageData; params: PageProps['params'] }>();
 const token = data.token as string | null;
 const projectId = params.projectId ?? null;
 const initialPayload = (data.reports ?? null) as ReportListResponse | null;
@@ -52,7 +51,6 @@ let commentDraft = $state('');
 let commentError = $state<string | null>(null);
 
 const statusOptions = ['pending', 'in_review', 'changes_requested', 'resolved', 'waived'] as const;
-const apiBase = (env.PUBLIC_API_BASE ?? 'http://localhost:8890').replace(/\/$/, '');
 let statusCounts = $state<Record<string, number>>({});
 let sortedSeverityCounts = $state<Array<[string, number]>>([]);
 let totalCount = $state<number>(initialPayload?.total_count ?? 0);
@@ -507,11 +505,10 @@ $effect(() => {
 			{/if}
 
 			{#if reports.length}
-				<ReportTable
-					reports={reports}
-					projectId={projectId}
-					apiBase={apiBase}
-					token={token}
+                <ReportTable
+                    reports={reports}
+                    projectId={projectId}
+                    token={token}
 					deletingId={deletingId}
 					selectable={true}
 					selectedId={selectedReportId}

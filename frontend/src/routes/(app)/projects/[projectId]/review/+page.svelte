@@ -6,10 +6,10 @@
     import { activeProject, projectState } from '$lib/stores/project';
     import { notifyError, notifySuccess } from '$lib/stores/notifications';
     import { onDestroy } from 'svelte';
-    import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBanner.svelte';
-    import type { PageData, PageParams } from './$types';
+import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBanner.svelte';
+import type { PageData, PageProps } from './$types';
 
-    const { data, params } = $props<{ data: PageData; params: PageParams }>();
+	const { data, params } = $props<{ data: PageData; params: PageProps['params'] }>();
     const token = data.token as string | null;
     const projectId = params.projectId ?? null;
 

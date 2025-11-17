@@ -1,9 +1,8 @@
-import { env } from '$env/dynamic/public';
 import type { PageLoad } from './$types';
+import { API_BASE } from '$lib/api/client';
 
 export const load: PageLoad = async ({ fetch }) => {
-	const apiBase = (env.PUBLIC_API_BASE ?? 'http://localhost:8890').replace(/\/$/, '');
-	const response = await fetch(`${apiBase}/generators/metadata`);
+	const response = await fetch(`${API_BASE}/generators/metadata`);
 	if (!response.ok) {
 		return { metadata: [], error: `Failed to load generator metadata (status ${response.status})` };
 	}

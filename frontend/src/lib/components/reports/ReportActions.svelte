@@ -2,10 +2,11 @@
 	import { browser } from '$app/environment';
 	import { createEventDispatcher } from 'svelte';
 	import { notifyError, notifySuccess } from '$lib/stores/notifications';
+	import { API_BASE } from '$lib/api/client';
 
 interface Props {
 	id: string;
-	apiBase: string;
+	apiBase?: string;
 	viewHref?: string | null;
 	deleting?: boolean;
 	deleteEnabled?: boolean;
@@ -21,7 +22,7 @@ const props: Props = $props();
 
 const {
 	id,
-	apiBase,
+	apiBase = API_BASE,
 	deleting = false,
 	deleteEnabled = true,
 	compact = false,

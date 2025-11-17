@@ -3,5 +3,6 @@ declare module '$env/dynamic/public' {
 }
 
 declare module '$env/static/public' {
-	export const PUBLIC_API_BASE: string;
+ export const PUBLIC_API_BASE: string;
+  export const PUBLIC_API_PORT: string;
 }

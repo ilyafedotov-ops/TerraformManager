@@ -1,6 +1,6 @@
 <script lang="ts">
 import ReportActions from '$lib/components/reports/ReportActions.svelte';
-import type { ReportSummary } from '$lib/api/client';
+import { API_BASE, type ReportSummary } from '$lib/api/client';
 import { createEventDispatcher } from 'svelte';
 
 /**
@@ -8,7 +8,7 @@ import { createEventDispatcher } from 'svelte';
  */
 interface Props {
     reports: ReportSummary[];
-    apiBase: string;
+    apiBase?: string;
     token?: string | null;
     deletingId?: string | null;
     selectable?: boolean;
@@ -65,6 +65,7 @@ const driftStatus = (summary?: ReportSummary['summary']) => {
     return `${label} (${total})`;
 };
 
+const apiBase = props.apiBase ?? API_BASE;
 const isDeleting = (id: string) => props.deletingId === id;
 
 const isSelected = (id: string) => props.selectedId === id;
@@ -147,7 +148,7 @@ const handleRowClick = (report: ReportSummary) => {
                     <td class="px-6 py-4 text-right" onclick={(event) => event.stopPropagation()}>
                         <ReportActions
                             id={report.id}
-                            apiBase={props.apiBase}
+                            apiBase={apiBase}
                             projectId={viewProjectId}
                             deleting={isDeleting(report.id)}
                             deleteEnabled={Boolean(props.token)}

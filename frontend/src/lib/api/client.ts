@@ -1,7 +1,17 @@
+import { browser } from '$app/environment';
 import { env } from '$env/dynamic/public';
 
 const DEFAULT_BASE = 'http://localhost:8890';
-export const API_BASE = (env.PUBLIC_API_BASE ?? DEFAULT_BASE).replace(/\/$/, '');
+
+const resolveBrowserBase = () => {
+    if (!browser) return DEFAULT_BASE;
+    const targetPort = env.PUBLIC_API_PORT || '8890';
+    const { protocol, hostname } = window.location;
+    return `${protocol}//${hostname}:${targetPort}`;
+};
+
+const resolvedBase = env.PUBLIC_API_BASE ?? resolveBrowserBase();
+export const API_BASE = resolvedBase.replace(/\/$/, '');
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 

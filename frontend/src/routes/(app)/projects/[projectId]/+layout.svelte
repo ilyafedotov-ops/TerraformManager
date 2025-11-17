@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { projectState } from '$lib/stores/project';
+	import type { ProjectDetail, ProjectSummary } from '$lib/api/client';
 
 	const { children, data } = $props();
 
-	const project = data.project as { id: string; name?: string; description?: string } | null;
+	const project = data.project as ProjectSummary | ProjectDetail | null;
 	const projectId = data.projectId as string;
 
 	$effect(() => {
@@ -21,11 +22,9 @@
 		{ id: 'reports', label: 'Reports', href: `/projects/${projectId}/reports`, match: /\/reports/ }
 	];
 
-	const activeTabId = $derived(() => {
-		const pathname = $page.url.pathname;
-		const tab = tabs.find((entry) => entry.match.test(pathname));
-		return tab?.id ?? 'dashboard';
-	});
+	const activeTabId = $derived(
+		tabs.find((entry) => entry.match.test($page.url.pathname))?.id ?? 'dashboard'
+	);
 </script>
 
 <section class="space-y-6">

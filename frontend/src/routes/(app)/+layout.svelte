@@ -218,7 +218,7 @@ const actionableCommandItems = $derived(
 const commandItemKey = (item: NavigationItem) => `${item.href ?? 'nohref'}::${item.title}`;
 const firstCommandHref = $derived(actionableCommandItems[0]?.href);
 
-const projectNavigationSections = $derived(() =>
+const projectNavigationSections = $derived(
 	materialiseNavigationSections($navigationSectionsStore, $activeProject?.id ?? null)
 );
 
@@ -377,7 +377,7 @@ const handleProjectChange = async (event: Event) => {
 			<p class="mt-2 font-mono text-slate-600">Local Development</p>
 			<p class="mt-2 text-slate-500">
 				API server:
-				<code class="rounded border border-slate-200 bg-white px-1 py-0.5 text-slate-600">http://localhost:8890</code>
+				<code class="rounded border border-slate-200 bg-white px-1 py-0.5 text-slate-600">{API_BASE}</code>
 			</p>
 		</div>
 	</aside>

@@ -18,7 +18,7 @@ from backend.policies import ALL_CHECKS
 from backend.policies.config import load_config, apply_config
 from backend.policies.metadata import get_rule_metadata
 from backend.rag import explain, get_passages_for_rule
-from backend.utils.logging import get_logger
+from backend.utils.logging import get_logger, log_context
 from backend.utils.diff import make_unified_diff
 from backend.validators import run_terraform_validate
 
@@ -57,17 +57,22 @@ def scan_paths(
     llm_options: Optional[Dict[str, Any]] = None,
     cost_options: Optional[Dict[str, Any]] = None,
     plan_path: Optional[Path] = None,
+    context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    LOGGER.debug(
-        "scan_paths invoked",
-        extra={
-            "paths": [str(p) for p in paths],
-            "use_terraform_validate": use_terraform_validate,
-            "llm_enabled": bool(llm_options),
-            "cost_enabled": cost_options is not None,
-            "plan_path": str(plan_path) if plan_path else None,
-        },
-    )
+    context_values = {"path_count": len(paths)}
+    if context:
+        context_values.update({k: v for k, v in context.items() if v is not None})
+    with log_context(**context_values):
+        LOGGER.debug(
+            "scan_paths invoked",
+            extra={
+                "paths": [str(p) for p in paths],
+                "use_terraform_validate": use_terraform_validate,
+                "llm_enabled": bool(llm_options),
+                "cost_enabled": cost_options is not None,
+                "plan_path": str(plan_path) if plan_path else None,
+            },
+        )
     review_config = load_config(paths)
     candidates: List[Candidate] = []
     files_seen = 0

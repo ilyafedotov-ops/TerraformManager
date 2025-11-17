@@ -1,13 +1,9 @@
 const plugin = require('tailwindcss/plugin');
-const colors = require('tailwindcss/colors');
 
 /** @type {import('tailwindcss').Config} */
 module.exports = {
 	content: ['./src/**/*.{html,js,svelte,ts}'],
 	theme: {
-		colors: {
-			...colors
-		},
 		extend: {
 			minHeight: {
 				'screen-75': '75vh'

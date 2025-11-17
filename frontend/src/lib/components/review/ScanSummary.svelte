@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ReportActions from '$lib/components/reports/ReportActions.svelte';
+	import { API_BASE } from '$lib/api/client';
 
 	/**
 	 * Render the outcome of a reviewer scan with severity distribution and export links.
@@ -8,7 +9,7 @@ export let reportId: string | null = null;
 export let summary: Record<string, unknown> | null = null;
 export let report: Record<string, unknown> | null = null;
 export let severityEntries: Array<[string, number]> = [];
-export let apiBase: string;
+export let apiBase: string = API_BASE;
 export let projectId: string | null = null;
 
 const issuesFound = (summary as { issues_found?: number } | null)?.issues_found ?? 0;

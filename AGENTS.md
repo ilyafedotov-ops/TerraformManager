@@ -17,8 +17,12 @@
 - Install shared dependencies via `pip install -r requirements.txt`; CLI and API share the same stack.
 - Optional tooling: Terraform CLI (fmt/validate), [`infracost`](https://www.infracost.io/docs/integrations/cli/) for cost deltas, and [`terraform-docs`](https://terraform-docs.io/) for generator markdown mirroring.
 - Frontend uses PNPM: `cd frontend && pnpm install`; dev server runs with `pnpm dev -- --open`.
-- FastAPI API runs with `python -m api` (loads uvicorn with auto-reload).
+- FastAPI API runs with `python -m api` (loads uvicorn with auto-reload). For day-to-day development, prefer the supervisor in `scripts/service_manager.py` (`python3 scripts/service_manager.py start all|status|logs api --follow`) so both services and their JSON logs (`logs/api-service.log`, `logs/frontend-service.log`) stay in sync.
 - Rebuild the TF-IDF index after adding Markdown knowledge with `python -m backend.cli reindex`.
+
+### Logging
+- Structured JSON logging is the default (`backend/utils/logging.py`); tweak verbosity and rotation via `TFM_LOG_*` env vars. Long-running jobs should wrap execution with `log_context` to annotate project/run metadata.
+- API requests automatically carry `request_id`, client IP, latency, and user info in the log lines, which live under `logs/terraform-manager.log` (rotating file) plus stdout. Tail with `python3 scripts/service_manager.py logs api --follow` or ship them to your aggregator.
 
 ## Working Agreements
 - Follow PEP 8 with 4-space indentation, rich type hints on public `backend/` functions, and concise docstrings where behavior is non-obvious.
