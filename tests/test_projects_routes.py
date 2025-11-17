@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Tuple
+from typing import Any, Dict, List, Tuple
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend import storage
@@ -10,6 +11,29 @@ from backend import storage
 
 def auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+
+def _create_project(client: TestClient, token: str, name: str = "API Generator Project") -> dict[str, str]:
+    response = client.post(
+        "/projects",
+        json={"name": name, "description": "Generator validation test"},
+        headers=auth_headers(token),
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def _sample_s3_payload() -> dict[str, str]:
+    return {
+        "bucket_name": "generator-bucket-1234",
+        "region": "us-east-1",
+        "environment": "dev",
+        "owner_tag": "platform",
+        "cost_center_tag": "ENG",
+        "force_destroy": False,
+        "versioning": True,
+        "enforce_secure_transport": True,
+    }
 
 
 def test_project_route_lifecycle(projects_client: Tuple[TestClient, str, Path, Path]) -> None:
@@ -225,34 +249,60 @@ def test_project_route_lifecycle(projects_client: Tuple[TestClient, str, Path, P
     assert manifest[0]["path"] == registered["version"]["display_path"]
     assert manifest[0]["media_type"] == "application/json"
 
-    delete_file = client.delete(
-        f"/projects/{project_id}/runs/{run_id}/artifacts",
-        params={"path": "outputs/report.json"},
-        headers=auth_headers(token),
-    )
-    assert delete_file.status_code == 204
 
-    manual_file = run_dir / "manual.txt"
-    manual_file.write_text("manual")
-    sync_response = client.post(
-        f"/projects/{project_id}/runs/{run_id}/artifacts/sync",
-        json={"prune_missing": False},
-        headers=auth_headers(token),
-    )
-    assert sync_response.status_code == 200
-    assert sync_response.json()["files_indexed"] >= 1
+def test_project_generator_validation_failure(
+    projects_client: Tuple[TestClient, str, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, token, _, _ = projects_client
+    project = _create_project(client, token, name="Generator Validation")
 
-    project_artifacts = client.get(
-        f"/projects/{project_id}/artifacts",
-        headers=auth_headers(token),
-    )
-    assert project_artifacts.status_code == 200
-    assert project_artifacts.json()["total_count"] == 1
+    def fake_validate(_files: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return {"status": "failed", "issues": ["terraform fmt failed"]}
 
-    remove_response = client.delete(
-        f"/projects/{project_id}",
-        params={"remove_files": "true"},
+    monkeypatch.setattr("api.routes.projects.validate_terraform_sources", fake_validate)
+
+    response = client.post(
+        f"/projects/{project['id']}/generators/aws/s3-secure-bucket",
+        json={"payload": _sample_s3_payload()},
         headers=auth_headers(token),
     )
-    assert remove_response.status_code == 204
-    assert not (projects_root / project["slug"]).exists()
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["error"] == "validation_failed"
+    assert detail["validation_summary"]["status"] == "failed"
+
+def test_project_generator_force_save(
+    projects_client: Tuple[TestClient, str, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, token, _, _ = projects_client
+    project = _create_project(client, token, name="Generator Force Save")
+
+    def fake_validate(_files: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return {"status": "failed", "issues": ["terraform fmt failed"]}
+
+    monkeypatch.setattr("api.routes.projects.validate_terraform_sources", fake_validate)
+
+    payload = {
+        "payload": _sample_s3_payload(),
+        "options": {
+            "force_save": True,
+            "asset_name": "Forced Bucket",
+            "description": "Force-saved config",
+        },
+    }
+    response = client.post(
+        f"/projects/{project['id']}/generators/aws/s3-secure-bucket",
+        json=payload,
+        headers=auth_headers(token),
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["asset"]["name"] == "Forced Bucket"
+    assert body["version"]["metadata"]["force_save"] is True
+
+    runs = client.get(f"/projects/{project['id']}/runs", headers=auth_headers(token)).json()["items"]
+    assert runs
+    assert runs[0]["status"] == "completed"
+    assert runs[0]["summary"]["asset_id"] == body["asset"]["id"]

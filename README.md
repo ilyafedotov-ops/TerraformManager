@@ -224,6 +224,13 @@ python -m backend.cli project generator \
   --payload payloads/s3-secure-bucket.json \
   --asset-name "Platform Logs Bucket" \
   --tags "terraform,baseline"
+
+# Override validation failures from the CLI when you intentionally want to save the result
+python -m backend.cli project generator \
+  --project-id <uuid> \
+  --slug aws/s3-secure-bucket \
+  --payload payloads/s3-secure-bucket.json \
+  --force-save
 ```
 
 > Tip: The Projects UI in the SvelteKit dashboard now covers workspace creation, editing, deletion, artifact browsing, and uploading new files. Reach for the CLI when you want automation, CI integration, or scripted workloads.

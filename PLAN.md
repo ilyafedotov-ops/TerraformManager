@@ -166,7 +166,7 @@ Goal: simplify the entire product around a single “Project” hub so users can
 ### Epic A – Backend Persistence & APIs
 - [x] **Project-aware generator endpoints**: add `POST /projects/{project_id}/generators/{slug}` + `/blueprints` handlers that wrap existing renderers, enforce project ownership, and create `ProjectRun` rows (kind `generator/<slug>`). Return rendered files plus created asset/version metadata.
 - [ ] **Report auto-save in API scans**: update `/scan` + `/scan/upload` to always create a run (when `req.save` true) and persist JSON/HTML outputs via `save_run_artifact` + `register_generated_asset` with `asset_type='scan_report'`.
-- [ ] **CLI parity hooks**: when CLI generators arrive, allow `backend/cli.py` to accept `--project-id` and forward payloads to the new project-aware endpoints (reuse auth tokens/settings) so automation benefits too.
+- [x] **CLI parity hooks**: when CLI generators arrive, allow `backend/cli.py` to accept `--project-id` and forward payloads to the new project-aware endpoints (reuse auth tokens/settings) so automation benefits too.
 
 ### Epic B – Storage & Versioning Enhancements
 - [x] **Asset bundle manifest**: create `generated_asset_version_files` table storing `{version_id, path, storage_path, checksum, media_type, size}` and update `_create_asset_version` to populate each rendered Terraform file.
@@ -176,7 +176,7 @@ Goal: simplify the entire product around a single “Project” hub so users can
 ### Epic C – Validation & Quality Gates
 - [x] **Terraform validation service**: implement `backend/terraform_validation.py` to run `terraform fmt -check` + `terraform validate -json` inside a temp dir, capturing diagnostics by file/line/severity.
 - [x] **Version metadata columns**: add JSON column `validation_summary` + text `payload_fingerprint` to `GeneratedAssetVersion`; store validation result, generator slug, blueprint id, git commit hash (if provided), and link to originating `ProjectRun`.
-- [ ] **Force/override workflow**: API should reject promotion on validation failure unless a `force_save` flag is set; responses must include validation details so the UI can guide fixes.
+- [x] **Force/override workflow**: API should reject promotion on validation failure unless a `force_save` flag is set; responses must include validation details so the UI can guide fixes.
 
 ### Epic D – Frontend & UX
 - [ ] **Generator wizard updates** (`frontend/src/routes/(app)/projects/[projectId]/generate/+page.svelte`):
