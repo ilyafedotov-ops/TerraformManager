@@ -115,23 +115,26 @@ Goal: simplify the entire product around a single “Project” hub so users can
 - [x] Update OpenAPI docs plus `docs/` references and wire router in `api/main.py`. Include request/response models in `api/schemas/projects.py`.
 
 ### Phase 3 – CLI & Automation Alignment
-- [ ] Extend `backend/cli.py` commands (`scan`, `baseline`, `docs`, etc.) to accept `--project-id/--project-slug` and persist outputs in the correct directory tree.
-- [ ] Add `project create/list/run/upload` subcommands to bootstrap a workspace locally, optionally calling API endpoints for remote state.
-- [ ] Document CLI workflows in README/knowledge and add regression tests for the new options under `tests/backend/`.
+- [x] Extend `backend/cli.py` commands (`scan`, `baseline`, `docs`, etc.) to accept `--project-id/--project-slug` and persist outputs in the correct directory tree.
+- [x] Add `project create/list/run/upload` subcommands to bootstrap a workspace locally, optionally calling API endpoints for remote state (upload now mirrors the FastAPI artifact endpoints).
+- [x] Document CLI workflows in README/knowledge and add regression tests for the new options under `tests/backend/`.
 
 ### Phase 4 – Frontend Navigation & State
 - [x] Build a global project switcher store in `frontend/src/lib/stores/project.ts` plus derived selectors for summary data; hydrate via `(app)/+layout.server.ts`.
-- [ ] Refactor navigation so all authenticated routes render under `/projects/:slug/*`; update `src/lib/api` clients to default to the active project.
+- [x] Refactor navigation so all authenticated routes render under `/projects/:slug/*`; update `src/lib/api` clients to default to the active project.
 - [ ] Replace fragmented top-level nav with a project-focused sidebar that exposes key actions (Create config, Run review, Upload artifact) contextually.
 
 ### Phase 5 – Project Workspace Experience
 - [x] Implement `/projects` list with tiles showing latest run status, open issues, and quick actions (open dashboard, start scan, upload artifact).
 - [x] Build `/projects/:slug/summary` cards for Configurations, Reviews, Reports, Artifacts, Knowledge, and Status. Each card exposes the most recent items, status pills, and CTA buttons.
 - [ ] Consolidate Configs, Reviews, and Reports tabs so users can create/edit configs, trigger scans, review outputs, and promote artifacts without leaving the project.
+  - 🔄 Reports tab under `/projects/[slug]/reports` now scopes every API query to the active project ID and slug, keeping filters, pagination, and review metadata edits inside the workspace context.
+  - 🔄 Review uploads from `/projects/[slug]/review` now send both `project_id` and `project_slug`, ensuring saved scans and runs stay linked to the same workspace routing model.
 - [ ] Provide inline diff/file-browser components for run artifacts, referencing helper components under `frontend/src/lib/components/artifacts/`.
 
 ### Phase 6 – Knowledge, Guidance, and Notifications
 - [ ] Surface contextual knowledge articles linked to the project’s generator/policy tags; update `frontend/src/lib/api/knowledge.ts` to filter by project metadata.
+  - 🔄 Added `frontend/src/lib/api/knowledge.ts` plus a dashboard knowledge panel that queries `/knowledge/search` using project metadata + generator tags, surfacing tailored remediation docs directly within each project workspace.
 - [ ] Add guided toasts/checklists for high-value actions (e.g., drift detected → run review). Use the shared notification store for consistent messaging.
 - [ ] Offer embedded help modals describing CLI equivalents and manual verification steps, populated from `docs/` or `knowledge/`.
 
