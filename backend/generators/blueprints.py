@@ -5,8 +5,11 @@ from io import BytesIO
 from typing import Any, Dict, List
 import zipfile
 
+from backend.utils.logging import get_logger, log_context
 from .models import BlueprintComponent, BlueprintRemoteStateAzure, BlueprintRemoteStateConfig, BlueprintRemoteStateS3, BlueprintRequest
 from .registry import GeneratorDefinition, get_generator_definition
+
+LOGGER = get_logger(__name__)
 
 
 def _apply_environment_placeholders(value: Any, environment: str) -> Any:
@@ -110,43 +113,49 @@ def _render_readme(request: BlueprintRequest) -> str:
 def render_blueprint_bundle(request: BlueprintRequest) -> Dict[str, Any]:
     files: List[Dict[str, str]] = []
 
-    for environment in request.environments:
-        env_dir = f"environments/{environment}"
+    with log_context(blueprint=request.name):
+        LOGGER.info(
+            "Rendering blueprint bundle",
+            extra={"environments": request.environments, "components": [c.slug for c in request.components]},
+        )
 
-        if request.remote_state:
-            backend_content = _render_remote_state_block(request.remote_state, environment)
-            files.append({"path": f"{env_dir}/backend.tf", "content": backend_content})
+        for environment in request.environments:
+            env_dir = f"environments/{environment}"
 
-        if request.include_variables_stub:
-            files.append({"path": f"{env_dir}/variables.tf", "content": _render_variables_stub(environment)})
+            if request.remote_state:
+                backend_content = _render_remote_state_block(request.remote_state, environment)
+                files.append({"path": f"{env_dir}/backend.tf", "content": backend_content})
 
-        for component in request.components:
-            definition = get_generator_definition(component.slug)
-            payload = _prepare_component_payload(definition, component, environment)
-            rendered = definition.render(payload)
-            subdir = component.target_subdir.strip("/") if component.target_subdir else ""
-            if subdir:
-                path = f"{env_dir}/{subdir}/{rendered['filename']}"
-            else:
-                path = f"{env_dir}/{rendered['filename']}"
-            files.append({"path": path, "content": rendered["content"]})
+            if request.include_variables_stub:
+                files.append({"path": f"{env_dir}/variables.tf", "content": _render_variables_stub(environment)})
 
-    if request.include_readme:
-        files.append({"path": "README.md", "content": _render_readme(request)})
+            for component in request.components:
+                definition = get_generator_definition(component.slug)
+                payload = _prepare_component_payload(definition, component, environment)
+                rendered = definition.render(payload)
+                subdir = component.target_subdir.strip("/") if component.target_subdir else ""
+                if subdir:
+                    path = f"{env_dir}/{subdir}/{rendered['filename']}"
+                else:
+                    path = f"{env_dir}/{rendered['filename']}"
+                files.append({"path": path, "content": rendered["content"]})
 
-    archive_name = f"{request.name.lower().replace(' ', '_')}_blueprint.zip"
-    buffer = BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for item in files:
-            zf.writestr(item["path"], item["content"])
-    archive_bytes = buffer.getvalue()
+        if request.include_readme:
+            files.append({"path": "README.md", "content": _render_readme(request)})
 
-    return {
-        "archive_name": archive_name,
-        "files": files,
-        "archive_bytes": archive_bytes,
-        "archive_base64": base64.b64encode(archive_bytes).decode("ascii"),
-    }
+        archive_name = f"{request.name.lower().replace(' ', '_')}_blueprint.zip"
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for item in files:
+                zf.writestr(item["path"], item["content"])
+        archive_bytes = buffer.getvalue()
+
+        return {
+            "archive_name": archive_name,
+            "files": files,
+            "archive_bytes": archive_bytes,
+            "archive_base64": base64.b64encode(archive_bytes).decode("ascii"),
+        }
 
 
 __all__ = ["render_blueprint_bundle"]

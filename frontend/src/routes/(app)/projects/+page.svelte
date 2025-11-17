@@ -53,18 +53,19 @@ type LibraryCacheEntry = ReturnType<typeof projectState.getCachedLibrary> | null
 type ConfigCacheEntry = ReturnType<typeof projectState.getCachedConfigs> | null;
 type ArtifactIndexCacheEntry = ReturnType<typeof projectState.getCachedArtifactIndex> | null;
 
-	const projects = $derived($projectState.projects as ProjectSummary[]);
-	const activeProjectValue = $derived($activeProject as ProjectDetail | null);
-	const projectRuns = $derived($activeProjectRuns as ProjectRunSummary[]);
-	const libraryAssets = $derived($activeProjectLibrary as GeneratedAssetSummary[]);
-	const overview = $derived($activeProjectOverview as ProjectOverview | null);
-	const projectConfigs = $derived(configCache?.items ?? []);
-	const projectArtifacts = $derived(artifactIndexCache?.items ?? []);
+const projects = $derived($projectState.projects as ProjectSummary[]);
+const activeProjectValue = $derived($activeProject as ProjectDetail | null);
+const projectRuns = $derived($activeProjectRuns as ProjectRunSummary[]);
+const libraryAssets = $derived($activeProjectLibrary as GeneratedAssetSummary[]);
+const overview = $derived($activeProjectOverview as ProjectOverview | null);
 
 let runCache = $state<RunsCacheEntry>(null);
 let libraryCache = $state<LibraryCacheEntry>(null);
 let configCache = $state<ConfigCacheEntry>(null);
 let artifactIndexCache = $state<ArtifactIndexCacheEntry>(null);
+
+const projectConfigs = $derived(configCache?.items ?? []);
+const projectArtifacts = $derived(artifactIndexCache?.items ?? []);
 
 	let searchQuery = $state('');
 let activeTab = $state<'overview' | 'runs' | 'files' | 'configs' | 'artifacts' | 'library' | 'settings'>('overview');
@@ -1580,7 +1581,7 @@ $effect(() => {
 													class="w-full rounded-2xl border border-slate-200 px-3 py-2"
 													rows={2}
 													bind:value={configDescriptionInput}
-												/>
+												></textarea>
 											</label>
 											<label class="block space-y-1">
 												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Kind</span>
@@ -1607,7 +1608,7 @@ $effect(() => {
 													rows={6}
 													bind:value={configPayloadInput}
 													placeholder="# thresholds:\n#   high: fail"
-												/>
+												></textarea>
 											</label>
 											<label class="block space-y-1">
 												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Tags</span>
@@ -1624,7 +1625,7 @@ $effect(() => {
 													class="w-full rounded-2xl border border-slate-200 px-3 py-2 font-mono text-xs"
 													rows={4}
 													bind:value={configMetadataInput}
-												/>
+												></textarea>
 											</label>
 											<label class="flex items-center gap-2 text-xs text-slate-500">
 												<input type="checkbox" bind:checked={configIsDefault} />
@@ -1694,7 +1695,158 @@ $effect(() => {
 									</div>
 								</div>
 								{#if artifactTableError}
-									<p class="rounded-2xl
+									<p class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-600">
+										{artifactTableError}
+									</p>
+								{:else}
+									<div class="grid gap-4 lg:grid-cols-[3fr,2fr]">
+										<div class="space-y-4">
+											{#if artifactTableLoading && !projectArtifacts.length}
+												<p class="text-sm text-slate-500">Loading artifacts…</p>
+											{:else if !projectArtifacts.length}
+												<p class="text-sm text-slate-500">No artifacts indexed yet. Promote a run to populate this table.</p>
+											{:else}
+												<div class="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+													<table class="w-full text-sm text-slate-600">
+														<thead class="bg-slate-50 text-xs uppercase tracking-[0.3em] text-slate-400">
+															<tr>
+																<th class="px-4 py-3 text-left">Artifact</th>
+																<th class="px-4 py-3 text-left">Details</th>
+																<th class="px-4 py-3 text-left">Actions</th>
+															</tr>
+														</thead>
+														<tbody>
+															{#each projectArtifacts as artifact (artifact.id)}
+																<tr class="border-t border-slate-100">
+																	<td class="px-4 py-3 align-top">
+																		<p class="font-semibold text-slate-700">{artifact.name}</p>
+																		<p class="text-xs uppercase tracking-[0.2em] text-slate-400">
+																			Run: {artifact.run_id ?? 'manual'}
+																		</p>
+																	</td>
+																	<td class="px-4 py-3 align-top">
+																		<div class="space-y-1 text-xs text-slate-500">
+																			<p class="font-mono text-[0.7rem] text-slate-600">{artifact.relative_path}</p>
+																			{#if artifact.media_type}
+																				<p>{artifact.media_type}</p>
+																			{/if}
+																			{#if artifact.tags.length}
+																				<div class="flex flex-wrap gap-1">
+																					{#each artifact.tags as tag}
+																						<span class="rounded-full border border-slate-200 px-2 py-[1px] text-[0.65rem] uppercase tracking-[0.3em] text-slate-400">
+																							{tag}
+																						</span>
+																					{/each}
+																				</div>
+																			{/if}
+																			{#if artifact.created_at}
+																				<p>Uploaded {artifact.created_at}</p>
+																			{/if}
+																		</div>
+																	</td>
+																	<td class="px-4 py-3 align-top">
+																		<div class="flex flex-col gap-2 text-xs">
+																			<button
+																				type="button"
+																				class="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50"
+																				onclick={() => handleEditArtifactMetadata(artifact)}
+																			>
+																				Edit metadata
+																			</button>
+																		</div>
+																	</td>
+																</tr>
+															{/each}
+														</tbody>
+													</table>
+												</div>
+												<div class="flex flex-col gap-2 text-xs text-slate-400 md:flex-row md:items-center md:justify-between">
+													<span>
+														Showing {projectArtifacts.length} of {artifactIndexCache?.totalCount ?? projectArtifacts.length} artifact(s)
+													</span>
+													{#if artifactIndexCache?.nextCursor}
+														<button
+															type="button"
+															class={`inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-500 transition hover:bg-slate-50 ${
+																artifactTableLoading ? 'cursor-wait opacity-60' : ''
+															}`}
+															onclick={handleLoadMoreProjectArtifacts}
+															disabled={artifactTableLoading}
+														>
+															{artifactTableLoading ? 'Loading…' : 'Load more'}
+														</button>
+													{/if}
+												</div>
+											{/if}
+										</div>
+										<div class="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
+											<div>
+												<h4 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Edit artifact metadata</h4>
+												{#if artifactEditTarget}
+													<p class="text-sm text-slate-500">
+														Updating <span class="font-semibold text-slate-700">{artifactEditTarget.name}</span>
+													</p>
+												{:else}
+													<p class="text-sm text-slate-500">Select an artifact to edit its tags and metadata.</p>
+												{/if}
+											</div>
+											<form class="space-y-3" onsubmit={handleArtifactMetadataSubmit}>
+												<label class="block space-y-1 text-xs text-slate-500">
+													<span class="font-semibold uppercase tracking-[0.3em] text-slate-400">Tags (comma separated)</span>
+													<input
+														class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700"
+														type="text"
+														bind:value={artifactTagsInput}
+														placeholder="prod,release"
+														disabled={!artifactEditTarget || artifactEditBusy}
+													/>
+												</label>
+												<label class="block space-y-1 text-xs text-slate-500">
+													<span class="font-semibold uppercase tracking-[0.3em] text-slate-400">Media type</span>
+													<input
+														class="w-full rounded-2xl border border-slate-200 px-3 py-2 text-sm text-slate-700"
+														type="text"
+														bind:value={artifactMediaTypeInput}
+														placeholder="application/json"
+														disabled={!artifactEditTarget || artifactEditBusy}
+													/>
+												</label>
+												<label class="block space-y-1 text-xs text-slate-500">
+													<span class="font-semibold uppercase tracking-[0.3em] text-slate-400">Metadata (JSON)</span>
+													<textarea
+														class="w-full rounded-2xl border border-slate-200 px-3 py-2 font-mono text-xs text-slate-700"
+														rows={6}
+														bind:value={artifactMetadataInput}
+														disabled={!artifactEditTarget || artifactEditBusy}
+													></textarea>
+												</label>
+												{#if artifactEditError}
+													<p class="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
+														{artifactEditError}
+													</p>
+												{/if}
+												<div class="flex flex-wrap items-center gap-2 text-sm">
+													<button
+														type="submit"
+														class="rounded-xl bg-sky-500 px-4 py-2 font-semibold text-white shadow-sm shadow-sky-200 transition hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-60"
+														disabled={!artifactEditTarget || artifactEditBusy}
+													>
+														{artifactEditBusy ? 'Saving…' : 'Save metadata'}
+													</button>
+													<button
+														type="button"
+														class="rounded-xl border border-slate-200 px-4 py-2 font-semibold text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+														onclick={resetArtifactEdit}
+														disabled={artifactEditBusy || !artifactEditTarget}
+													>
+														Clear selection
+													</button>
+												</div>
+											</form>
+										</div>
+									</div>
+								{/if}
+							</section>
 						{:else if activeTab === 'library'}
 							<section class="space-y-4">
 								<div class="flex items-center justify-between">

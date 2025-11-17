@@ -519,6 +519,7 @@ def main() -> None:
         paths = [Path(p) for p in args.path]
         project_record: Dict[str, Any] | None = None
         project_run_parameters: Dict[str, Any] | None = None
+        project_run_record: Dict[str, Any] | None = None
         if args.project_id or args.project_slug:
             try:
                 project_record = _resolve_project_reference(args.project_id, args.project_slug)
@@ -581,13 +582,49 @@ def main() -> None:
 
         plan_path = Path(args.plan_json).resolve() if args.plan_json else None
 
-        report = scan_paths(
-            paths,
-            use_terraform_validate=args.terraform_validate,
-            llm_options=llm_options,
-            cost_options=cost_opts,
-            plan_path=plan_path,
-        )
+        run_label = None
+        scan_context = {"source": "cli.scan"}
+        if project_record:
+            run_label = args.project_run_label or f"CLI scan {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}"
+            try:
+                project_run_record = create_project_run(
+                    project_id=project_record["id"],
+                    label=run_label,
+                    kind=args.project_run_kind or "review",
+                    parameters=project_run_parameters or {},
+                    status="running",
+                )
+            except ValueError as exc:
+                logger.error("Failed to create project run: %s", exc)
+                sys.exit(1)
+            scan_context.update(
+                {
+                    "project_id": project_record["id"],
+                    "project_slug": project_record.get("slug"),
+                    "run_id": project_run_record["id"],
+                }
+            )
+
+        try:
+            report = scan_paths(
+                paths,
+                use_terraform_validate=args.terraform_validate,
+                llm_options=llm_options,
+                cost_options=cost_opts,
+                plan_path=plan_path,
+                context=scan_context,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Scan failed")
+            if project_record and project_run_record:
+                update_project_run(
+                    run_id=project_run_record["id"],
+                    project_id=project_record["id"],
+                    status="failed",
+                    summary={"error": str(exc)},
+                    finished_at=datetime.now(timezone.utc),
+                )
+            raise
         report_id: str | None = None
         logger.info(
             "Scan completed",
@@ -626,21 +663,13 @@ def main() -> None:
             save_report(report_id, report.get("summary", {}), report)
             report["id"] = report_id
 
-        if project_record:
-            run_label = args.project_run_label or f"CLI scan {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}"
-            run = create_project_run(
-                project_id=project_record["id"],
-                label=run_label,
-                kind=args.project_run_kind or "review",
-                parameters=project_run_parameters or {},
-                report_id=report_id,
-            )
+        if project_record and project_run_record:
             summary_payload = dict(report.get("summary", {}))
             if report_id:
                 summary_payload["saved_report_id"] = report_id
             summary_payload["artifacts"] = [rel for _, rel in generated_artifacts]
             update_project_run(
-                run_id=run["id"],
+                run_id=project_run_record["id"],
                 project_id=project_record["id"],
                 status="completed",
                 summary=summary_payload,
@@ -648,8 +677,8 @@ def main() -> None:
                 report_id=report_id,
             )
             for artifact_path, relative in generated_artifacts:
-                _save_run_artifact_from_path(project_record["id"], run["id"], artifact_path, relative)
-            print(f"Logged run {run['id']} under project {project_record['name']}")
+                _save_run_artifact_from_path(project_record["id"], project_run_record["id"], artifact_path, relative)
+            print(f"Logged run {project_run_record['id']} under project {project_record['name']}")
         thresholds = report.get("summary", {}).get("thresholds", {})
         if thresholds.get("triggered"):
             violated = ", ".join(thresholds.get("violated_ids", []))
@@ -661,7 +690,7 @@ def main() -> None:
             sys.exit(2)
     elif args.cmd == "baseline":
         paths = [Path(p) for p in args.path]
-        report = scan_paths(paths, use_terraform_validate=False)
+        report = scan_paths(paths, use_terraform_validate=False, context={"source": "cli.baseline"})
         baseline_data = _build_baseline(report, include_waived=args.include_waived)
         out_path = Path(args.out)
         _ensure_parent(out_path)

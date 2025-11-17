@@ -72,8 +72,33 @@ TerraformManager emits structured JSON logs via `backend/utils/logging.py`. By d
 | `TFM_LOG_FILE` | `<TFM_LOG_DIR>/terraform-manager.log` | Override file path; set to `stdout`/`stderr`/`none` to disable. |
 | `TFM_LOG_FILE_MAX_BYTES` | `5242880` | Rotate threshold per file. |
 | `TFM_LOG_FILE_BACKUP_COUNT` | `5` | Number of rotated files to retain. |
+| `TFM_PORT` / `PORT` | `8890` | Backend bind port (supervisor + frontend detection honor it). |
+| `PUBLIC_API_BASE` | auto-detected | Force the frontend to hit a specific API origin (e.g., `https://reviewer.example.com`). |
+| `PUBLIC_API_PORT` | derived from `TFM_PORT` | When auto-detecting, override just the port exposed by the API. |
 
 The log payload already carries request IDs, HTTP metadata, scan summaries, etc. Ship them to your aggregator by tailing `logs/terraform-manager.log` with Fluent Bit/Vector/Logstash or by binding `stdout` into your container logging pipeline. All JSON lines conform to a stable schema: `timestamp`, `level`, `logger`, `message`, and nested `context` / `extra` dictionaries.
+
+**Common tasks**
+
+```bash
+# Raise log level for a debugging session
+export TFM_LOG_LEVEL=DEBUG
+
+# Point the structured log file somewhere else (and disable stdout logging)
+export TFM_LOG_DIR=/var/log/tfm
+export TFM_LOG_FILE=/var/log/tfm/api.jsonl
+
+# Switch the API to port 9000 and let the frontend follow automatically
+export TFM_PORT=9000
+export PUBLIC_API_PORT=9000
+
+# When running behind a reverse proxy, force the SPA to target the external URL
+export PUBLIC_API_BASE="https://tfm.example.com"
+
+# Tear down environment overrides
+unset TFM_LOG_LEVEL TFM_LOG_DIR TFM_LOG_FILE TFM_LOG_FILE_MAX_BYTES \
+      TFM_LOG_FILE_BACKUP_COUNT TFM_PORT PUBLIC_API_BASE PUBLIC_API_PORT
+```
 
 ### Service manager
 
@@ -94,6 +119,8 @@ python3 scripts/service_manager.py restart frontend
 ```
 
 The manager automatically loads `.env`, writes PID metadata under `logs/service-manager/`, and streams stdout/err to `logs/api-service.log` and `logs/frontend-service.log` so you can feed them into the same observability pipeline.
+
+- When you access the UI from another machine, the frontend now auto-detects the API host using the page's origin. Override the behavior with `PUBLIC_API_BASE` or set `PUBLIC_API_PORT` in `.env` if your backend is not running on port `8890`.
 
 - Optional tooling unlocks extra features:
   - [Terraform CLI](https://developer.hashicorp.com/terraform/cli) for `fmt` / `validate` integrations.

@@ -4,6 +4,11 @@ import { svelteTesting } from '@testing-library/svelte/vite';
 
 export default defineConfig({
 	plugins: [sveltekit(), svelteTesting()],
+	server: {
+		host: '0.0.0.0',
+		port: 5173,
+		strictPort: true
+	},
 	test: {
 		globals: true,
 		environment: 'jsdom',

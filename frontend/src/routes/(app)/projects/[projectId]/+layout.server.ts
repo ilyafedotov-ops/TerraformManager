@@ -1,7 +1,5 @@
-import { env } from '$env/dynamic/public';
 import { redirect } from '@sveltejs/kit';
-
-const API_BASE = (env.PUBLIC_API_BASE ?? 'http://localhost:8890').replace(/\/$/, '');
+import { API_BASE } from '$lib/api/client';
 
 export const load = async ({ parent, params, fetch }) => {
 	const parentData = await parent();
