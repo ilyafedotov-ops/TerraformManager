@@ -8,7 +8,7 @@ type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export interface ApiRequestOptions<TBody = unknown> {
 	method?: HttpMethod;
 	token?: string | null;
-	searchParams?: Record<string, string | number | boolean | undefined>;
+	searchParams?: Record<string, string | number | boolean | undefined> | URLSearchParams;
 	body?: TBody;
 	headers?: HeadersInit;
 }
@@ -105,6 +105,8 @@ export interface ProjectSummary {
 	last_activity_at?: string | null;
 	run_count?: number;
 	library_asset_count?: number;
+	config_count?: number;
+	artifact_count?: number;
 	latest_run?: ProjectListLatestRun | null;
 	metadata?: Record<string, unknown> | null;
 }
@@ -172,7 +174,11 @@ export interface ProjectOverview {
 	run_count: number;
 	latest_run?: ProjectRunSummary | null;
 	library_asset_count: number;
+	config_count: number;
+	default_config?: ProjectConfigRecord | null;
+	artifact_count: number;
 	recent_assets: GeneratedAssetSummary[];
+	recent_artifacts: ProjectArtifactRecord[];
 	metrics: ProjectOverviewMetrics;
 	last_activity_at?: string | null;
 }
@@ -183,6 +189,85 @@ export interface ArtifactEntry {
 	is_dir: boolean;
 	size?: number | null;
 	modified_at?: string | null;
+	artifact_id?: string | null;
+	media_type?: string | null;
+	tags?: string[] | null;
+	metadata?: Record<string, unknown> | null;
+}
+
+export interface ProjectConfigRecord {
+	id: string;
+	project_id: string;
+	name: string;
+	slug: string;
+	description?: string | null;
+	config_name?: string | null;
+	kind: string;
+	payload?: string | null;
+	tags: string[];
+	metadata: Record<string, unknown>;
+	is_default: boolean;
+	created_at?: string | null;
+	updated_at?: string | null;
+}
+
+export interface ProjectConfigCreatePayload {
+	name: string;
+	slug?: string | null;
+	description?: string | null;
+	config_name?: string | null;
+	payload?: string | null;
+	kind?: string;
+	tags?: string[];
+	metadata?: Record<string, unknown>;
+	is_default?: boolean;
+}
+
+export interface ProjectConfigUpdatePayload {
+	name?: string;
+	description?: string | null;
+	config_name?: string | null;
+	payload?: string | null;
+	kind?: string | null;
+	tags?: string[] | null;
+	metadata?: Record<string, unknown> | null;
+	is_default?: boolean | null;
+}
+
+export interface ProjectArtifactRecord {
+	id: string;
+	project_id: string;
+	run_id?: string | null;
+	report_id?: string | null;
+	name: string;
+	relative_path: string;
+	storage_path: string;
+	media_type?: string | null;
+	size_bytes?: number | null;
+	checksum?: string | null;
+	tags: string[];
+	metadata: Record<string, unknown>;
+	created_at?: string | null;
+	updated_at?: string | null;
+}
+
+export interface ProjectArtifactUpdatePayload {
+	tags?: string[];
+	metadata?: Record<string, unknown>;
+	media_type?: string | null;
+}
+
+export interface ProjectArtifactListResponse {
+	items: ProjectArtifactRecord[];
+	nextCursor?: string | null;
+	totalCount: number;
+}
+
+export interface ProjectArtifactSyncResponse {
+	added: number;
+	updated: number;
+	removed: number;
+	files_indexed: number;
 }
 
 export interface GeneratedAssetVersionSummary {
@@ -261,12 +346,19 @@ export interface GeneratedAssetUpdatePayload {
 }
 
 function buildUrl(path: string, searchParams?: ApiRequestOptions['searchParams']): string {
-    const url = new URL(path.startsWith('/') ? path : `/${path}`, API_BASE);
-	if (searchParams) {
-		for (const [key, value] of Object.entries(searchParams)) {
-			if (value === undefined || value === null) continue;
-			url.searchParams.set(key, String(value));
+	const url = new URL(path.startsWith('/') ? path : `/${path}`, API_BASE);
+	if (!searchParams) {
+		return url.toString();
+	}
+	if (searchParams instanceof URLSearchParams) {
+		for (const [key, value] of searchParams.entries()) {
+			url.searchParams.append(key, value);
 		}
+		return url.toString();
+	}
+	for (const [key, value] of Object.entries(searchParams)) {
+		if (value === undefined || value === null) continue;
+		url.searchParams.set(key, String(value));
 	}
 	return url.toString();
 }
@@ -452,7 +544,12 @@ export async function listAuthEvents(
 
 export interface ReportSummary {
 	id: string;
-	created_at?: string;
+	created_at?: string | null;
+	updated_at?: string | null;
+	review_status?: string | null;
+	review_assignee?: string | null;
+	review_due_at?: string | null;
+	review_notes?: string | null;
 	summary?: {
 		issues_found?: number;
 		severity_counts?: Record<string, number>;
@@ -464,6 +561,12 @@ export interface ReportSummary {
 
 export interface ReportDetail {
 	id?: string;
+	review_status?: string | null;
+	review_assignee?: string | null;
+	review_due_at?: string | null;
+	review_notes?: string | null;
+	created_at?: string | null;
+	updated_at?: string | null;
 	summary?: ReportSummary['summary'] & {
 		issues_found?: number;
 		thresholds?: Record<string, unknown>;
@@ -474,21 +577,212 @@ export interface ReportDetail {
 	cost?: CostReport | null;
 	drift?: DriftReport | null;
 	waived_findings?: Array<Record<string, unknown>>;
+	report?: Record<string, unknown>;
+}
+
+export interface ReportListAggregates {
+	status_counts?: Record<string, number>;
+	severity_counts?: Record<string, number>;
+}
+
+export interface ReportListResponse {
+	items: ReportSummary[];
+	total_count: number;
+	limit: number;
+	offset: number;
+	next_offset?: number | null;
+	has_more: boolean;
+	aggregates?: ReportListAggregates;
+}
+
+export interface ListReportsParams {
+	limit?: number;
+	offset?: number;
+	status?: string[] | string;
+	assignee?: string;
+	search?: string;
+	created_after?: string;
+	created_before?: string;
+	order?: 'asc' | 'desc';
 }
 
 export async function listReports(
-    fetchFn: typeof fetch,
-    token: string,
-    limit = 20
-): Promise<ReportSummary[]> {
-    return apiFetch<ReportSummary[]>(fetchFn, '/reports', {
-        token,
-        searchParams: { limit }
-    });
+	fetchFn: typeof fetch,
+	token: string,
+	params: ListReportsParams = {}
+): Promise<ReportListResponse> {
+	const searchParams = new URLSearchParams();
+	const effectiveLimit = params.limit ?? 50;
+
+	searchParams.set('limit', String(effectiveLimit));
+	if (typeof params.offset === 'number' && params.offset >= 0) {
+		searchParams.set('offset', String(params.offset));
+	}
+	if (params.assignee) {
+		searchParams.set('assignee', params.assignee);
+	}
+	if (params.search) {
+		searchParams.set('search', params.search);
+	}
+	if (params.created_after) {
+		searchParams.set('created_after', params.created_after);
+	}
+	if (params.created_before) {
+		searchParams.set('created_before', params.created_before);
+	}
+	if (params.order) {
+		searchParams.set('order', params.order);
+	}
+	if (params.status) {
+		const statuses = Array.isArray(params.status) ? params.status : [params.status];
+		for (const value of statuses) {
+			searchParams.append('status', value);
+		}
+	}
+
+	return apiFetch<ReportListResponse>(fetchFn, '/reports', {
+		token,
+		searchParams
+	});
+}
+
+interface ReportRecordResponse {
+    id: string;
+    summary?: ReportSummary['summary'];
+    report?: Record<string, unknown> | null;
+    review_status?: string | null;
+    review_assignee?: string | null;
+    review_due_at?: string | null;
+    review_notes?: string | null;
+    created_at?: string | null;
+    updated_at?: string | null;
+}
+
+function mergeReportResponse(payload: ReportRecordResponse): ReportDetail {
+    const base: ReportDetail = {
+        id: payload.id,
+        review_status: payload.review_status ?? null,
+        review_assignee: payload.review_assignee ?? null,
+        review_due_at: payload.review_due_at ?? null,
+        review_notes: payload.review_notes ?? null,
+        created_at: payload.created_at ?? null,
+        updated_at: payload.updated_at ?? null,
+        summary: payload.summary,
+        report: payload.report ?? undefined,
+        findings: undefined,
+        cost: undefined,
+        drift: undefined,
+        waived_findings: undefined
+    };
+
+    if (payload.report && typeof payload.report === 'object') {
+        const reportData = payload.report as Record<string, unknown>;
+
+        if (reportData.summary && typeof reportData.summary === 'object') {
+            base.summary = reportData.summary as ReportDetail['summary'];
+        }
+
+        if (Array.isArray(reportData.findings)) {
+            base.findings = reportData.findings as ReportDetail['findings'];
+        }
+
+        if (reportData.cost) {
+            base.cost = reportData.cost as ReportDetail['cost'];
+        }
+
+        if (reportData.drift) {
+            base.drift = reportData.drift as ReportDetail['drift'];
+        }
+
+        if (Array.isArray(reportData.waived_findings)) {
+            base.waived_findings = reportData.waived_findings as ReportDetail['waived_findings'];
+        }
+    }
+
+    return base;
 }
 
 export async function getReport(fetchFn: typeof fetch, token: string, id: string): Promise<ReportDetail> {
-    return apiFetch<ReportDetail>(fetchFn, `/reports/${id}`, { token });
+    const payload = await apiFetch<ReportRecordResponse>(fetchFn, `/reports/${encodeURIComponent(id)}`, { token });
+    return mergeReportResponse(payload);
+}
+
+export interface ReportReviewUpdatePayload {
+	review_status?: string | null;
+	review_assignee?: string | null;
+	review_due_at?: string | null;
+	review_notes?: string | null;
+}
+
+export interface ReportReviewMetadata {
+	id: string;
+	review_status?: string | null;
+	review_assignee?: string | null;
+	review_due_at?: string | null;
+	review_notes?: string | null;
+	updated_at?: string | null;
+}
+
+export interface ReportComment {
+	id: string;
+	report_id: string;
+	body: string;
+	author?: string | null;
+	created_at?: string | null;
+	updated_at?: string | null;
+}
+
+export async function updateReportReviewMetadata(
+	fetchFn: typeof fetch,
+	token: string,
+	id: string,
+	payload: ReportReviewUpdatePayload
+): Promise<ReportReviewMetadata> {
+	return apiFetch<ReportReviewMetadata>(fetchFn, `/reports/${encodeURIComponent(id)}`, {
+		method: 'PATCH',
+		token,
+		body: payload
+	});
+}
+
+export async function listReportComments(
+	fetchFn: typeof fetch,
+	token: string,
+	reportId: string
+): Promise<ReportComment[]> {
+	const response = await apiFetch<{ items: ReportComment[] }>(fetchFn, `/reports/${encodeURIComponent(reportId)}/comments`, {
+		token
+	});
+	return response.items;
+}
+
+export async function createReportComment(
+	fetchFn: typeof fetch,
+	token: string,
+	reportId: string,
+	body: string,
+	author?: string | null
+): Promise<ReportComment> {
+	return apiFetch<ReportComment>(fetchFn, `/reports/${encodeURIComponent(reportId)}/comments`, {
+		method: 'POST',
+		token,
+		body: {
+			body,
+			author: author ?? undefined
+		}
+	});
+}
+
+export async function deleteReportComment(
+	fetchFn: typeof fetch,
+	token: string,
+	reportId: string,
+	commentId: string
+): Promise<{ status: string; id: string }> {
+	return apiFetch(fetchFn, `/reports/${encodeURIComponent(reportId)}/comments/${encodeURIComponent(commentId)}`, {
+		method: 'DELETE',
+		token
+	});
 }
 
 export async function deleteReport(fetchFn: typeof fetch, token: string, id: string): Promise<{ status: string; id: string }> {
@@ -932,9 +1226,91 @@ export async function deleteProject(
 	});
 }
 
+export interface ListProjectConfigsOptions {
+	includePayload?: boolean;
+}
+
+export async function listProjectConfigs(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	options: ListProjectConfigsOptions = {}
+): Promise<ProjectConfigRecord[]> {
+	const searchParams: Record<string, string> = {};
+	if (options.includePayload) {
+		searchParams.include_payload = 'true';
+	}
+	return apiFetch(fetchFn, `/projects/${projectId}/configs`, {
+		token,
+		searchParams: Object.keys(searchParams).length ? searchParams : undefined
+	});
+}
+
+export async function createProjectConfig(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	payload: ProjectConfigCreatePayload
+): Promise<ProjectConfigRecord> {
+	return apiFetch(fetchFn, `/projects/${projectId}/configs`, {
+		method: 'POST',
+		token,
+		body: payload
+	});
+}
+
+export async function updateProjectConfig(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	configId: string,
+	payload: ProjectConfigUpdatePayload
+): Promise<ProjectConfigRecord> {
+	return apiFetch(fetchFn, `/projects/${projectId}/configs/${configId}`, {
+		method: 'PATCH',
+		token,
+		body: payload
+	});
+}
+
+export async function deleteProjectConfig(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	configId: string
+): Promise<void> {
+	await apiFetch(fetchFn, `/projects/${projectId}/configs/${configId}`, {
+		method: 'DELETE',
+		token
+	});
+}
+
+export async function getProjectConfig(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	configId: string,
+	options: { includePayload?: boolean } = {}
+): Promise<ProjectConfigRecord> {
+	const searchParams: Record<string, string> = {};
+	if (options.includePayload === false) {
+		searchParams.include_payload = 'false';
+	}
+	return apiFetch(fetchFn, `/projects/${projectId}/configs/${configId}`, {
+		token,
+		searchParams: Object.keys(searchParams).length ? searchParams : undefined
+	});
+}
+
 export interface ListProjectRunsOptions {
 	limit?: number;
 	cursor?: string;
+}
+
+interface ProjectRunListResponse {
+	items: ProjectRunSummary[];
+	next_cursor?: string | null;
+	total_count?: number | null;
 }
 
 export async function listProjectRuns(
@@ -950,7 +1326,7 @@ export async function listProjectRuns(
 	if (options.cursor) {
 		searchParams.cursor = options.cursor;
 	}
-	const response = await apiFetch(fetchFn, `/projects/${projectId}/runs`, {
+	const response = await apiFetch<ProjectRunListResponse>(fetchFn, `/projects/${projectId}/runs`, {
 		token,
 		searchParams: Object.keys(searchParams).length ? searchParams : undefined
 	});
@@ -1058,10 +1434,94 @@ export async function downloadRunArtifact(
 	return response;
 }
 
+export interface ListProjectArtifactsOptions {
+	runId?: string;
+	limit?: number;
+	cursor?: string;
+}
+
+export async function listProjectArtifacts(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	options: ListProjectArtifactsOptions = {}
+): Promise<ProjectArtifactListResponse> {
+	const searchParams: Record<string, string> = {};
+	if (options.runId) {
+		searchParams.run_id = options.runId;
+	}
+	if (typeof options.limit === 'number') {
+		searchParams.limit = String(options.limit);
+	}
+	if (options.cursor) {
+		searchParams.cursor = options.cursor;
+	}
+	const response = await apiFetch<{ items: ProjectArtifactRecord[]; next_cursor?: string | null; total_count: number }>(
+		fetchFn,
+		`/projects/${projectId}/artifacts`,
+		{
+			token,
+			searchParams: Object.keys(searchParams).length ? searchParams : undefined
+		}
+	);
+	return {
+		items: response.items,
+		nextCursor: response.next_cursor ?? null,
+		totalCount: response.total_count
+	};
+}
+
+export async function getProjectArtifact(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	artifactId: string
+): Promise<ProjectArtifactRecord> {
+	return apiFetch(fetchFn, `/projects/${projectId}/artifacts/${artifactId}`, {
+		token
+	});
+}
+
+export async function updateProjectArtifact(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	artifactId: string,
+	payload: ProjectArtifactUpdatePayload
+): Promise<ProjectArtifactRecord> {
+	return apiFetch(fetchFn, `/projects/${projectId}/artifacts/${artifactId}`, {
+		method: 'PATCH',
+		token,
+		body: payload
+	});
+}
+
+export async function syncProjectRunArtifacts(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string,
+	runId: string,
+	options: { pruneMissing?: boolean } = {}
+): Promise<ProjectArtifactSyncResponse> {
+	return apiFetch(fetchFn, `/projects/${projectId}/runs/${runId}/artifacts/sync`, {
+		method: 'POST',
+		token,
+		body: {
+			prune_missing: options.pruneMissing !== false
+		}
+	});
+}
+
 export interface ListProjectLibraryOptions {
 	includeVersions?: boolean;
 	limit?: number;
 	cursor?: string;
+}
+
+interface ProjectLibraryListResponse {
+	items: GeneratedAssetSummary[];
+	next_cursor?: string | null;
+	total_count?: number | null;
 }
 
 export async function listProjectLibrary(
@@ -1080,7 +1540,7 @@ export async function listProjectLibrary(
 	if (options.cursor) {
 		searchParams.cursor = options.cursor;
 	}
-	const response = await apiFetch(fetchFn, `/projects/${projectId}/library`, {
+	const response = await apiFetch<ProjectLibraryListResponse>(fetchFn, `/projects/${projectId}/library`, {
 		token,
 		searchParams: Object.keys(searchParams).length ? searchParams : undefined
 	});

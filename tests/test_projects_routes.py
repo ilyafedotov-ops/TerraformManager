@@ -62,6 +62,8 @@ def auth_headers(token: str) -> dict[str, str]:
 def test_project_route_lifecycle(projects_client: Tuple[TestClient, str, Path, Path]) -> None:
     client, token, db_path, projects_root = projects_client
 
+    storage.upsert_config("baseline", "thresholds:\n  high: fail\n", db_path=db_path)
+
     create_body = {
         "name": "API Project",
         "description": "Managed via API",
@@ -85,6 +87,83 @@ def test_project_route_lifecycle(projects_client: Tuple[TestClient, str, Path, P
     assert detail_response.status_code == 200
     assert detail_response.json()["metadata"]["team"] == "platform"
 
+    configs_response = client.get(
+        f"/projects/{project_id}/configs",
+        headers=auth_headers(token),
+        params={"include_payload": "true"},
+    )
+    assert configs_response.status_code == 200
+    assert configs_response.json() == []
+
+    create_config_response = client.post(
+        f"/projects/{project_id}/configs",
+        json={
+            "name": "Default gates",
+            "config_name": "baseline",
+            "is_default": True,
+            "metadata": {"scope": "workspace"},
+        },
+        headers=auth_headers(token),
+    )
+    assert create_config_response.status_code == 201
+    config_record = create_config_response.json()
+    config_id = config_record["id"]
+    assert config_record["is_default"] is True
+
+    inline_config_response = client.post(
+        f"/projects/{project_id}/configs",
+        json={
+            "name": "Inline profile",
+            "payload": "thresholds:\n  medium: warn\n",
+            "tags": ["prod"],
+            "metadata": {"scope": "prod"},
+        },
+        headers=auth_headers(token),
+    )
+    assert inline_config_response.status_code == 201
+    inline_config_id = inline_config_response.json()["id"]
+
+    configs_response = client.get(
+        f"/projects/{project_id}/configs",
+        headers=auth_headers(token),
+        params={"include_payload": "true"},
+    )
+    assert configs_response.status_code == 200
+    configs_payload = configs_response.json()
+    assert len(configs_payload) == 2
+
+    update_inline = client.patch(
+        f"/projects/{project_id}/configs/{inline_config_id}",
+        json={"tags": ["prod", "critical"], "is_default": True},
+        headers=auth_headers(token),
+    )
+    assert update_inline.status_code == 200
+    assert update_inline.json()["is_default"] is True
+
+    config_detail = client.get(
+        f"/projects/{project_id}/configs/{config_id}",
+        headers=auth_headers(token),
+        params={"include_payload": "false"},
+    )
+    assert config_detail.status_code == 200
+    assert config_detail.json()["is_default"] is False
+
+    delete_inline = client.delete(
+        f"/projects/{project_id}/configs/{inline_config_id}",
+        headers=auth_headers(token),
+    )
+    assert delete_inline.status_code == 204
+
+    configs_response = client.get(
+        f"/projects/{project_id}/configs",
+        headers=auth_headers(token),
+        params={"include_payload": "false"},
+    )
+    assert configs_response.status_code == 200
+    configs_payload = configs_response.json()
+    assert len(configs_payload) == 1
+    assert configs_payload[0]["is_default"] is True
+
     update_response = client.patch(
         f"/projects/{project_id}",
         json={"description": "Updated description", "metadata": {"team": "platform", "env": "prod"}},
@@ -100,6 +179,8 @@ def test_project_route_lifecycle(projects_client: Tuple[TestClient, str, Path, P
     assert run_create.status_code == 201
     run = run_create.json()
     run_id = run["id"]
+    run_dir = Path(run["artifacts_path"])
+    assert run_dir.exists()
 
     runs_response = client.get(f"/projects/{project_id}/runs", headers=auth_headers(token))
     assert runs_response.status_code == 200
@@ -122,6 +203,8 @@ def test_project_route_lifecycle(projects_client: Tuple[TestClient, str, Path, P
     )
     assert upload_response.status_code == 201
     assert upload_response.json()["path"] == "outputs/report.json"
+    artifact_id = upload_response.json().get("artifact_id")
+    assert artifact_id
 
     list_artifacts = client.get(
         f"/projects/{project_id}/runs/{run_id}/artifacts",
@@ -129,6 +212,30 @@ def test_project_route_lifecycle(projects_client: Tuple[TestClient, str, Path, P
     )
     assert list_artifacts.status_code == 200
     assert any(entry["path"] == "outputs" for entry in list_artifacts.json())
+
+    project_artifacts = client.get(
+        f"/projects/{project_id}/artifacts",
+        headers=auth_headers(token),
+    )
+    assert project_artifacts.status_code == 200
+    payload = project_artifacts.json()
+    assert payload["total_count"] == 1
+    assert payload["items"][0]["id"] == artifact_id
+
+    artifact_update = client.patch(
+        f"/projects/{project_id}/artifacts/{artifact_id}",
+        json={"tags": ["report"], "metadata": {"format": "json"}},
+        headers=auth_headers(token),
+    )
+    assert artifact_update.status_code == 200
+    assert artifact_update.json()["tags"] == ["report"]
+
+    artifact_detail = client.get(
+        f"/projects/{project_id}/artifacts/{artifact_id}",
+        headers=auth_headers(token),
+    )
+    assert artifact_detail.status_code == 200
+    assert artifact_detail.json()["metadata"]["format"] == "json"
 
     download = client.get(
         f"/projects/{project_id}/runs/{run_id}/artifacts/download",
@@ -144,6 +251,23 @@ def test_project_route_lifecycle(projects_client: Tuple[TestClient, str, Path, P
         headers=auth_headers(token),
     )
     assert delete_file.status_code == 204
+
+    manual_file = run_dir / "manual.txt"
+    manual_file.write_text("manual")
+    sync_response = client.post(
+        f"/projects/{project_id}/runs/{run_id}/artifacts/sync",
+        json={"prune_missing": False},
+        headers=auth_headers(token),
+    )
+    assert sync_response.status_code == 200
+    assert sync_response.json()["files_indexed"] >= 1
+
+    project_artifacts = client.get(
+        f"/projects/{project_id}/artifacts",
+        headers=auth_headers(token),
+    )
+    assert project_artifacts.status_code == 200
+    assert project_artifacts.json()["total_count"] == 1
 
     remove_response = client.delete(
         f"/projects/{project_id}",

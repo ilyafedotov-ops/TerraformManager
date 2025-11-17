@@ -11,15 +11,18 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from uuid import uuid4
 import shutil
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from backend.db.models import (
     Config,
     Report,
+    ReportComment,
     Setting,
     Project,
     ProjectRun,
+    ProjectConfig,
+    ProjectArtifact,
     GeneratedAsset,
     GeneratedAssetVersion,
     format_timestamp,
@@ -41,6 +44,20 @@ class ProjectRunNotFoundError(Exception):
 
 class ArtifactPathError(Exception):
     """Raised when a requested artifact path is invalid or escapes the run root."""
+
+
+class ReportNotFoundError(Exception):
+    """Raised when a report cannot be located in the database."""
+
+
+REVIEW_STATUS_CHOICES: set[str] = {
+    "pending",
+    "in_review",
+    "changes_requested",
+    "resolved",
+    "waived",
+}
+DEFAULT_REVIEW_STATUS = "pending"
 
 
 def get_projects_root(base_path: Path | None = None) -> Path:
@@ -65,6 +82,56 @@ def _ensure_unique_slug(db: Session, slug: str) -> str:
         counter += 1
         stmt = select(Project.slug).where(Project.slug == slug)
     return slug
+
+
+def _ensure_project_config_slug(db: Session, project_id: str, slug: str) -> str:
+    base_slug = slug
+    counter = 2
+    stmt = select(ProjectConfig.id).where(
+        ProjectConfig.project_id == project_id,
+        ProjectConfig.slug == slug,
+    )
+    while db.execute(stmt).scalar_one_or_none():
+        slug = f"{base_slug}-{counter}"
+        counter += 1
+        stmt = select(ProjectConfig.id).where(
+            ProjectConfig.project_id == project_id,
+            ProjectConfig.slug == slug,
+        )
+    return slug
+
+
+def _has_project_default_config(db: Session, project_id: str) -> bool:
+    stmt = (
+        select(ProjectConfig.id)
+        .where(ProjectConfig.project_id == project_id, ProjectConfig.is_default.is_(True))
+        .limit(1)
+    )
+    return db.execute(stmt).scalar_one_or_none() is not None
+
+
+def _mark_default_project_config(db: Session, project_id: str, config: ProjectConfig | None) -> None:
+    stmt = select(ProjectConfig).where(ProjectConfig.project_id == project_id, ProjectConfig.is_default.is_(True))
+    for record in db.execute(stmt).scalars():
+        record.is_default = False
+    if config is not None:
+        config.is_default = True
+    db.flush()
+
+
+def _ensure_project_default_config(db: Session, project_id: str) -> None:
+    if _has_project_default_config(db, project_id):
+        return
+    fallback = (
+        select(ProjectConfig)
+        .where(ProjectConfig.project_id == project_id)
+        .order_by(ProjectConfig.updated_at.desc(), ProjectConfig.name.asc())
+        .limit(1)
+    )
+    record = db.execute(fallback).scalars().first()
+    if record:
+        record.is_default = True
+        db.flush()
 
 
 def _get_project_or_raise(db: Session, project_id: str) -> Project:
@@ -133,6 +200,127 @@ def _resolve_artifact_path(run_dir: Path, relative_path: str | None) -> Path:
     return candidate
 
 
+def _record_project_artifact(
+    db: Session,
+    project: Project,
+    *,
+    run: ProjectRun | None,
+    relative_path: str,
+    absolute_path: Path,
+    report: Report | None = None,
+    media_type: str | None = None,
+    tags: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> ProjectArtifact:
+    relative = _normalise_relative_path(relative_path)
+    record = (
+        db.execute(
+            select(ProjectArtifact).where(
+                ProjectArtifact.project_id == project.id,
+                ProjectArtifact.run_id == (run.id if run else None),
+                ProjectArtifact.relative_path == relative,
+            )
+        )
+        .scalars()
+        .first()
+    )
+    tags_value = _normalise_tags(tags) if tags is not None else None
+    metadata_value = dict(metadata or {}) if metadata is not None else None
+
+    size_bytes: int | None = None
+    checksum: str | None = None
+    if absolute_path.exists() and absolute_path.is_file():
+        stat = absolute_path.stat()
+        size_bytes = int(stat.st_size)
+        checksum = _hash_file(absolute_path)
+
+    if record is None:
+        record = ProjectArtifact(
+            project_id=project.id,
+            run_id=run.id if run else None,
+            report_id=report.id if report else None,
+            name=absolute_path.name,
+            relative_path=relative,
+            storage_path=str(absolute_path),
+            media_type=media_type,
+            size_bytes=size_bytes,
+            checksum=checksum,
+            tags=tags_value or [],
+            artifact_metadata=metadata_value or {},
+        )
+        db.add(record)
+    else:
+        record.name = absolute_path.name
+        record.storage_path = str(absolute_path)
+        record.media_type = media_type or record.media_type
+        record.size_bytes = size_bytes
+        record.checksum = checksum
+        if tags_value is not None:
+            record.tags = tags_value
+        if metadata_value is not None:
+            record.artifact_metadata = metadata_value
+        if report:
+            record.report_id = report.id
+    db.flush()
+    return record
+
+
+def _ensure_report_review_columns(db: Session) -> None:
+    """Add review workflow columns to reports table if they are missing."""
+    existing_columns = {
+        row[1]
+        for row in db.execute(text("PRAGMA table_info(reports)"))
+    }
+    if "review_status" not in existing_columns:
+        db.execute(
+            text("ALTER TABLE reports ADD COLUMN review_status TEXT NOT NULL DEFAULT 'pending'")
+        )
+    if "review_assignee" not in existing_columns:
+        db.execute(
+            text("ALTER TABLE reports ADD COLUMN review_assignee TEXT")
+        )
+    if "review_due_at" not in existing_columns:
+        db.execute(
+            text("ALTER TABLE reports ADD COLUMN review_due_at TIMESTAMP")
+        )
+    if "review_notes" not in existing_columns:
+        db.execute(
+            text("ALTER TABLE reports ADD COLUMN review_notes TEXT")
+        )
+    if "updated_at" not in existing_columns:
+        db.execute(text("ALTER TABLE reports ADD COLUMN updated_at TIMESTAMP"))
+    db.execute(
+        text("UPDATE reports SET updated_at = created_at WHERE updated_at IS NULL")
+    )
+    db.execute(
+        text("UPDATE reports SET review_status = 'pending' WHERE review_status IS NULL OR review_status = ''")
+    )
+
+
+def _apply_report_review_metadata(report: Report, metadata: Optional[Dict[str, Any]]) -> None:
+    if not metadata:
+        return
+    status_raw = metadata.get("review_status") or metadata.get("status")
+    assignee_raw = metadata.get("review_assignee") or metadata.get("assignee")
+    due_raw = metadata.get("review_due_at") or metadata.get("due_at")
+    notes_raw = metadata.get("review_notes") or metadata.get("notes")
+
+    if status_raw is not None:
+        status_value = _normalise_review_status(status_raw)
+        report.review_status = status_value or DEFAULT_REVIEW_STATUS
+    if assignee_raw is not None:
+        cleaned = assignee_raw.strip() if isinstance(assignee_raw, str) else assignee_raw
+        report.review_assignee = cleaned or None
+    if due_raw is not None:
+        report.review_due_at = _parse_datetime(due_raw)
+    if notes_raw is not None:
+        if isinstance(notes_raw, str):
+            report.review_notes = notes_raw.strip() or None
+        else:
+            report.review_notes = None
+    report.updated_at = datetime.now(timezone.utc)
+
+
 def _normalise_tags(values: Optional[List[str]]) -> List[str]:
     if not values:
         return []
@@ -149,11 +337,65 @@ def _normalise_tags(values: Optional[List[str]]) -> List[str]:
     return normalised
 
 
+def _normalise_relative_path(value: str) -> str:
+    cleaned = value.strip().replace("\\", "/")
+    cleaned = re.sub(r"^\./+", "", cleaned)
+    cleaned = cleaned.strip("/")
+    if not cleaned:
+        return "."
+    return cleaned
+
+
 def _sanitize_storage_name(value: str) -> str:
     candidate = Path(value).name
     if not candidate:
         raise ValueError("storage filename cannot be empty")
     return candidate
+
+
+def _hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _normalise_review_status(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    candidate = value.strip().lower()
+    if not candidate:
+        return DEFAULT_REVIEW_STATUS
+    if candidate not in REVIEW_STATUS_CHOICES:
+        raise ValueError(f"invalid review status: {value!r}")
+    return candidate
+
+
+def _parse_datetime(value: Optional[str | datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        if cleaned.endswith("Z"):
+            cleaned = f"{cleaned[:-1]}+00:00"
+        try:
+            parsed = datetime.fromisoformat(cleaned)
+        except ValueError as exc:
+            raise ValueError(f"invalid datetime string: {value!r}") from exc
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    raise TypeError("datetime value must be str or datetime instance")
 
 
 def _resolve_asset_bytes(source_path: Path | None, data: bytes | None) -> bytes:
@@ -308,6 +550,9 @@ def list_projects(
         latest_runs: Dict[str, ProjectRun] = {}
         assets_count: Dict[str, int] = {}
         assets_updated: Dict[str, datetime] = {}
+        config_counts: Dict[str, int] = {}
+        artifact_counts: Dict[str, int] = {}
+        artifact_updated: Dict[str, datetime] = {}
 
         if project_ids:
             run_count_stmt = (
@@ -344,6 +589,31 @@ def list_projects(
                 if value is not None:
                     assets_updated[project_id] = value
 
+            config_count_stmt = (
+                select(ProjectConfig.project_id, func.count(ProjectConfig.id))
+                .where(ProjectConfig.project_id.in_(project_ids))
+                .group_by(ProjectConfig.project_id)
+            )
+            for project_id, count in db.execute(config_count_stmt):
+                config_counts[project_id] = int(count or 0)
+
+            artifact_count_stmt = (
+                select(ProjectArtifact.project_id, func.count(ProjectArtifact.id))
+                .where(ProjectArtifact.project_id.in_(project_ids))
+                .group_by(ProjectArtifact.project_id)
+            )
+            for project_id, count in db.execute(artifact_count_stmt):
+                artifact_counts[project_id] = int(count or 0)
+
+            artifact_updated_stmt = (
+                select(ProjectArtifact.project_id, func.max(ProjectArtifact.updated_at))
+                .where(ProjectArtifact.project_id.in_(project_ids))
+                .group_by(ProjectArtifact.project_id)
+            )
+            for project_id, value in db.execute(artifact_updated_stmt):
+                if value is not None:
+                    artifact_updated[project_id] = value
+
         results: List[Dict[str, Any]] = []
         for project in projects:
             payload = project.to_dict(include_metadata=include_metadata)
@@ -363,11 +633,14 @@ def list_projects(
             )
             payload["run_count"] = run_counts.get(project.id, 0)
             payload["library_asset_count"] = assets_count.get(project.id, 0)
+            payload["config_count"] = config_counts.get(project.id, 0)
+            payload["artifact_count"] = artifact_counts.get(project.id, 0)
 
             last_activity_candidates = [
                 project.updated_at,
                 latest_run.updated_at if latest_run else None,
                 assets_updated.get(project.id),
+                artifact_updated.get(project.id),
             ]
             last_activity = max(
                 (value for value in last_activity_candidates if value is not None),
@@ -469,6 +742,187 @@ def update_project(
         db.flush()
         db.refresh(project)
         return project.to_dict()
+
+
+def list_project_configs(
+    project_id: str,
+    *,
+    include_payload: bool = False,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> List[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        try:
+            _get_project_or_raise(db, project_id)
+        except ProjectNotFoundError as exc:
+            raise ValueError(f"project '{project_id}' not found") from exc
+
+        stmt = (
+            select(ProjectConfig)
+            .where(ProjectConfig.project_id == project_id)
+            .order_by(ProjectConfig.created_at.asc(), ProjectConfig.id.asc())
+        )
+        return [record.to_dict(include_payload=include_payload) for record in db.execute(stmt).scalars()]
+
+
+def get_project_config(
+    config_id: str,
+    *,
+    project_id: str | None = None,
+    include_payload: bool = True,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Optional[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        record = db.get(ProjectConfig, config_id)
+        if not record:
+            return None
+        if project_id and record.project_id != project_id:
+            return None
+        return record.to_dict(include_payload=include_payload)
+
+
+def create_project_config(
+    project_id: str,
+    *,
+    name: str,
+    slug: str | None = None,
+    config_name: str | None = None,
+    payload: str | None = None,
+    kind: str = "tfreview",
+    description: str | None = None,
+    tags: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    is_default: bool = False,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Dict[str, Any]:
+    cleaned_name = name.strip()
+    if not cleaned_name:
+        raise ValueError("config name cannot be empty")
+    cleaned_kind = kind.strip() or "tfreview"
+    tags_value = _normalise_tags(tags)
+    metadata_value = dict(metadata or {})
+    payload_value = None
+    if payload is not None:
+        payload_value = payload if payload.strip() else None
+    config_name_value = config_name.strip() if config_name else None
+
+    with _get_session(session, db_path) as db:
+        try:
+            project = _get_project_or_raise(db, project_id)
+        except ProjectNotFoundError as exc:
+            raise ValueError(f"project '{project_id}' not found") from exc
+
+        if config_name_value:
+            exists = db.get(Config, config_name_value)
+            if not exists:
+                raise ValueError(f"config '{config_name_value}' does not exist")
+
+        if not config_name_value and payload_value is None:
+            raise ValueError("either config_name or payload must be provided")
+
+        slug_input = slug.strip() if slug else cleaned_name
+        slug_value = _ensure_project_config_slug(db, project.id, _slugify(slug_input))
+
+        record = ProjectConfig(
+            project_id=project.id,
+            name=cleaned_name,
+            slug=slug_value,
+            description=description.strip() if description else None,
+            config_name=config_name_value,
+            payload=payload_value,
+            kind=cleaned_kind,
+            tags=tags_value,
+            config_metadata=metadata_value,
+            is_default=False,
+        )
+        db.add(record)
+        db.flush()
+
+        if is_default or not _has_project_default_config(db, project.id):
+            _mark_default_project_config(db, project.id, record)
+        else:
+            db.flush()
+
+        return record.to_dict()
+
+
+def update_project_config(
+    config_id: str,
+    *,
+    project_id: str,
+    name: str | None = None,
+    config_name: str | None = None,
+    payload: str | None = None,
+    kind: str | None = None,
+    description: str | None = None,
+    tags: Optional[List[str]] | None = None,
+    metadata: Optional[Dict[str, Any]] | None = None,
+    is_default: bool | None = None,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Optional[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        record = db.get(ProjectConfig, config_id)
+        if not record or record.project_id != project_id:
+            return None
+
+        if name is not None:
+            cleaned = name.strip()
+            if not cleaned:
+                raise ValueError("config name cannot be empty")
+            record.name = cleaned
+        if description is not None:
+            record.description = description.strip() if description else None
+        if kind is not None:
+            cleaned_kind = kind.strip() or "tfreview"
+            record.kind = cleaned_kind
+        if tags is not None:
+            record.tags = _normalise_tags(tags)
+        if metadata is not None:
+            record.config_metadata = dict(metadata or {})
+        if config_name is not None:
+            cleaned_config = config_name.strip() if config_name else None
+            if cleaned_config:
+                exists = db.get(Config, cleaned_config)
+                if not exists:
+                    raise ValueError(f"config '{cleaned_config}' does not exist")
+            record.config_name = cleaned_config
+        if payload is not None:
+            record.payload = payload if payload.strip() else None
+
+        if not record.payload and not record.config_name:
+            raise ValueError("project config must reference a saved config or include payload data")
+
+        if is_default is True:
+            _mark_default_project_config(db, project_id, record)
+        elif is_default is False and record.is_default:
+            record.is_default = False
+            db.flush()
+            _ensure_project_default_config(db, project_id)
+
+        db.flush()
+        return record.to_dict()
+
+
+def delete_project_config(
+    config_id: str,
+    *,
+    project_id: str,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> bool:
+    with _get_session(session, db_path) as db:
+        record = db.get(ProjectConfig, config_id)
+        if not record or record.project_id != project_id:
+            return False
+        was_default = record.is_default
+        db.delete(record)
+        db.flush()
+        if was_default:
+            _ensure_project_default_config(db, project_id)
+        return True
 
 
 def create_project_run(
@@ -619,6 +1073,15 @@ def list_run_artifacts(
         except ProjectRunNotFoundError as exc:
             raise ValueError(f"run '{run_id}' not found") from exc
         run_dir = _ensure_run_directory(db, project, run)
+        artifact_records: Dict[str, ProjectArtifact] = {
+            record.relative_path: record
+            for record in db.execute(
+                select(ProjectArtifact).where(
+                    ProjectArtifact.project_id == project.id,
+                    ProjectArtifact.run_id == run.id,
+                )
+            ).scalars()
+        }
         target = _resolve_artifact_path(run_dir, path)
         if not target.exists():
             raise FileNotFoundError(str(path or ""))
@@ -629,13 +1092,20 @@ def list_run_artifacts(
         for child in sorted(target.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())):
             stat = child.stat()
             modified = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+            relative = str(child.relative_to(run_dir))
+            normalised_relative = _normalise_relative_path(relative)
+            record = artifact_records.get(normalised_relative)
             entries.append(
                 {
                     "name": child.name,
-                    "path": str(child.relative_to(run_dir)),
+                    "path": relative,
                     "is_dir": child.is_dir(),
                     "size": int(stat.st_size) if child.is_file() else None,
                     "modified_at": format_timestamp(modified),
+                    "artifact_id": record.id if record else None,
+                    "media_type": record.media_type if record else None,
+                    "metadata": record.artifact_metadata if record else None,
+                    "tags": record.tags if record else None,
                 }
             )
         return entries
@@ -679,14 +1149,25 @@ def save_run_artifact(
 
         stat = destination.stat()
         run.updated_at = datetime.now(tz=timezone.utc)
+        relative_path = str(destination.relative_to(run_dir))
+        record = _record_project_artifact(
+            db,
+            project,
+            run=run,
+            relative_path=relative_path,
+            absolute_path=destination,
+        )
         db.flush()
 
         return {
             "name": destination.name,
-            "path": str(destination.relative_to(run_dir)),
+            "path": relative_path,
             "is_dir": False,
             "size": int(stat.st_size),
             "modified_at": format_timestamp(datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)),
+            "artifact_id": record.id,
+            "checksum": record.checksum,
+            "media_type": record.media_type,
         }
 
 
@@ -745,10 +1226,192 @@ def delete_run_artifact(
         if destination.is_dir():
             raise ArtifactPathError("cannot delete directory via artifact endpoint")
 
+        relative_path = str(destination.relative_to(run_dir))
         destination.unlink()
+        record = (
+            db.execute(
+                select(ProjectArtifact).where(
+                    ProjectArtifact.project_id == project.id,
+                    ProjectArtifact.run_id == run.id,
+                    ProjectArtifact.relative_path == _normalise_relative_path(relative_path),
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if record:
+            db.delete(record)
         run.updated_at = datetime.now(tz=timezone.utc)
         db.flush()
         return True
+
+
+def list_project_artifacts(
+    project_id: str,
+    *,
+    run_id: str | None = None,
+    limit: int = 200,
+    cursor: str | None = None,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Dict[str, Any]:
+    if limit <= 0:
+        raise ValueError("limit must be greater than zero")
+    limit = min(limit, 500)
+
+    with _get_session(session, db_path) as db:
+        try:
+            _get_project_or_raise(db, project_id)
+        except ProjectNotFoundError as exc:
+            raise ValueError(f"project '{project_id}' not found") from exc
+
+        cursor_record: ProjectArtifact | None = None
+        if cursor:
+            candidate = db.get(ProjectArtifact, cursor)
+            if not candidate or candidate.project_id != project_id:
+                raise ValueError("cursor does not reference a project artifact")
+            if run_id and candidate.run_id != run_id:
+                raise ValueError("cursor does not match requested run_id")
+            cursor_record = candidate
+
+        stmt = select(ProjectArtifact).where(ProjectArtifact.project_id == project_id)
+        if run_id:
+            stmt = stmt.where(ProjectArtifact.run_id == run_id)
+        if cursor_record:
+            stmt = stmt.where(
+                or_(
+                    ProjectArtifact.updated_at < cursor_record.updated_at,
+                    and_(
+                        ProjectArtifact.updated_at == cursor_record.updated_at,
+                        ProjectArtifact.id < cursor_record.id,
+                    ),
+                )
+            )
+        stmt = stmt.order_by(ProjectArtifact.updated_at.desc(), ProjectArtifact.id.desc()).limit(limit + 1)
+        fetched = list(db.execute(stmt).scalars())
+        items = fetched[:limit]
+
+        next_cursor: Optional[str] = None
+        if items and len(fetched) > limit:
+            next_cursor = items[-1].id
+
+        count_stmt = select(func.count(ProjectArtifact.id)).where(ProjectArtifact.project_id == project_id)
+        if run_id:
+            count_stmt = count_stmt.where(ProjectArtifact.run_id == run_id)
+        total_count = int(db.execute(count_stmt).scalar_one() or 0)
+
+        return {
+            "items": [record.to_dict() for record in items],
+            "next_cursor": next_cursor,
+            "total_count": total_count,
+        }
+
+
+def get_project_artifact(
+    artifact_id: str,
+    *,
+    project_id: str | None = None,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Optional[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        record = db.get(ProjectArtifact, artifact_id)
+        if not record:
+            return None
+        if project_id and record.project_id != project_id:
+            return None
+        return record.to_dict()
+
+
+def update_project_artifact(
+    artifact_id: str,
+    *,
+    project_id: str,
+    tags: Optional[List[str]] | None = None,
+    metadata: Optional[Dict[str, Any]] | None = None,
+    media_type: str | None = None,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Optional[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        record = db.get(ProjectArtifact, artifact_id)
+        if not record or record.project_id != project_id:
+            return None
+        if tags is not None:
+            record.tags = _normalise_tags(tags)
+        if metadata is not None:
+            record.artifact_metadata = dict(metadata or {})
+        if media_type is not None:
+            record.media_type = media_type or None
+        db.flush()
+        return record.to_dict()
+
+
+def sync_project_run_artifacts(
+    project_id: str,
+    run_id: str,
+    *,
+    projects_root: Path | None = None,
+    prune_missing: bool = True,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Dict[str, int]:
+    with _get_session(session, db_path) as db:
+        try:
+            project, run = _get_project_and_run_or_raise(db, project_id, run_id)
+        except ProjectNotFoundError as exc:
+            raise ValueError(f"project '{project_id}' not found") from exc
+        except ProjectRunNotFoundError as exc:
+            raise ValueError(f"run '{run_id}' not found") from exc
+
+        run_dir = _ensure_run_directory(db, project, run, projects_root)
+        records_by_relative: Dict[str, ProjectArtifact] = {
+            record.relative_path: record
+            for record in db.execute(
+                select(ProjectArtifact).where(
+                    ProjectArtifact.project_id == project.id,
+                    ProjectArtifact.run_id == run.id,
+                )
+            ).scalars()
+        }
+        processed: set[str] = set()
+        added = 0
+        updated = 0
+
+        for file_path in run_dir.rglob("*"):
+            if not file_path.is_file():
+                continue
+            relative = str(file_path.relative_to(run_dir))
+            normalised = _normalise_relative_path(relative)
+            existing = records_by_relative.get(normalised)
+            record = _record_project_artifact(
+                db,
+                project,
+                run=run,
+                relative_path=relative,
+                absolute_path=file_path,
+            )
+            records_by_relative[normalised] = record
+            processed.add(normalised)
+            if existing is None:
+                added += 1
+            else:
+                updated += 1
+
+        removed = 0
+        if prune_missing:
+            for relative, record in list(records_by_relative.items()):
+                if relative not in processed:
+                    db.delete(record)
+                    removed += 1
+
+        db.flush()
+        return {
+            "added": added,
+            "updated": updated,
+            "removed": removed,
+            "files_indexed": len(processed),
+        }
 
 
 def list_generated_assets(
@@ -833,15 +1496,34 @@ def get_project_overview(
             db.execute(select(func.count(ProjectRun.id)).where(ProjectRun.project_id == project_id)).scalar_one() or 0
         )
 
-        library_asset_count = int(
+        config_count = int(
+            db.execute(select(func.count(ProjectConfig.id)).where(ProjectConfig.project_id == project_id)).scalar_one() or 0
+        )
+
+        default_config = (
             db.execute(
-                select(func.count(GeneratedAsset.id)).where(GeneratedAsset.project_id == project_id)
-            ).scalar_one()
-            or 0
+                select(ProjectConfig)
+                .where(ProjectConfig.project_id == project_id, ProjectConfig.is_default.is_(True))
+                .order_by(ProjectConfig.updated_at.desc(), ProjectConfig.id.desc())
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+
+        library_asset_count = int(
+            db.execute(select(func.count(GeneratedAsset.id)).where(GeneratedAsset.project_id == project_id)).scalar_one() or 0
+        )
+
+        artifact_count = int(
+            db.execute(select(func.count(ProjectArtifact.id)).where(ProjectArtifact.project_id == project_id)).scalar_one() or 0
         )
 
         latest_asset_updated = db.execute(
             select(func.max(GeneratedAsset.updated_at)).where(GeneratedAsset.project_id == project_id)
+        ).scalar_one_or_none()
+        latest_artifact_updated = db.execute(
+            select(func.max(ProjectArtifact.updated_at)).where(ProjectArtifact.project_id == project_id)
         ).scalar_one_or_none()
 
         recent_assets_stmt = (
@@ -854,6 +1536,14 @@ def get_project_overview(
             asset.to_dict(include_versions=False)
             for asset in db.execute(recent_assets_stmt).scalars()
         ]
+
+        recent_artifacts_stmt = (
+            select(ProjectArtifact)
+            .where(ProjectArtifact.project_id == project_id)
+            .order_by(ProjectArtifact.updated_at.desc(), ProjectArtifact.id.desc())
+            .limit(recent_assets)
+        )
+        artifact_items = [artifact.to_dict() for artifact in db.execute(recent_artifacts_stmt).scalars()]
 
         metrics: Dict[str, Any] = {}
         if latest_run and latest_run.summary:
@@ -870,6 +1560,8 @@ def get_project_overview(
         ]
         if latest_asset_updated:
             last_activity_candidates.append(latest_asset_updated)
+        if latest_artifact_updated:
+            last_activity_candidates.append(latest_artifact_updated)
         last_activity = max(
             (value for value in last_activity_candidates if value is not None),
             default=project.updated_at,
@@ -879,8 +1571,12 @@ def get_project_overview(
             "project": project.to_dict(include_metadata=include_metadata),
             "run_count": run_count,
             "latest_run": latest_run.to_dict(include_parameters=False) if latest_run else None,
+            "config_count": config_count,
+            "default_config": default_config.to_dict(include_payload=False) if default_config else None,
             "library_asset_count": library_asset_count,
+            "artifact_count": artifact_count,
             "recent_assets": assets,
+            "recent_artifacts": artifact_items,
             "metrics": metrics,
             "last_activity_at": format_timestamp(last_activity),
         }
@@ -1314,6 +2010,8 @@ def diff_generated_asset_versions(
 def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
     """Initialise database tables using SQLAlchemy metadata."""
     init_models(db_path)
+    with session_scope(db_path) as db:
+        _ensure_report_review_columns(db)
 
 
 def upsert_config(
@@ -1400,6 +2098,7 @@ def save_report(
     db_path: Path = DEFAULT_DB_PATH,
     *,
     session: Session | None = None,
+    review_metadata: Optional[Dict[str, Any]] = None,
 ) -> None:
     summary_json = json.dumps(summary)
     report_json = json.dumps(report)
@@ -1408,34 +2107,144 @@ def save_report(
         if existing:
             existing.summary = summary_json
             existing.report = report_json
+            existing.updated_at = datetime.now(timezone.utc)
+            _apply_report_review_metadata(existing, review_metadata)
         else:
-            db.add(Report(id=report_id, summary=summary_json, report=report_json))
+            record = Report(
+                id=report_id,
+                summary=summary_json,
+                report=report_json,
+                review_status=DEFAULT_REVIEW_STATUS,
+            )
+            db.add(record)
+            _apply_report_review_metadata(record, review_metadata)
         db.flush()
 
 
 def list_reports(
     limit: int = 50,
+    offset: int = 0,
     db_path: Path = DEFAULT_DB_PATH,
     *,
     session: Session | None = None,
-) -> List[Dict[str, Any]]:
-    with _get_session(session, db_path) as db:
-        stmt = (
-            select(Report.id, Report.summary, Report.created_at)
-            .order_by(Report.created_at.desc())
-            .limit(limit)
+    review_status: Optional[List[str] | str] = None,
+    assignee: Optional[str] = None,
+    created_after: Optional[datetime | str] = None,
+    created_before: Optional[datetime | str] = None,
+    search: Optional[str] = None,
+    order: str = "desc",
+) -> Dict[str, Any]:
+    parsed_created_after = _parse_datetime(created_after) if created_after is not None else None
+    parsed_created_before = _parse_datetime(created_before) if created_before is not None else None
+
+    status_values: Optional[List[str]] = None
+    if review_status is not None:
+        if isinstance(review_status, str):
+            review_status = [review_status]
+        status_values = []
+        for value in review_status:
+            normalised = _normalise_review_status(value)
+            if normalised:
+                status_values.append(normalised)
+        if not status_values:
+            status_values = None
+
+    filters = []
+    if status_values:
+        filters.append(Report.review_status.in_(status_values))
+    if assignee:
+        filters.append(func.lower(Report.review_assignee) == assignee.lower())
+    if parsed_created_after:
+        filters.append(Report.created_at >= parsed_created_after)
+    if parsed_created_before:
+        filters.append(Report.created_at <= parsed_created_before)
+    if search:
+        term = f"%{search.lower()}%"
+        filters.append(
+            or_(
+                func.lower(Report.id).like(term),
+                func.lower(Report.review_assignee).like(term),
+                func.lower(Report.review_notes).like(term),
+            )
         )
-        rows = db.execute(stmt).all()
-        results: List[Dict[str, Any]] = []
+
+    order_normalised = order.lower() if order else "desc"
+    primary_order = Report.created_at.desc() if order_normalised != "asc" else Report.created_at.asc()
+    secondary_order = Report.id.desc() if order_normalised != "asc" else Report.id.asc()
+
+    with _get_session(session, db_path) as db:
+        base = select(
+            Report.id,
+            Report.summary,
+            Report.created_at,
+            Report.updated_at,
+            Report.review_status,
+            Report.review_assignee,
+            Report.review_due_at,
+            Report.review_notes,
+        )
+        if filters:
+            base = base.where(*filters)
+
+        total_stmt = select(func.count()).select_from(Report)
+        if filters:
+            total_stmt = total_stmt.where(*filters)
+        total_count = int(db.execute(total_stmt).scalar_one())
+
+        status_counts_stmt = select(Report.review_status, func.count()).group_by(Report.review_status)
+        if filters:
+            status_counts_stmt = status_counts_stmt.where(*filters)
+        status_counts_rows = db.execute(status_counts_stmt).all()
+        status_counts: Dict[str, int] = {row[0]: int(row[1] or 0) for row in status_counts_rows}
+
+        summary_stmt = select(Report.summary)
+        if filters:
+            summary_stmt = summary_stmt.where(*filters)
+        severity_counts: Dict[str, int] = {}
+        for row in db.execute(summary_stmt):
+            summary = _safe_json_load(row.summary, expect_mapping=True)
+            counts = summary.get("severity_counts") if isinstance(summary, dict) else None
+            if not counts:
+                continue
+            for severity, value in counts.items():
+                try:
+                    numeric = int(value or 0)
+                except (TypeError, ValueError):
+                    numeric = 0
+                severity_counts[severity] = severity_counts.get(severity, 0) + numeric
+
+        items_stmt = base.order_by(primary_order, secondary_order).offset(max(offset, 0)).limit(limit)
+        rows = db.execute(items_stmt).all()
+        items: List[Dict[str, Any]] = []
         for row in rows:
-            results.append(
+            items.append(
                 {
                     "id": row.id,
                     "summary": _safe_json_load(row.summary, expect_mapping=True),
                     "created_at": format_timestamp(row.created_at),
+                    "updated_at": format_timestamp(row.updated_at),
+                    "review_status": row.review_status,
+                    "review_assignee": row.review_assignee,
+                    "review_due_at": format_timestamp(row.review_due_at),
+                    "review_notes": row.review_notes,
                 }
             )
-        return results
+
+        next_offset = offset + limit if offset + limit < total_count else None
+        has_more = next_offset is not None
+
+        return {
+            "items": items,
+            "total_count": total_count,
+            "limit": limit,
+            "offset": offset,
+            "next_offset": next_offset,
+            "has_more": has_more,
+            "aggregates": {
+                "status_counts": status_counts,
+                "severity_counts": severity_counts,
+            },
+        }
 
 
 def get_report(
@@ -1452,8 +2261,111 @@ def get_report(
             "id": record.id,
             "summary": _safe_json_load(record.summary, expect_mapping=True),
             "report": _safe_json_load(record.report, expect_mapping=False),
+            "review_status": record.review_status,
+            "review_assignee": record.review_assignee,
+            "review_due_at": format_timestamp(record.review_due_at),
+            "review_notes": record.review_notes,
             "created_at": format_timestamp(record.created_at),
+            "updated_at": format_timestamp(record.updated_at),
         }
+
+
+def update_report_review(
+    report_id: str,
+    *,
+    review_status: Optional[str] = None,
+    review_assignee: Optional[str] = None,
+    review_due_at: Optional[str | datetime] = None,
+    review_notes: Optional[str] = None,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Optional[Dict[str, Any]]:
+    metadata: Dict[str, Any] = {}
+    if review_status is not None:
+        metadata["review_status"] = review_status
+    if review_assignee is not None:
+        metadata["review_assignee"] = review_assignee
+    if review_due_at is not None:
+        metadata["review_due_at"] = review_due_at
+    if review_notes is not None:
+        metadata["review_notes"] = review_notes
+
+    with _get_session(session, db_path) as db:
+        record = db.get(Report, report_id)
+        if not record:
+            return None
+        _apply_report_review_metadata(record, metadata)
+        db.flush()
+        return {
+            "id": record.id,
+            "review_status": record.review_status,
+            "review_assignee": record.review_assignee,
+            "review_due_at": format_timestamp(record.review_due_at),
+            "review_notes": record.review_notes,
+            "updated_at": format_timestamp(record.updated_at),
+        }
+
+
+def create_report_comment(
+    report_id: str,
+    body: str,
+    *,
+    author: Optional[str] = None,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> Dict[str, Any]:
+    cleaned_body = body.strip()
+    if not cleaned_body:
+        raise ValueError("comment body cannot be empty")
+    cleaned_author = author.strip() if isinstance(author, str) else None
+
+    with _get_session(session, db_path) as db:
+        report = db.get(Report, report_id)
+        if not report:
+            raise ReportNotFoundError(report_id)
+        comment = ReportComment(report_id=report_id, body=cleaned_body, author=cleaned_author)
+        db.add(comment)
+        report.updated_at = datetime.now(timezone.utc)
+        db.flush()
+        return comment.as_dict()
+
+
+def list_report_comments(
+    report_id: str,
+    *,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> List[Dict[str, Any]]:
+    with _get_session(session, db_path) as db:
+        report = db.get(Report, report_id)
+        if not report:
+            raise ReportNotFoundError(report_id)
+        stmt = (
+            select(ReportComment)
+            .where(ReportComment.report_id == report_id)
+            .order_by(ReportComment.created_at.asc(), ReportComment.id.asc())
+        )
+        rows = db.execute(stmt).scalars().all()
+        return [row.as_dict() for row in rows]
+
+
+def delete_report_comment(
+    report_id: str,
+    comment_id: str,
+    *,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> bool:
+    with _get_session(session, db_path) as db:
+        comment = db.get(ReportComment, comment_id)
+        if not comment or comment.report_id != report_id:
+            return False
+        db.delete(comment)
+        parent = db.get(Report, report_id)
+        if parent:
+            parent.updated_at = datetime.now(timezone.utc)
+        db.flush()
+        return True
 
 
 def delete_report(

@@ -54,14 +54,35 @@ class Config(Base):
 
 class Report(Base):
     __tablename__ = "reports"
+    __table_args__ = (
+        Index("ix_reports_created_at", "created_at"),
+        Index("ix_reports_review_status", "review_status"),
+        Index("ix_reports_review_assignee", "review_assignee"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     report: Mapped[str] = mapped_column(Text, nullable=False)
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    review_assignee: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)
+    review_due_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.current_timestamp(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+        server_onupdate=func.current_timestamp(),
+    )
+
+    comments: Mapped[List["ReportComment"]] = relationship(  # type: ignore[name-defined]
+        back_populates="report",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     def as_dict(self) -> Dict[str, Optional[str]]:
@@ -69,7 +90,49 @@ class Report(Base):
             "id": self.id,
             "summary": self.summary,
             "report": self.report,
+            "review_status": self.review_status,
+            "review_assignee": self.review_assignee,
+            "review_due_at": format_timestamp(self.review_due_at),
+            "review_notes": self.review_notes,
             "created_at": format_timestamp(self.created_at),
+            "updated_at": format_timestamp(self.updated_at),
+        }
+
+
+class ReportComment(Base):
+    __tablename__ = "report_comments"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    report_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("reports.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    author: Mapped[Optional[str]] = mapped_column(String(320), nullable=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+        server_onupdate=func.current_timestamp(),
+    )
+
+    report: Mapped["Report"] = relationship(back_populates="comments")
+
+    def as_dict(self) -> Dict[str, Optional[str]]:
+        return {
+            "id": self.id,
+            "report_id": self.report_id,
+            "author": self.author,
+            "body": self.body,
+            "created_at": format_timestamp(self.created_at),
+            "updated_at": format_timestamp(self.updated_at),
         }
 
 
@@ -231,6 +294,16 @@ class Project(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    configs: Mapped[List["ProjectConfig"]] = relationship(  # type: ignore[name-defined]
+        back_populates="project",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    artifacts: Mapped[List["ProjectArtifact"]] = relationship(  # type: ignore[name-defined]
+        back_populates="project",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     def to_dict(self, include_metadata: bool = True) -> Dict[str, Any]:
         payload = dict(self.project_metadata or {}) if include_metadata else None
@@ -273,6 +346,11 @@ class ProjectRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     project: Mapped[Project] = relationship(back_populates="runs")
+    artifacts: Mapped[List["ProjectArtifact"]] = relationship(  # type: ignore[name-defined]
+        back_populates="run",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     def to_dict(self, include_parameters: bool = True, include_summary: bool = True) -> Dict[str, Any]:
         return {
@@ -289,6 +367,108 @@ class ProjectRun(Base):
             "updated_at": format_timestamp(self.updated_at),
             "started_at": format_timestamp(self.started_at),
             "finished_at": format_timestamp(self.finished_at),
+        }
+
+
+class ProjectConfig(Base):
+    __tablename__ = "project_configs"
+    __table_args__ = (UniqueConstraint("project_id", "slug", name="uq_project_config_slug"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    slug: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    config_name: Mapped[str | None] = mapped_column(String, ForeignKey("configs.name", ondelete="SET NULL"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, default="tfreview")
+    payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[List[str]] = mapped_column(JSON, nullable=False, default=list)
+    config_metadata: Mapped[Dict[str, Any]] = mapped_column("metadata", JSON, nullable=False, default=dict)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+        server_onupdate=func.current_timestamp(),
+    )
+
+    project: Mapped[Project] = relationship(back_populates="configs")
+    config: Mapped[Config | None] = relationship()
+
+    def to_dict(self, include_payload: bool = True) -> Dict[str, Any]:
+        payload_value = self.payload if include_payload else None
+        return {
+            "id": self.id,
+            "project_id": self.project_id,
+            "name": self.name,
+            "slug": self.slug,
+            "description": self.description,
+            "config_name": self.config_name,
+            "kind": self.kind,
+            "payload": payload_value,
+            "tags": list(self.tags or []),
+            "metadata": dict(self.config_metadata or {}),
+            "is_default": self.is_default,
+            "created_at": format_timestamp(self.created_at),
+            "updated_at": format_timestamp(self.updated_at),
+        }
+
+
+class ProjectArtifact(Base):
+    __tablename__ = "project_artifacts"
+    __table_args__ = (
+        UniqueConstraint("project_id", "run_id", "relative_path", name="uq_project_artifact_path"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str | None] = mapped_column(String, ForeignKey("project_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    report_id: Mapped[str | None] = mapped_column(String, ForeignKey("reports.id", ondelete="SET NULL"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    relative_path: Mapped[str] = mapped_column(String, nullable=False)
+    storage_path: Mapped[str] = mapped_column(String, nullable=False)
+    media_type: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    tags: Mapped[List[str]] = mapped_column(JSON, nullable=False, default=list)
+    artifact_metadata: Mapped[Dict[str, Any]] = mapped_column("metadata", JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
+        server_onupdate=func.current_timestamp(),
+    )
+
+    project: Mapped[Project] = relationship(back_populates="artifacts")
+    run: Mapped[ProjectRun | None] = relationship(back_populates="artifacts")
+    report: Mapped[Report | None] = relationship()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "project_id": self.project_id,
+            "run_id": self.run_id,
+            "report_id": self.report_id,
+            "name": self.name,
+            "relative_path": self.relative_path,
+            "storage_path": self.storage_path,
+            "media_type": self.media_type,
+            "size_bytes": self.size_bytes,
+            "checksum": self.checksum,
+            "tags": list(self.tags or []),
+            "metadata": dict(self.artifact_metadata or {}),
+            "created_at": format_timestamp(self.created_at),
+            "updated_at": format_timestamp(self.updated_at),
         }
 
 
