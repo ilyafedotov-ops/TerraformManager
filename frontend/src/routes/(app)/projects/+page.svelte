@@ -143,6 +143,8 @@ let artifactRunFilter = $state('');
 	const pendingRunLoads = new Set<string>();
 	const pendingLibraryLoads = new Set<string>();
 	const pendingOverviewLoads = new Set<string>();
+	const pendingConfigLoads = new Set<string>();
+	const pendingArtifactIndexLoads = new Set<string>();
 
 	const tabs: { id: typeof activeTab; label: string }[] = [
 		{ id: 'overview', label: 'Overview' },
@@ -1011,47 +1013,62 @@ $effect(() => {
 	sortedProjects = sorted;
 });
 
-$effect(() => {
-	const project = $activeProject as ProjectDetail | null;
-	if (!project || !token) {
-		return;
-	}
-	if (activeTab === 'configs' && !projectState.getCachedConfigs(project.id)) {
-		configsLoading = true;
-		configsError = null;
-		void projectState
-			.loadConfigs(fetch, token, project.id)
-			.catch((error) => {
-				const message = error instanceof Error ? error.message : 'Unable to load configs.';
-				configsError = message;
-				notifyError(message);
-			})
-			.finally(() => {
-				configsLoading = false;
-			});
-	}
-});
+	$effect(() => {
+		const project = $activeProject as ProjectDetail | null;
+		if (!project || !token) {
+			return;
+		}
+		const projectId = project.id;
+		if (
+			activeTab === 'configs' &&
+			!projectState.getCachedConfigs(projectId) &&
+			!pendingConfigLoads.has(projectId)
+		) {
+			pendingConfigLoads.add(projectId);
+			configsLoading = true;
+			configsError = null;
+			void projectState
+				.loadConfigs(fetch, token, projectId)
+				.catch((error) => {
+					const message = error instanceof Error ? error.message : 'Unable to load configs.';
+					configsError = message;
+					notifyError(message);
+				})
+				.finally(() => {
+					configsLoading = false;
+					pendingConfigLoads.delete(projectId);
+				});
+		}
+	});
 
-$effect(() => {
-	const project = $activeProject as ProjectDetail | null;
-	if (!project || !token) {
-		return;
-	}
-	if (activeTab === 'artifacts' && !projectState.getCachedArtifactIndex(project.id, artifactRunFilter || null)) {
-		artifactTableLoading = true;
-		artifactTableError = null;
-		void projectState
-			.loadProjectArtifactIndex(fetch, token, project.id, { runId: artifactRunFilter || null })
-			.catch((error) => {
-				const message = error instanceof Error ? error.message : 'Unable to load artifacts.';
-				artifactTableError = message;
-				notifyError(message);
-			})
-			.finally(() => {
-				artifactTableLoading = false;
-			});
-	}
-});
+	$effect(() => {
+		const project = $activeProject as ProjectDetail | null;
+		if (!project || !token) {
+			return;
+		}
+		const projectId = project.id;
+		const artifactKey = `${projectId}::${artifactRunFilter || 'all'}`;
+		if (
+			activeTab === 'artifacts' &&
+			!projectState.getCachedArtifactIndex(projectId, artifactRunFilter || null) &&
+			!pendingArtifactIndexLoads.has(artifactKey)
+		) {
+			pendingArtifactIndexLoads.add(artifactKey);
+			artifactTableLoading = true;
+			artifactTableError = null;
+			void projectState
+				.loadProjectArtifactIndex(fetch, token, projectId, { runId: artifactRunFilter || null })
+				.catch((error) => {
+					const message = error instanceof Error ? error.message : 'Unable to load artifacts.';
+					artifactTableError = message;
+					notifyError(message);
+				})
+				.finally(() => {
+					artifactTableLoading = false;
+					pendingArtifactIndexLoads.delete(artifactKey);
+				});
+		}
+	});
 </script>
 
 <section class="space-y-8">
