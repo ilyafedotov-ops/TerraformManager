@@ -1,46 +1,55 @@
 import { redirect } from '@sveltejs/kit';
 
-const sectionMeta = [
+type Breadcrumb = { href: string; label: string };
+
+type SectionDefinition = {
+	match: RegExp;
+	title: string;
+	subtitle: string;
+	breadcrumbs?: Breadcrumb[] | ((pathname: string) => Breadcrumb[]);
+};
+
+const sectionMeta: SectionDefinition[] = [
 	{
-		match: /^\/dashboard/,
+		match: /^\/projects$/,
+		title: 'Project workspace',
+		subtitle: 'Select a project to continue.',
+		breadcrumbs: [{ href: '/projects', label: 'Projects' }]
+	},
+	{
+		match: /^\/projects\/[^/]+\/dashboard/,
 		title: 'Control plane overview',
 		subtitle: 'Track reviewer activity and severity trends.',
-		breadcrumbs: [{ href: '/dashboard', label: 'Dashboard' }]
+		breadcrumbs: (pathname) => [
+			{ href: '/projects', label: 'Projects' },
+			{ href: pathname, label: 'Dashboard' }
+		]
 	},
 	{
-		match: /^\/generate/,
+		match: /^\/projects\/[^/]+\/generate/,
 		title: 'Terraform generator',
 		subtitle: 'Render hardened infrastructure blueprints.',
-		breadcrumbs: [
-			{ href: '/dashboard', label: 'Dashboard' },
-			{ href: '/generate', label: 'Generate' }
+		breadcrumbs: (pathname) => [
+			{ href: '/projects', label: 'Projects' },
+			{ href: pathname, label: 'Generate' }
 		]
 	},
 	{
-		match: /^\/review/,
+		match: /^\/projects\/[^/]+\/review/,
 		title: 'Scan uploads',
 		subtitle: 'Submit Terraform for static analysis and remediation hints.',
-		breadcrumbs: [
-			{ href: '/dashboard', label: 'Dashboard' },
-			{ href: '/review', label: 'Review' }
+		breadcrumbs: (pathname) => [
+			{ href: '/projects', label: 'Projects' },
+			{ href: pathname, label: 'Review' }
 		]
 	},
 	{
-		match: /^\/reports/,
+		match: /^\/projects\/[^/]+\/reports/,
 		title: 'Historical reports',
 		subtitle: 'Reference past reviewer runs and export findings.',
-		breadcrumbs: [
-			{ href: '/dashboard', label: 'Dashboard' },
-			{ href: '/reports', label: 'Reports' }
-		]
-	},
-	{
-		match: /^\/configs/,
-		title: 'Reviewer configs',
-		subtitle: 'Manage tfreview rules and suppression baselines.',
-		breadcrumbs: [
-			{ href: '/dashboard', label: 'Dashboard' },
-			{ href: '/configs', label: 'Configs' }
+		breadcrumbs: (pathname) => [
+			{ href: '/projects', label: 'Projects' },
+			{ href: pathname, label: 'Reports' }
 		]
 	},
 	{
@@ -48,7 +57,7 @@ const sectionMeta = [
 		title: 'Knowledge base',
 		subtitle: 'Search RAG snippets and sync documentation sources.',
 		breadcrumbs: [
-			{ href: '/dashboard', label: 'Dashboard' },
+			{ href: '/projects', label: 'Projects' },
 			{ href: '/knowledge', label: 'Knowledge' }
 		]
 	},
@@ -57,7 +66,7 @@ const sectionMeta = [
 		title: 'Session security',
 		subtitle: 'Review active device sessions and revoke refresh tokens.',
 		breadcrumbs: [
-			{ href: '/dashboard', label: 'Dashboard' },
+			{ href: '/projects', label: 'Projects' },
 			{ href: '/settings/sessions', label: 'Settings · Sessions' }
 		]
 	},
@@ -66,7 +75,7 @@ const sectionMeta = [
 		title: 'Workspace settings',
 		subtitle: 'Configure LLM providers, tokens, and beta features.',
 		breadcrumbs: [
-			{ href: '/dashboard', label: 'Dashboard' },
+			{ href: '/projects', label: 'Projects' },
 			{ href: '/settings/llm', label: 'Settings · LLM' }
 		]
 	},
@@ -75,26 +84,29 @@ const sectionMeta = [
 		title: 'Workspace settings',
 		subtitle: 'Configure workspace preferences and security controls.',
 		breadcrumbs: [
-			{ href: '/dashboard', label: 'Dashboard' },
+			{ href: '/projects', label: 'Projects' },
 			{ href: '/settings/llm', label: 'Settings' }
 		]
 	}
-] as const;
+];
 
 const resolveSection = (pathname: string) => {
 	for (const entry of sectionMeta) {
 		if (entry.match.test(pathname)) {
+			const crumbs = typeof entry.breadcrumbs === 'function'
+				? entry.breadcrumbs(pathname)
+				: entry.breadcrumbs;
 			return {
 				title: entry.title,
 				subtitle: entry.subtitle,
-				breadcrumbs: entry.breadcrumbs
+				breadcrumbs: crumbs ?? [{ href: '/projects', label: 'Projects' }]
 			};
 		}
 	}
 	return {
 		title: 'Terraform Manager',
 		subtitle: 'Secure infrastructure at speed.',
-		breadcrumbs: [{ href: '/dashboard', label: 'Dashboard' }]
+		breadcrumbs: [{ href: '/projects', label: 'Projects' }]
 	};
 };
 

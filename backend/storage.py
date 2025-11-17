@@ -934,6 +934,7 @@ def create_project_run(
     triggered_by: str | None = None,
     parameters: Dict[str, Any] | None = None,
     projects_root: Path | None = None,
+    report_id: str | None = None,
     db_path: Path = DEFAULT_DB_PATH,
     session: Session | None = None,
 ) -> Dict[str, Any]:
@@ -943,6 +944,10 @@ def create_project_run(
             project = _get_project_or_raise(db, project_id)
         except ProjectNotFoundError as exc:
             raise ValueError(f"project '{project_id}' not found") from exc
+        if report_id:
+            report = db.get(Report, report_id)
+            if not report:
+                raise ValueError(f"report '{report_id}' not found")
         run = ProjectRun(
             project_id=project.id,
             label=label,
@@ -950,6 +955,7 @@ def create_project_run(
             status=status,
             triggered_by=triggered_by,
             parameters=metadata,
+            report_id=report_id,
         )
         db.add(run)
         db.flush()
@@ -1036,6 +1042,7 @@ def update_project_run(
     summary: Dict[str, Any] | None = None,
     started_at: datetime | None = None,
     finished_at: datetime | None = None,
+    report_id: str | None = None,
     db_path: Path = DEFAULT_DB_PATH,
     session: Session | None = None,
 ) -> Optional[Dict[str, Any]]:
@@ -1053,6 +1060,12 @@ def update_project_run(
             run.started_at = started_at
         if finished_at:
             run.finished_at = finished_at
+        if report_id is not None:
+            if report_id:
+                report = db.get(Report, report_id)
+                if not report:
+                    raise ValueError(f"report '{report_id}' not found")
+            run.report_id = report_id
         db.flush()
         return run.to_dict()
 
@@ -2133,6 +2146,7 @@ def list_reports(
     created_before: Optional[datetime | str] = None,
     search: Optional[str] = None,
     order: str = "desc",
+    project_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     parsed_created_after = _parse_datetime(created_after) if created_after is not None else None
     parsed_created_before = _parse_datetime(created_before) if created_before is not None else None
@@ -2183,21 +2197,39 @@ def list_reports(
             Report.review_due_at,
             Report.review_notes,
         )
+        if project_id:
+            try:
+                _get_project_or_raise(db, project_id)
+            except ProjectNotFoundError as exc:
+                raise ValueError(f"project '{project_id}' not found") from exc
+            base = base.join(ProjectRun, Report.id == ProjectRun.report_id).where(ProjectRun.project_id == project_id)
         if filters:
             base = base.where(*filters)
 
-        total_stmt = select(func.count()).select_from(Report)
+        total_stmt = select(func.count(func.distinct(Report.id))).select_from(Report)
+        if project_id:
+            total_stmt = total_stmt.join(ProjectRun, Report.id == ProjectRun.report_id).where(
+                ProjectRun.project_id == project_id
+            )
         if filters:
             total_stmt = total_stmt.where(*filters)
         total_count = int(db.execute(total_stmt).scalar_one())
 
-        status_counts_stmt = select(Report.review_status, func.count()).group_by(Report.review_status)
+        status_counts_stmt = select(Report.review_status, func.count()).select_from(Report).group_by(Report.review_status)
+        if project_id:
+            status_counts_stmt = status_counts_stmt.join(ProjectRun, Report.id == ProjectRun.report_id).where(
+                ProjectRun.project_id == project_id
+            )
         if filters:
             status_counts_stmt = status_counts_stmt.where(*filters)
         status_counts_rows = db.execute(status_counts_stmt).all()
         status_counts: Dict[str, int] = {row[0]: int(row[1] or 0) for row in status_counts_rows}
 
-        summary_stmt = select(Report.summary)
+        summary_stmt = select(Report.summary).select_from(Report)
+        if project_id:
+            summary_stmt = summary_stmt.join(ProjectRun, Report.id == ProjectRun.report_id).where(
+                ProjectRun.project_id == project_id
+            )
         if filters:
             summary_stmt = summary_stmt.where(*filters)
         severity_counts: Dict[str, int] = {}

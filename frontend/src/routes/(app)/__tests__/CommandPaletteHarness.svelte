@@ -1,15 +1,23 @@
 <script lang="ts">
 	import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte';
 	import { navigationSectionsStore, navigationState, commandResults } from '$lib/stores/navigation';
+	import { projectState } from '$lib/stores/project';
 	import type { NavigationItem, NavigationSection } from '$lib/navigation/types';
+	import type { ProjectSummary } from '$lib/api/client';
 
 	interface Props {
 		sections: NavigationSection[];
+		project?: ProjectSummary | null;
 	}
 
-	const { sections }: Props = $props();
+	const { sections, project = null }: Props = $props();
 
 	navigationSectionsStore.set(sections);
+	projectState.reset();
+	if (project) {
+		projectState.upsertProject(project);
+		projectState.setActiveProject(project.id);
+	}
 
 	const dispatch = createEventDispatcher<{ select: { href: string } }>();
 	let commandInput = $state<HTMLInputElement | null>(null);
@@ -21,6 +29,7 @@
 			(item): item is NavigationItem & { href: string } => Boolean(item.href)
 		)
 	);
+	const commandKey = (item: NavigationItem) => `${item.href ?? 'nohref'}::${item.title}`;
 	const firstHref = $derived(actionableItems[0]?.href);
 
 	const focusableSelector =
@@ -112,6 +121,7 @@
 	onDestroy(() => {
 		navigationState.reset();
 		navigationSectionsStore.set(sections);
+		projectState.reset();
 	});
 </script>
 
@@ -163,10 +173,10 @@
 			</div>
 			<div class="mt-4 max-h-60 overflow-auto rounded-2xl border border-slate-200 bg-white" data-testid="command-results">
 				{#if actionableItems.length}
-					<ul class="divide-y divide-slate-100 text-sm text-slate-600">
-						{#each actionableItems as item (item.href ?? item.title)}
-							<li>
-								<button
+						<ul class="divide-y divide-slate-100 text-sm text-slate-600">
+							{#each actionableItems as item (commandKey(item))}
+								<li>
+									<button
 									class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-sky-50 hover:text-sky-600"
 									type="button"
 									onclick={() => handleCommandSelect(item.href)}

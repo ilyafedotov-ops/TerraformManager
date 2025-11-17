@@ -331,6 +331,12 @@ class ProjectRun(Base):
     parameters: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     summary: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     artifacts_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    report_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("reports.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -346,6 +352,7 @@ class ProjectRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     project: Mapped[Project] = relationship(back_populates="runs")
+    report: Mapped[Report | None] = relationship()
     artifacts: Mapped[List["ProjectArtifact"]] = relationship(  # type: ignore[name-defined]
         back_populates="run",
         cascade="all, delete-orphan",
@@ -363,6 +370,7 @@ class ProjectRun(Base):
             "parameters": dict(self.parameters or {}) if include_parameters else None,
             "summary": dict(self.summary or {}) if include_summary else None,
             "artifacts_path": self.artifacts_path,
+            "report_id": self.report_id,
             "created_at": format_timestamp(self.created_at),
             "updated_at": format_timestamp(self.updated_at),
             "started_at": format_timestamp(self.started_at),

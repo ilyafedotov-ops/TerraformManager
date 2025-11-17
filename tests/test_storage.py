@@ -68,13 +68,51 @@ def test_report_roundtrip(db_path: Path) -> None:
     assert second["report"]["findings"] == [1]
     assert second["created_at"] == created_at
 
-    reports = storage.list_reports(db_path=db_path)
-    assert len(reports) == 1
-    assert reports[0]["summary"]["count"] == 2
+    reports_payload = storage.list_reports(db_path=db_path)
+    assert reports_payload["total_count"] == 1
+    assert len(reports_payload["items"]) == 1
+    assert reports_payload["items"][0]["summary"]["count"] == 2
+    assert reports_payload["items"][0]["review_status"] == "pending"
 
     assert storage.delete_report("missing", db_path=db_path) is False
     assert storage.delete_report("r1", db_path=db_path) is True
     assert storage.get_report("r1", db_path=db_path) is None
+
+
+def test_report_review_workflow(db_path: Path) -> None:
+    storage.save_report(
+        "r1",
+        {"severity_counts": {"high": 2}},
+        {"summary": {"severity_counts": {"high": 2}}},
+        db_path=db_path,
+    )
+
+    payload = storage.update_report_review(
+        "r1",
+        review_status="in_review",
+        review_assignee="alice@example.com",
+        review_notes="Taking a look.",
+        db_path=db_path,
+    )
+    assert payload is not None
+    assert payload["review_status"] == "in_review"
+    assert payload["review_assignee"] == "alice@example.com"
+
+    comment = storage.create_report_comment(
+        "r1",
+        "Initial findings look good.",
+        author="alice@example.com",
+        db_path=db_path,
+    )
+    assert comment["body"] == "Initial findings look good."
+
+    comments = storage.list_report_comments("r1", db_path=db_path)
+    assert len(comments) == 1
+    assert comments[0]["author"] == "alice@example.com"
+
+    assert storage.delete_report_comment("r1", comment["id"], db_path=db_path) is True
+    comments_after = storage.list_report_comments("r1", db_path=db_path)
+    assert comments_after == []
 
 
 def test_settings_helpers(db_path: Path) -> None:

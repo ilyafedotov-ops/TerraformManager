@@ -4,12 +4,33 @@ export const navigationSections: NavigationSection[] = [
 	{
 		title: 'Workbench',
 		items: [
-			{ title: 'Dashboard', href: '/dashboard', icon: 'grid' },
 			{ title: 'Projects', href: '/projects', icon: 'folder-tree' },
-			{ title: 'Generate', href: '/generate', icon: 'sparkles', label: 'Beta' },
-			{ title: 'Review', href: '/review', icon: 'upload-cloud', label: 'Core' },
-			{ title: 'Reports', href: '/reports', icon: 'file-bar-chart-2' },
-			{ title: 'Configs', href: '/configs', icon: 'settings-2' },
+			{
+				title: 'Dashboard',
+				icon: 'grid',
+				projectScoped: true,
+				projectPath: '/projects/{projectId}/dashboard'
+			},
+			{
+				title: 'Generate',
+				icon: 'sparkles',
+				label: 'Beta',
+				projectScoped: true,
+				projectPath: '/projects/{projectId}/generate'
+			},
+			{
+				title: 'Review',
+				icon: 'upload-cloud',
+				label: 'Core',
+				projectScoped: true,
+				projectPath: '/projects/{projectId}/review'
+			},
+			{
+				title: 'Reports',
+				icon: 'file-bar-chart-2',
+				projectScoped: true,
+				projectPath: '/projects/{projectId}/reports'
+			},
 			{ title: 'Knowledge', href: '/knowledge', icon: 'book-open', label: 'New' }
 		]
 	},

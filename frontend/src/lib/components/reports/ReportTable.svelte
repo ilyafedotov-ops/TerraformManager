@@ -11,13 +11,16 @@ interface Props {
     apiBase: string;
     token?: string | null;
     deletingId?: string | null;
+    selectable?: boolean;
+    selectedId?: string | null;
+    projectId?: string | null;
 }
 
 const props: Props = $props();
 
-const dispatch = createEventDispatcher<{ delete: { id: string } }>();
+const dispatch = createEventDispatcher<{ delete: { id: string }; select: { id: string } }>();
 
-const formatDate = (value?: string) => {
+const formatDate = (value?: string | null) => {
 	if (!value) return '—';
 	const date = new Date(value);
 	return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
@@ -63,42 +66,96 @@ const driftStatus = (summary?: ReportSummary['summary']) => {
 };
 
 const isDeleting = (id: string) => props.deletingId === id;
+
+const isSelected = (id: string) => props.selectedId === id;
+const viewProjectId = props.projectId ?? null;
+
+const statusBadgeClass = (status?: string | null) => {
+    const value = status?.toLowerCase() ?? 'pending';
+    switch (value) {
+        case 'resolved':
+            return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+        case 'in_review':
+            return 'bg-sky-100 text-sky-700 border-sky-200';
+        case 'changes_requested':
+            return 'bg-amber-100 text-amber-700 border-amber-200';
+        case 'waived':
+            return 'bg-slate-200 text-slate-700 border-slate-300';
+        default:
+            return 'bg-slate-100 text-slate-600 border-slate-200';
+    }
+};
+
+const formatStatus = (status?: string | null) => {
+    if (!status) return 'Pending';
+    return status
+        .split('_')
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+};
+
+const formatDueDate = (value?: string | null) => {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+    return date.toLocaleDateString();
+};
+
+const handleRowClick = (report: ReportSummary) => {
+    if (!props.selectable) return;
+    dispatch('select', { id: report.id });
+};
 </script>
 
 <div class="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-300/40">
-	<table class="min-w-full divide-y divide-slate-100 text-sm">
-		<thead class="bg-slate-50 text-xs uppercase tracking-[0.3em] text-slate-400">
-			<tr>
-				<th class="px-6 py-4 text-left">Report ID</th>
-				<th class="px-6 py-4 text-left">Created</th>
-				<th class="px-6 py-4 text-left">Severity</th>
-				<th class="px-6 py-4 text-left">Issues</th>
-				<th class="px-6 py-4 text-left">Cost Δ</th>
-				<th class="px-6 py-4 text-left">Drift</th>
-				<th class="px-6 py-4 text-right">Actions</th>
-			</tr>
-		</thead>
-		<tbody class="divide-y divide-slate-100 text-slate-500">
-			{#each props.reports as report (report.id)}
-				<tr class="hover:bg-sky-50">
-					<td class="px-6 py-4 font-mono text-sm text-slate-600">{report.id}</td>
-					<td class="px-6 py-4">{formatDate(report.created_at)}</td>
-					<td class="px-6 py-4 uppercase tracking-[0.2em] text-slate-500">{severityLabel(report.summary)}</td>
-					<td class="px-6 py-4">{issuesCount(report.summary)}</td>
-					<td class="px-6 py-4">{costDelta(report.summary)}</td>
-					<td class="px-6 py-4">{driftStatus(report.summary)}</td>
-					<td class="px-6 py-4 text-right">
-						<ReportActions
-							id={report.id}
-							apiBase={props.apiBase}
-							viewHref={`/reports/${report.id}`}
-							deleting={isDeleting(report.id)}
-							deleteEnabled={Boolean(props.token)}
-							on:delete={() => dispatch('delete', { id: report.id })}
-						/>
-					</td>
-				</tr>
-			{/each}
-		</tbody>
-	</table>
+    <table class="min-w-full divide-y divide-slate-100 text-sm">
+        <thead class="bg-slate-50 text-xs uppercase tracking-[0.3em] text-slate-400">
+            <tr>
+                <th class="px-6 py-4 text-left">Report ID</th>
+                <th class="px-6 py-4 text-left">Created</th>
+                <th class="px-6 py-4 text-left">Status</th>
+                <th class="px-6 py-4 text-left">Assignee</th>
+                <th class="px-6 py-4 text-left">Due</th>
+                <th class="px-6 py-4 text-left">Severity</th>
+                <th class="px-6 py-4 text-left">Issues</th>
+                <th class="px-6 py-4 text-left">Cost Δ</th>
+                <th class="px-6 py-4 text-left">Drift</th>
+                <th class="px-6 py-4 text-right">Actions</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 text-slate-500">
+            {#each props.reports as report (report.id)}
+                <tr
+                    class={`transition ${props.selectable ? 'cursor-pointer hover:bg-sky-50' : ''} ${isSelected(report.id) ? 'bg-sky-50' : ''}`}
+                    onclick={() => handleRowClick(report)}
+                >
+                    <td class="px-6 py-4 font-mono text-sm text-slate-600">{report.id}</td>
+                    <td class="px-6 py-4">{formatDate(report.created_at)}</td>
+                    <td class="px-6 py-4">
+                        <span class={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${statusBadgeClass(report.review_status)}`}>
+                            {formatStatus(report.review_status)}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 text-slate-600">{report.review_assignee ?? '—'}</td>
+                    <td class="px-6 py-4">{formatDueDate(report.review_due_at)}</td>
+                    <td class="px-6 py-4 uppercase tracking-[0.2em] text-slate-500">{severityLabel(report.summary)}</td>
+                    <td class="px-6 py-4">{issuesCount(report.summary)}</td>
+                    <td class="px-6 py-4">{costDelta(report.summary)}</td>
+                    <td class="px-6 py-4">{driftStatus(report.summary)}</td>
+                    <td class="px-6 py-4 text-right" onclick={(event) => event.stopPropagation()}>
+                        <ReportActions
+                            id={report.id}
+                            apiBase={props.apiBase}
+                            projectId={viewProjectId}
+                            deleting={isDeleting(report.id)}
+                            deleteEnabled={Boolean(props.token)}
+                            on:delete={() => dispatch('delete', { id: report.id })}
+                        />
+                    </td>
+                </tr>
+            {/each}
+        </tbody>
+    </table>
 </div>

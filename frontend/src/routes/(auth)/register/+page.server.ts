@@ -7,7 +7,7 @@ const successMessage =
 
 export const load: PageServerLoad = ({ locals }) => {
 	if (locals.token) {
-		throw redirect(303, '/dashboard');
+	throw redirect(303, '/projects');
 	}
 
 	return {};

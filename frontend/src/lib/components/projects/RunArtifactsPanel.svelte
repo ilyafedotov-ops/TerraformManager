@@ -1,7 +1,7 @@
 <script lang="ts">
 import { browser } from '$app/environment';
 import { onMount } from 'svelte';
-import { downloadRunArtifact, type ArtifactEntry } from '$lib/api/client';
+import { downloadRunArtifact, type ArtifactEntry, type ProjectRunSummary } from '$lib/api/client';
 import { notifyError, notifySuccess } from '$lib/stores/notifications';
 import { activeProject, activeProjectRuns, activeProjectLibrary, projectState } from '$lib/stores/project';
 
@@ -258,14 +258,7 @@ const resetArtifacts = () => {
 
 		let highlightedRunId: string | null = null;
 		if (highlightReportId) {
-			const match = runs.find((run) => {
-				const summary = run.summary as Record<string, unknown> | null | undefined;
-				const savedId =
-					summary && typeof summary === 'object'
-						? (summary as { saved_report_id?: string | null }).saved_report_id
-						: null;
-				return savedId === highlightReportId;
-			});
+			const match = runs.find((run) => resolveRunReportId(run) === highlightReportId);
 			highlightedRunId = match?.id ?? null;
 		}
 
@@ -566,8 +559,16 @@ const resetArtifacts = () => {
 		}
 	};
 
-	const MAX_PREVIEW_BYTES = 512 * 1024; // 512 KB
-	const textLikeContentTypes = ['text/', 'application/json', 'application/x-yaml', 'application/javascript'];
+const MAX_PREVIEW_BYTES = 512 * 1024; // 512 KB
+const resolveRunReportId = (run: ProjectRunSummary): string | null => {
+	const explicit = run.report_id?.trim();
+	if (explicit) {
+		return explicit;
+	}
+	const summary = run.summary as { saved_report_id?: string | null } | null | undefined;
+	return summary?.saved_report_id ?? null;
+};
+const textLikeContentTypes = ['text/', 'application/json', 'application/x-yaml', 'application/javascript'];
 
 	const isLikelyText = (contentType: string | null, sample: Uint8Array) => {
 		if (contentType && textLikeContentTypes.some((token) => contentType.includes(token))) {
@@ -685,7 +686,7 @@ const resetArtifacts = () => {
 					{#each projectRuns as run (run.id)}
 						<option value={run.id}>
 							{run.label} · {run.status}
-							{#if highlightReportId && run.summary && (run.summary as { saved_report_id?: string | null }).saved_report_id === highlightReportId}
+							{#if highlightReportId && resolveRunReportId(run) === highlightReportId}
 								★
 							{/if}
 						</option>
@@ -707,7 +708,7 @@ const resetArtifacts = () => {
 				<span class="rounded-full border border-slate-200 px-3 py-[2px] text-[0.65rem] font-semibold text-slate-600">
 					Status: {selectedRun.status}
 				</span>
-				{#if highlightReportId && selectedRun.summary && (selectedRun.summary as { saved_report_id?: string | null }).saved_report_id === highlightReportId}
+				{#if highlightReportId && resolveRunReportId(selectedRun) === highlightReportId}
 					<span class="rounded-full border border-sky-200 bg-sky-50 px-3 py-[2px] text-[0.65rem] font-semibold text-sky-600">
 						Linked report
 					</span>

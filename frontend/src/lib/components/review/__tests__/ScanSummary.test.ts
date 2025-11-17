@@ -46,7 +46,8 @@ describe('ScanSummary', () => {
 					['critical', 2],
 					['high', 1]
 				],
-				apiBase: 'https://api.example.dev'
+				apiBase: 'https://api.example.dev',
+				projectId: 'proj-1'
 			}
 		});
 
@@ -58,7 +59,7 @@ describe('ScanSummary', () => {
         expect(getByText('Plan drift')).toBeInTheDocument();
 
 		const viewLink = getByText('View');
-		expect(viewLink.getAttribute('href')).toBe('/reports/rpt-123');
+		expect(viewLink.getAttribute('href')).toBe('/projects/proj-1/reports/rpt-123');
 		expect(getByText('JSON')).toHaveAttribute('href', 'https://api.example.dev/reports/rpt-123');
 		expect(queryByText('Delete')).not.toBeInTheDocument();
 	});

@@ -7,9 +7,11 @@
     import { notifyError, notifySuccess } from '$lib/stores/notifications';
     import { onDestroy } from 'svelte';
     import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBanner.svelte';
+    import type { PageData, PageParams } from './$types';
 
-    const { data } = $props();
+    const { data, params } = $props<{ data: PageData; params: PageParams }>();
     const token = data.token as string | null;
+    const projectId = params.projectId ?? null;
 
     let files = $state<FileList | null>(null);
     let terraformValidate = $state(false);
@@ -183,10 +185,12 @@
         }
         try {
             const label = `Review • ${new Date().toLocaleString()}`;
+            const savedReportId = (scanResult as { id?: string | null } | null)?.id ?? null;
             const run = await projectState.createRun(fetch, token, activeProjectValue.id, {
                 label,
                 kind: 'review',
-                parameters
+                parameters,
+				report_id: savedReportId ?? undefined
             });
             if (!run?.id) {
                 return;
@@ -195,7 +199,8 @@
 			const updatePayload: ProjectRunUpdatePayload = {
 				status: 'completed',
 				finished_at: new Date().toISOString(),
-				summary: summary ?? undefined
+				summary: summary ?? undefined,
+				report_id: savedReportId ?? undefined
 			};
 			try {
 				const updated = await updateProjectRun(fetch, token, activeProjectValue.id, run.id, updatePayload);
@@ -242,6 +247,7 @@
             report={(result.report ?? null) as Record<string, unknown> | null}
             severityEntries={severityEntries()}
             apiBase={API_BASE}
+            projectId={projectId}
         />
     {/if}
 </section>

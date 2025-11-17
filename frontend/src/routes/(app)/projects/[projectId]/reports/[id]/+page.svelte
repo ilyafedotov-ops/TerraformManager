@@ -13,6 +13,7 @@ import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBan
 	const error = data.error as string | undefined;
 	const token = data.token as string | null;
 	const apiBase = (env.PUBLIC_API_BASE ?? 'http://localhost:8890').replace(/\/$/, '');
+	const projectReportsHref = `/projects/${params.projectId}/reports`;
 	let deleting = $state(false);
 	let deleteError = $state<string | null>(null);
 
@@ -80,7 +81,7 @@ const displayedFindings = findings.slice(0, 50);
 		try {
 			await deleteReport(fetch, token, params.id);
 			notifySuccess(`Report ${params.id} deleted.`);
-			await goto('/reports');
+		await goto(projectReportsHref);
 		} catch (err) {
 			let message = 'Failed to delete report.';
 			if (err instanceof ApiError) {
@@ -99,7 +100,7 @@ const displayedFindings = findings.slice(0, 50);
 
 <section class="space-y-6">
 	<header class="space-y-2">
-		<a class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 hover:text-sky-500" href="/reports">
+		<a class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 hover:text-sky-500" href={projectReportsHref}>
 			← Back to reports
 		</a>
 		<h2 class="text-3xl font-semibold text-slate-700">Report {params.id}</h2>

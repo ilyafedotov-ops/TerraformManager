@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import uuid
 from datetime import datetime, timezone
 from getpass import getpass
 from pathlib import Path
@@ -28,6 +29,7 @@ from backend.storage import (
     list_project_runs,
     list_projects,
     list_run_artifacts,
+    save_report,
     save_run_artifact,
     update_project_run,
 )
@@ -322,6 +324,11 @@ def main() -> None:
         "--html-out",
         help="Optional file path to write an HTML summary report",
     )
+    scan.add_argument(
+        "--save-report",
+        action="store_true",
+        help="Persist the JSON report in the local SQLite database for project linking",
+    )
     project_group = scan.add_argument_group("Project logging")
     project_ref = project_group.add_mutually_exclusive_group()
     project_ref.add_argument("--project-id", help="Log this scan under the specified project id")
@@ -581,6 +588,7 @@ def main() -> None:
             cost_options=cost_opts,
             plan_path=plan_path,
         )
+        report_id: str | None = None
         logger.info(
             "Scan completed",
             extra={
@@ -613,6 +621,11 @@ def main() -> None:
             print(f"Wrote HTML report to {args.html_out}")
             generated_artifacts.append((html_path, f"reports/{html_path.name}"))
 
+        if args.save_report:
+            report_id = str(uuid.uuid4())
+            save_report(report_id, report.get("summary", {}), report)
+            report["id"] = report_id
+
         if project_record:
             run_label = args.project_run_label or f"CLI scan {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}"
             run = create_project_run(
@@ -620,8 +633,11 @@ def main() -> None:
                 label=run_label,
                 kind=args.project_run_kind or "review",
                 parameters=project_run_parameters or {},
+                report_id=report_id,
             )
             summary_payload = dict(report.get("summary", {}))
+            if report_id:
+                summary_payload["saved_report_id"] = report_id
             summary_payload["artifacts"] = [rel for _, rel in generated_artifacts]
             update_project_run(
                 run_id=run["id"],
@@ -629,6 +645,7 @@ def main() -> None:
                 status="completed",
                 summary=summary_payload,
                 finished_at=datetime.now(timezone.utc),
+                report_id=report_id,
             )
             for artifact_path, relative in generated_artifacts:
                 _save_run_artifact_from_path(project_record["id"], run["id"], artifact_path, relative)

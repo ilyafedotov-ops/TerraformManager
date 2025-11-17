@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
-	import { goto } from '$app/navigation';
+import { goto } from '$app/navigation';
+import { page } from '$app/stores';
 	import AuthEventTimeline from '$lib/components/dashboard/AuthEventTimeline.svelte';
 	import StatCard from '$lib/components/dashboard/StatCard.svelte';
 	import StepBar from '$lib/components/dashboard/StepBar.svelte';
@@ -9,7 +10,13 @@
 	import type { DashboardStats } from '$lib/types/dashboard';
 	import { activeProject, activeProjectRuns, projectState } from '$lib/stores/project';
 
-	const { data } = $props();
+const { data } = $props();
+const projectReportsHref = $derived(
+	$page.params.projectId ? `/projects/${$page.params.projectId}/reports` : '/projects'
+);
+const projectGenerateHref = $derived(
+	$page.params.projectId ? `/projects/${$page.params.projectId}/generate` : '/projects'
+);
 	const statsSource = data.stats as DashboardStats | Promise<DashboardStats | null> | null;
 	const errorSource = data.error as string | Promise<string | null> | null;
 	const authEventsSource = data.authEvents as AuthEvent[] | Promise<AuthEvent[]> | null;
@@ -159,11 +166,11 @@ const hasSeverityData = $derived(topSeverityCount > 0);
 	const isProjectLoading = $derived($projectState.loading);
 
 	const handleStartRun = async () => {
-		await goto('/generate');
+		await goto(projectGenerateHref);
 	};
 
 	const handleReviewRuns = async () => {
-		await goto('/reports');
+		await goto(projectReportsHref);
 	};
 
 	const stepItems = [
