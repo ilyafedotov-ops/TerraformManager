@@ -6,8 +6,9 @@
 	import StatCard from '$lib/components/dashboard/StatCard.svelte';
 	import StepBar from '$lib/components/dashboard/StepBar.svelte';
 	import SeverityDistribution from '$lib/components/dashboard/SeverityDistribution.svelte';
-	import ProjectKnowledgePanel from '$lib/components/projects/ProjectKnowledgePanel.svelte';
-	import ProjectHelpModal from '$lib/components/projects/ProjectHelpModal.svelte';
+import ProjectKnowledgePanel from '$lib/components/projects/ProjectKnowledgePanel.svelte';
+import ProjectHelpModal from '$lib/components/projects/ProjectHelpModal.svelte';
+import { notify, notifyError } from '$lib/stores/notifications';
 	import type { AuthEvent } from '$lib/api/client';
 	import type { DashboardStats } from '$lib/types/dashboard';
 	import { activeProject, activeProjectRuns, projectState } from '$lib/stores/project';
@@ -32,6 +33,7 @@ const projectGenerateHref = $derived(projectSlug ? `${projectBasePath}/generate`
 	let eventsLoading = $state<boolean>(isPromise(authEventsSource));
 	let authEventsError = $state<string | null>(null);
 	let helpModalOpen = $state(false);
+	let lastGuidanceRunId = $state<string | null>(null);
 
 	if (isPromise(statsSource)) {
 		let active = true;
@@ -191,6 +193,24 @@ const hasSeverityData = $derived(topSeverityCount > 0);
 			status: 'upcoming' as const
 		}
 	];
+
+	$effect(() => {
+		const runId = lastReport?.id ?? null;
+		if (!runId || runId === lastGuidanceRunId) {
+			return;
+		}
+		const driftSummary = lastSummary?.drift ?? stats?.last?.summary?.drift;
+		if (driftSummary && driftSummary.has_changes) {
+			notifyError('Drift detected in the latest run. Review the plan or re-run a scan.', { duration: 7000 });
+			lastGuidanceRunId = runId;
+			return;
+		}
+		const issuesFound = Number(lastSummary?.issues_found ?? 0);
+		if (issuesFound > 0) {
+			notify(`New findings detected (${issuesFound}). Visit the Review tab to triage.`, { duration: 6000 });
+			lastGuidanceRunId = runId;
+		}
+	});
 </script>
 
 <section class="space-y-8">
