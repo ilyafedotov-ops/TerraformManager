@@ -1430,6 +1430,16 @@ $effect(() => {
 {JSON.stringify(run.summary, null, 2)}</pre>
 													</details>
 												{/if}
+												{#if run.report_id && activeProjectValue}
+													<div class="mt-3">
+														<a
+															class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-sky-50 hover:text-sky-600"
+															href={`/projects/${activeProjectValue.id}/reports/${run.report_id}`}
+														>
+															View linked report
+														</a>
+													</div>
+												{/if}
 											</li>
 										{/each}
 									</ul>

@@ -10,6 +10,7 @@ from .models import (
     ProjectRun,
     GeneratedAsset,
     GeneratedAssetVersion,
+    ReportComment,
 )
 from .session import DEFAULT_DB_PATH, get_engine, get_sessionmaker, get_session_dependency, init_models, session_scope
 
@@ -25,6 +26,7 @@ __all__ = [
     "ProjectRun",
     "GeneratedAsset",
     "GeneratedAssetVersion",
+    "ReportComment",
     "DEFAULT_DB_PATH",
     "get_engine",
     "get_sessionmaker",

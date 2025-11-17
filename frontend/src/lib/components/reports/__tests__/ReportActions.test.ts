@@ -28,7 +28,7 @@ describe('ReportActions', () => {
 		clearClipboard();
 	});
 
-	it('renders action links with expected destinations', () => {
+	it('renders action links with expected destinations for global fallback', () => {
 		const { getByText } = render(ReportActions, {
 			props: { id: reportId, apiBase }
 		});
@@ -37,6 +37,14 @@ describe('ReportActions', () => {
 		expect(getByText('JSON')).toHaveAttribute('href', `${apiBase}/reports/${reportId}`);
 		expect(getByText('CSV')).toHaveAttribute('href', `${apiBase}/reports/${reportId}/csv`);
 		expect(getByText('HTML')).toHaveAttribute('href', `${apiBase}/reports/${reportId}/html`);
+	});
+
+	it('uses a project-scoped route when a projectId is supplied', () => {
+		const { getByText } = render(ReportActions, {
+			props: { id: reportId, apiBase, projectId: 'proj-42' }
+		});
+
+		expect(getByText('View')).toHaveAttribute('href', `/projects/proj-42/reports/${reportId}`);
 	});
 
 	it('emits a delete event when delete is clicked', async () => {

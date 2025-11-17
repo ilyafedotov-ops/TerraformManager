@@ -52,4 +52,13 @@ describe('ReportTable', () => {
 
 		expect(getByText('Delete')).toBeDisabled();
 	});
+
+	it('renders project-scoped view links when a projectId is provided', () => {
+		const reports = [buildReport()];
+		const { getByText } = render(ReportTable, {
+			props: { reports, apiBase, token: 'token-123', deletingId: null, projectId: 'proj-123' }
+		});
+
+		expect(getByText('View')).toHaveAttribute('href', '/projects/proj-123/reports/rpt-1');
+	});
 });

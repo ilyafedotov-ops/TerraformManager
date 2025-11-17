@@ -5,10 +5,10 @@
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { clearToken, token } from '$lib/stores/auth';
 	import { API_BASE } from '$lib/api/client';
-	import MainNav from '$lib/components/navigation/MainNav.svelte';
-	import { navigationSectionsStore, navigationState, commandResults } from '$lib/stores/navigation';
-	import { projectState, activeProject, activeProjectRuns } from '$lib/stores/project';
-	import type { NavigationItem } from '$lib/navigation/types';
+import MainNav from '$lib/components/navigation/MainNav.svelte';
+import { navigationSectionsStore, navigationState, commandResults, materialiseNavigationSections } from '$lib/stores/navigation';
+import { projectState, activeProject, activeProjectRuns } from '$lib/stores/project';
+import type { NavigationItem } from '$lib/navigation/types';
 
 	const { children, data } = $props();
 
@@ -34,7 +34,7 @@
 	let lastServerToken = $state<string | null>(data.token ?? null);
 	let commandInput = $state<HTMLInputElement | null>(null);
 	let commandDialog = $state<HTMLDivElement | null>(null);
-	let previouslyFocused: HTMLElement | null = null;
+let previouslyFocused: HTMLElement | null = null;
 
 	if (browser) {
 		unsubscribe = token.subscribe((value) => {
@@ -210,12 +210,17 @@
 		}
 	};
 
-	const actionableCommandItems = $derived(
-		$commandResults.filter(
-			(item): item is NavigationItem & { href: string } => Boolean(item.href)
-		)
-	);
-	const firstCommandHref = $derived(actionableCommandItems[0]?.href);
+const actionableCommandItems = $derived(
+	$commandResults.filter(
+		(item): item is NavigationItem & { href: string } => Boolean(item.href)
+	)
+);
+const commandItemKey = (item: NavigationItem) => `${item.href ?? 'nohref'}::${item.title}`;
+const firstCommandHref = $derived(actionableCommandItems[0]?.href);
+
+const projectNavigationSections = $derived(() =>
+	materialiseNavigationSections($navigationSectionsStore, $activeProject?.id ?? null)
+);
 
 	const handleNavNavigate = async (event: CustomEvent<{ href: string }>) => {
 		const { href } = event.detail;
@@ -262,16 +267,17 @@
 		});
 	});
 
-	const handleProjectChange = async (event: Event) => {
-		const select = event.target as HTMLSelectElement;
-		const projectId = select.value || null;
-		projectState.setActiveProject(projectId);
-		if (projectId && browser && currentToken) {
-			await projectState.refreshRuns(fetch, currentToken, projectId, 10).catch((err) => {
-				console.error('Failed to refresh runs', err);
-			});
-		}
-	};
+const handleProjectChange = async (event: Event) => {
+	const select = event.target as HTMLSelectElement;
+	const projectId = select.value || null;
+	projectState.setActiveProject(projectId);
+	if (projectId && browser && currentToken) {
+		await projectState.refreshRuns(fetch, currentToken, projectId, 10).catch((err) => {
+			console.error('Failed to refresh runs', err);
+		});
+		await goto(`/projects/${projectId}/dashboard`, { replaceState: false });
+	}
+};
 
 	const handleReloadProjects = async () => {
 		if (!browser || !currentToken) return;
@@ -358,13 +364,13 @@
 				{/if}
 		</div>
 
-		<MainNav
-			sections={$navigationSectionsStore}
-			activePath={$navigationState.activePath}
-			expanded={$navigationState.expanded}
-			on:navigate={handleNavNavigate}
-			on:toggleSection={(event) => navigationState.setExpanded(event.detail.key, event.detail.open)}
-		/>
+	<MainNav
+		sections={projectNavigationSections}
+		activePath={$navigationState.activePath}
+		expanded={$navigationState.expanded}
+		on:navigate={handleNavNavigate}
+		on:toggleSection={(event) => navigationState.setExpanded(event.detail.key, event.detail.open)}
+	/>
 
 		<div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
 			<p class="font-semibold uppercase tracking-[0.3em] text-slate-400">Environment</p>
@@ -511,7 +517,7 @@
 				<div class="mt-4 max-h-60 overflow-auto rounded-2xl border border-slate-200 bg-white">
 					{#if actionableCommandItems.length}
 						<ul class="divide-y divide-slate-100 text-sm text-slate-600">
-							{#each actionableCommandItems as item (item.href ?? item.title)}
+							{#each actionableCommandItems as item (commandItemKey(item))}
 								<li>
 									<button
 										class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-sky-50 hover:text-sky-600"

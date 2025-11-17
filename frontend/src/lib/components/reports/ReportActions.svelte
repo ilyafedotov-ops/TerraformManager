@@ -4,33 +4,36 @@
 	import { notifyError, notifySuccess } from '$lib/stores/notifications';
 
 interface Props {
-    id: string;
-    apiBase: string;
-    viewHref?: string | null;
-    deleting?: boolean;
-    deleteEnabled?: boolean;
-    compact?: boolean;
-    showView?: boolean;
-    showApiLinks?: boolean;
-    showCopyJson?: boolean;
-    showDelete?: boolean;
+	id: string;
+	apiBase: string;
+	viewHref?: string | null;
+	deleting?: boolean;
+	deleteEnabled?: boolean;
+	compact?: boolean;
+	showView?: boolean;
+	showApiLinks?: boolean;
+	showCopyJson?: boolean;
+	showDelete?: boolean;
+	projectId?: string | null;
 }
 
 const props: Props = $props();
 
 const {
-    id,
-    apiBase,
-    deleting = false,
-    deleteEnabled = true,
-    compact = false,
-    showView = true,
-    showApiLinks = true,
-    showCopyJson = true,
-    showDelete = true
+	id,
+	apiBase,
+	deleting = false,
+	deleteEnabled = true,
+	compact = false,
+	showView = true,
+	showApiLinks = true,
+	showCopyJson = true,
+	showDelete = true,
+	projectId = null
 } = props;
 
-const viewHref = props.viewHref ?? `/reports/${id}`;
+const viewHref =
+	props.viewHref ?? (projectId ? `/projects/${projectId}/reports/${id}` : `/reports/${id}`);
 
 	const dispatcher = createEventDispatcher<{ delete: void }>();
 

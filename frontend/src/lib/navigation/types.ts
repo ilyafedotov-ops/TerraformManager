@@ -6,6 +6,8 @@ export interface NavigationItem {
 	label?: string;
 	items?: NavigationItem[];
 	lazyImport?: () => Promise<NavigationItem[]>;
+	projectScoped?: boolean;
+	projectPath?: string;
 }
 
 export interface NavigationSection {

@@ -8,6 +8,7 @@ import uuid
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query, Depends, UploadFile, File, Form, Response
 from fastapi.responses import HTMLResponse
@@ -33,6 +34,11 @@ from backend.storage import (
     delete_report,
     upsert_setting,
     get_llm_settings as db_get_llm_settings,
+    update_report_review,
+    create_report_comment,
+    list_report_comments,
+    delete_report_comment,
+    ReportNotFoundError,
 )
 from backend.preview_html import render_preview_html
 from backend.report_csv import render_csv_report
@@ -89,6 +95,18 @@ class ScanRequest(BaseModel):
     plan_path: Optional[str] = None
 
 
+class ReportReviewUpdatePayload(BaseModel):
+    review_status: Optional[str] = None
+    review_assignee: Optional[str] = None
+    review_due_at: Optional[str | datetime] = None
+    review_notes: Optional[str] = None
+
+
+class ReportCommentCreatePayload(BaseModel):
+    body: str
+    author: Optional[str] = None
+
+
 @app.post("/scan")
 def scan(
     req: ScanRequest,
@@ -121,10 +139,35 @@ def scan(
 @app.get("/reports")
 def reports(
     limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    status: Optional[List[str]] = Query(None, description="Filter by review status"),
+    assignee: Optional[str] = Query(None, description="Filter by review assignee"),
+    created_after: Optional[str] = Query(None, description="ISO timestamp lower bound"),
+    created_before: Optional[str] = Query(None, description="ISO timestamp upper bound"),
+    search: Optional[str] = Query(None, description="Case-insensitive search across id, assignee, notes"),
+    order: str = Query("desc", description="Sort direction: asc or desc"),
+    project_id: Optional[str] = Query(None, description="Restrict results to a specific project"),
     session: Session = Depends(get_session_dependency),
     _current_user: auth_routes.CurrentUser = Depends(require_current_user),
-) -> List[Dict[str, Any]]:
-    return list_reports(limit=limit, session=session)
+) -> Dict[str, Any]:
+    order_normalised = order.lower()
+    if order_normalised not in {"asc", "desc"}:
+        raise HTTPException(400, "order must be 'asc' or 'desc'")
+    try:
+        return list_reports(
+            limit=limit,
+            offset=offset,
+            review_status=status,
+            assignee=assignee,
+            created_after=created_after,
+            created_before=created_before,
+            search=search,
+            order=order_normalised,
+            project_id=project_id,
+            session=session,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/reports/{report_id}")
@@ -136,7 +179,86 @@ def get_report_json(
     rec = get_report(report_id, session=session)
     if not rec:
         raise HTTPException(404, "report not found")
-    return rec["report"]
+    return rec
+
+
+@app.patch("/reports/{report_id}")
+def update_report_review_metadata(
+    report_id: str,
+    payload: ReportReviewUpdatePayload,
+    session: Session = Depends(get_session_dependency),
+    _current_user: auth_routes.CurrentUser = Depends(require_current_user),
+) -> Dict[str, Any]:
+    data = payload.dict(exclude_unset=True)
+    if not data:
+        existing = get_report(report_id, session=session)
+        if not existing:
+            raise HTTPException(404, "report not found")
+        return {
+            "id": existing["id"],
+            "review_status": existing["review_status"],
+            "review_assignee": existing["review_assignee"],
+            "review_due_at": existing["review_due_at"],
+            "review_notes": existing["review_notes"],
+            "updated_at": existing["updated_at"],
+        }
+    try:
+        result = update_report_review(
+            report_id,
+            session=session,
+            **data,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not result:
+        raise HTTPException(404, "report not found")
+    return result
+
+
+@app.get("/reports/{report_id}/comments")
+def list_report_comments_api(
+    report_id: str,
+    session: Session = Depends(get_session_dependency),
+    _current_user: auth_routes.CurrentUser = Depends(require_current_user),
+) -> Dict[str, Any]:
+    try:
+        comments = list_report_comments(report_id, session=session)
+    except ReportNotFoundError as exc:
+        raise HTTPException(404, "report not found") from exc
+    return {"items": comments}
+
+
+@app.post("/reports/{report_id}/comments", status_code=201)
+def create_report_comment_api(
+    report_id: str,
+    payload: ReportCommentCreatePayload,
+    session: Session = Depends(get_session_dependency),
+    _current_user: auth_routes.CurrentUser = Depends(require_current_user),
+) -> Dict[str, Any]:
+    try:
+        return create_report_comment(
+            report_id,
+            payload.body,
+            author=payload.author,
+            session=session,
+        )
+    except ReportNotFoundError as exc:
+        raise HTTPException(404, "report not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.delete("/reports/{report_id}/comments/{comment_id}")
+def delete_report_comment_api(
+    report_id: str,
+    comment_id: str,
+    session: Session = Depends(get_session_dependency),
+    _current_user: auth_routes.CurrentUser = Depends(require_current_user),
+) -> Dict[str, Any]:
+    deleted = delete_report_comment(report_id, comment_id, session=session)
+    if not deleted:
+        raise HTTPException(404, "comment not found")
+    return {"status": "deleted", "id": comment_id}
 
 
 @app.get("/reports/{report_id}/html", response_class=HTMLResponse)

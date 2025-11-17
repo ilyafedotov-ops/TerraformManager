@@ -12,11 +12,11 @@ const secureCookie = !dev;
 
 export const load: PageServerLoad = ({ locals, url }) => {
 	if (locals.token) {
-		throw redirect(303, '/dashboard');
+	throw redirect(303, '/projects');
 	}
 
 	return {
-		redirectTo: url.searchParams.get('redirect') ?? '/dashboard'
+	redirectTo: url.searchParams.get('redirect') ?? '/projects'
 	};
 };
 
@@ -118,7 +118,7 @@ export const actions: Actions = {
 			cookies.delete(REFRESH_CSRF_COOKIE, { path: '/' });
 		}
 
-		const redirectTo = url.searchParams.get('redirect') ?? '/dashboard';
+		const redirectTo = url.searchParams.get('redirect') ?? '/projects';
 		throw redirect(303, redirectTo);
 	}
 };

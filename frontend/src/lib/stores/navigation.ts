@@ -1,6 +1,7 @@
 import { derived, writable } from 'svelte/store';
 import type { NavigationSection, NavigationItem } from '$lib/navigation/types';
 import { navigationSections } from '$lib/navigation/data';
+import { activeProject } from '$lib/stores/project';
 
 interface NavigationState {
 	sidebarOpen: boolean;
@@ -83,14 +84,44 @@ export const navigationState = createNavigationStore();
 
 export const navigationSectionsStore = writable(navigationSections);
 
-export const commandResults = derived([navigationSectionsStore, navigationState], ([$sections, $state]) => {
-	const allItems = flattenItems($sections);
-	const query = $state.commandQuery.trim().toLowerCase();
-	if (!query) {
-		return allItems;
+const resolveNavigationItem = (item: NavigationItem, projectId: string | null): NavigationItem => {
+	const resolved: NavigationItem = { ...item };
+	if (item.projectScoped) {
+		if (projectId) {
+			resolved.href = item.projectPath?.replace('{projectId}', projectId) ?? `/projects/${projectId}`;
+		} else {
+			resolved.href = '/projects';
+		}
 	}
-	return allItems.filter((item) => {
-		if (item.title.toLowerCase().includes(query)) return true;
-		return item.href?.toLowerCase().includes(query);
-	});
-});
+	if (item.items?.length) {
+		resolved.items = item.items.map((child) => resolveNavigationItem(child, projectId));
+	}
+	return resolved;
+};
+
+export const materialiseNavigationSections = (
+	sections: NavigationSection[],
+	projectId: string | null
+): NavigationSection[] =>
+	sections.map((section) => ({
+		title: section.title,
+		items: section.items.map((item) => resolveNavigationItem(item, projectId))
+	}));
+
+export const commandResults = derived(
+	[navigationSectionsStore, navigationState, activeProject],
+	([$sections, $state, $activeProject]) => {
+		const resolvedSections = materialiseNavigationSections($sections, $activeProject?.id ?? null);
+		const allItems = flattenItems(resolvedSections);
+		const query = $state.commandQuery.trim().toLowerCase();
+		if (!query) {
+			return allItems;
+		}
+		return allItems.filter((item) => {
+			if (item.title.toLowerCase().includes(query)) {
+				return true;
+			}
+			return item.href?.toLowerCase().includes(query);
+		});
+	}
+);

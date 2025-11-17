@@ -6,7 +6,7 @@ const successMessage = 'Recovery instructions are on the way. Check your inbox f
 
 export const load: PageServerLoad = ({ locals, url }) => {
 	if (locals.token) {
-		throw redirect(303, url.searchParams.get('redirect') ?? '/dashboard');
+	throw redirect(303, url.searchParams.get('redirect') ?? '/projects');
 	}
 
 	return {};

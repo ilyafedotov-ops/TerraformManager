@@ -9,6 +9,7 @@ export let summary: Record<string, unknown> | null = null;
 export let report: Record<string, unknown> | null = null;
 export let severityEntries: Array<[string, number]> = [];
 export let apiBase: string;
+export let projectId: string | null = null;
 
 const issuesFound = (summary as { issues_found?: number } | null)?.issues_found ?? 0;
 const waivedCount = (report as { waived_findings?: unknown[] } | null)?.waived_findings?.length ?? 0;
@@ -71,6 +72,7 @@ const driftHasChanges = Boolean((driftSummary as { has_changes?: boolean } | nul
 			<ReportActions
 				id={reportId}
 				apiBase={apiBase}
+				projectId={projectId ?? null}
 				compact
 				showDelete={false}
 				showCopyJson

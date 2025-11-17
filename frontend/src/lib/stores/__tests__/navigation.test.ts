@@ -1,11 +1,8 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import { get, type Readable } from 'svelte/store';
 import { navigationSections } from '$lib/navigation/data';
-import {
-	navigationState,
-	navigationSectionsStore,
-	commandResults
-} from '../navigation';
+import { navigationState, navigationSectionsStore, commandResults } from '../navigation';
+import { projectState } from '$lib/stores/project';
 
 type NavigationReadable<T> = Readable<T>;
 
@@ -14,7 +11,18 @@ const readState = () => get(navigationState as unknown as NavigationReadable<any
 afterEach(() => {
 	navigationState.reset();
 	navigationSectionsStore.set(navigationSections);
+	projectState.reset();
 });
+
+const seedProject = (id = 'proj-123') => {
+	projectState.upsertProject({
+		id,
+		name: 'Workspace',
+		slug: 'workspace',
+		root_path: '.'
+	});
+	projectState.setActiveProject(id);
+};
 
 describe('navigationState store', () => {
 	it('toggles the sidebar visibility', () => {
@@ -42,8 +50,8 @@ describe('navigationState store', () => {
 	});
 
 	it('tracks the active path', () => {
-		navigationState.setActivePath('/reports');
-		expect(readState().activePath).toBe('/reports');
+		navigationState.setActivePath('/projects/test-project/reports');
+		expect(readState().activePath).toBe('/projects/test-project/reports');
 	});
 
 	it('manages expanded navigation groups', () => {
@@ -63,14 +71,23 @@ describe('commandResults derived store', () => {
 			{
 				title: 'Test',
 				items: [
-					{ title: 'Dashboard', href: '/dashboard', icon: 'grid' },
-					{ title: 'Reports', href: '/reports', icon: 'file' }
+					{
+						title: 'Dashboard',
+						icon: 'grid',
+						projectScoped: true,
+						projectPath: '/projects/{projectId}/dashboard'
+					},
+					{ title: 'Knowledge', href: '/knowledge', icon: 'book' }
 				]
 			}
 		]);
+		seedProject();
 		navigationState.setCommandQuery('');
 
-		expect(get(commandResults).map((item) => item.title)).toEqual(['Dashboard', 'Reports']);
+		expect(get(commandResults).map((item) => item.href)).toEqual([
+			'/projects/proj-123/dashboard',
+			'/knowledge'
+		]);
 	});
 
 	it('filters items case-insensitively using title or href', () => {
@@ -78,16 +95,47 @@ describe('commandResults derived store', () => {
 			{
 				title: 'Test',
 				items: [
-					{ title: 'Dashboard', href: '/dashboard', icon: 'grid' },
-					{ title: 'Terraform Reports', href: '/reports', icon: 'file' }
+					{
+						title: 'Dashboard',
+						icon: 'grid',
+						projectScoped: true,
+						projectPath: '/projects/{projectId}/dashboard'
+					},
+					{
+						title: 'Terraform Reports',
+						icon: 'file',
+						projectScoped: true,
+						projectPath: '/projects/{projectId}/reports'
+					}
 				]
 			}
 		]);
+		seedProject();
 
 		navigationState.setCommandQuery('reports');
 		expect(get(commandResults).map((item) => item.title)).toEqual(['Terraform Reports']);
 
-		navigationState.setCommandQuery('/dash');
+		navigationState.setCommandQuery('/projects/proj-123/dash');
 		expect(get(commandResults).map((item) => item.title)).toEqual(['Dashboard']);
+	});
+
+	it('falls back to /projects when no project is active', () => {
+		navigationSectionsStore.set([
+			{
+				title: 'Test',
+				items: [
+					{
+						title: 'Dashboard',
+						icon: 'grid',
+						projectScoped: true,
+						projectPath: '/projects/{projectId}/dashboard'
+					}
+				]
+			}
+		]);
+		projectState.reset();
+		navigationState.setCommandQuery('');
+
+		expect(get(commandResults).map((item) => item.href)).toEqual(['/projects']);
 	});
 });

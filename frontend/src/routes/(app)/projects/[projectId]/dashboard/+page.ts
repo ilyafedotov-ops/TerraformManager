@@ -3,7 +3,8 @@ import { listAuthEvents, listReports } from '$lib/api/client';
 import type { DashboardStats } from '$lib/types/dashboard';
 
 async function buildDashboardStats(fetchFn: typeof fetch, token: string): Promise<DashboardStats> {
-	const reports = await listReports(fetchFn, token, 20);
+	const payload = await listReports(fetchFn, token, { limit: 20 });
+	const reports = payload.items ?? [];
 	const severityCounts: Record<string, number> = {};
 	const recentSeverityCounts: Record<string, number> = {};
 

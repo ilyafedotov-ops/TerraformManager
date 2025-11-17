@@ -122,12 +122,17 @@ class ProjectRunResponse(BaseModel):
     updated_at: Optional[str] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
+    report_id: Optional[str] = None
 
 
 class ProjectRunCreateRequest(BaseModel):
     label: str = Field(..., min_length=1, max_length=128)
     kind: str = Field(..., min_length=1, max_length=48)
     parameters: Dict[str, Any] = Field(default_factory=dict)
+    status: Optional[str] = Field(default="queued", min_length=1, max_length=32)
+    triggered_by: Optional[str] = Field(default=None, max_length=320)
+    projects_root: Optional[str] = None
+    report_id: Optional[str] = None
 
 
 class ProjectRunUpdateRequest(BaseModel):
@@ -135,6 +140,7 @@ class ProjectRunUpdateRequest(BaseModel):
     summary: Optional[Dict[str, Any]] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
+    report_id: Optional[str] = None
 
 
 class ArtifactEntry(BaseModel):
@@ -595,7 +601,11 @@ def project_run_create(
             label=label,
             kind=kind,
             parameters=payload.parameters,
-            triggered_by=current_user.user.email if current_user.user else None,
+            status=(payload.status or "queued"),
+            triggered_by=payload.triggered_by
+            or (current_user.user.email if current_user.user else None),
+            projects_root=Path(payload.projects_root).expanduser() if payload.projects_root else None,
+            report_id=payload.report_id,
             session=session,
         )
     except ValueError as exc:
@@ -640,6 +650,7 @@ def project_run_update(
         summary=payload.summary,
         started_at=payload.started_at,
         finished_at=payload.finished_at,
+        report_id=payload.report_id,
         session=session,
     )
     if not updated:

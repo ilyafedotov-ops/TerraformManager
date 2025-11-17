@@ -136,12 +136,17 @@ export interface ProjectRunSummary {
 	updated_at?: string | null;
 	started_at?: string | null;
 	finished_at?: string | null;
+	report_id?: string | null;
 }
 
 export interface ProjectRunCreatePayload {
 	label: string;
 	kind: string;
 	parameters?: Record<string, unknown>;
+	status?: string;
+	triggered_by?: string | null;
+	projects_root?: string | null;
+	report_id?: string | null;
 }
 
 export interface ProjectUpdatePayload {
@@ -155,6 +160,7 @@ export interface ProjectRunUpdatePayload {
 	summary?: Record<string, unknown> | null;
 	started_at?: string;
 	finished_at?: string;
+	report_id?: string | null;
 }
 
 export interface PaginatedResult<T> {
@@ -604,6 +610,7 @@ export interface ListReportsParams {
 	created_after?: string;
 	created_before?: string;
 	order?: 'asc' | 'desc';
+	project_id?: string;
 }
 
 export async function listReports(
@@ -632,6 +639,9 @@ export async function listReports(
 	}
 	if (params.order) {
 		searchParams.set('order', params.order);
+	}
+	if (params.project_id) {
+		searchParams.set('project_id', params.project_id);
 	}
 	if (params.status) {
 		const statuses = Array.isArray(params.status) ? params.status : [params.status];
