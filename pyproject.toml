@@ -1,0 +1,24 @@
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["api", "backend", "scripts", "tests"]
+exclude = [
+    ".git",
+    ".venv",
+    "node_modules",
+    "frontend/node_modules",
+    "logs",
+    "data",
+    "generated",
+    "repo_remote",
+    "notus-svelte",
+    "svelte",
+]
+
+[tool.ruff.lint]
+ignore = ["E203"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import base64
-import json
-import tempfile
+import shutil
 import zipfile
 import uuid
 from io import BytesIO
@@ -40,6 +38,10 @@ from backend.storage import (
     delete_report_comment,
     ReportNotFoundError,
     get_project,
+    get_project_workspace,
+    resolve_workspace_paths,
+    resolve_workspace_file,
+    WorkspacePathError,
 )
 from backend.preview_html import render_preview_html
 from backend.report_csv import render_csv_report
@@ -89,52 +91,6 @@ def _require_project_record(session: Session, project_id: str | None, project_sl
     return record
 
 
-def _project_workspace_root(project: Dict[str, Any]) -> Path:
-    raw_root = project.get("root_path")
-    if not raw_root:
-        raise HTTPException(500, "project is missing workspace metadata")
-    root = Path(raw_root).expanduser().resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
-def _normalise_relative_token(value: Optional[str]) -> str:
-    token = (value or "").strip()
-    return token or "."
-
-
-def _resolve_workspace_target(root: Path, token: Optional[str], *, label: str) -> Path:
-    rel_value = _normalise_relative_token(token)
-    rel_path = Path(rel_value)
-    if rel_path.is_absolute():
-        raise ValueError(f"{label} must be project-relative (got absolute path)")
-    candidate = (root / rel_path).resolve()
-    try:
-        candidate.relative_to(root)
-    except ValueError as exc:
-        raise ValueError(f"{label} escapes the project workspace") from exc
-    if not candidate.exists():
-        raise ValueError(f"{label} '{rel_value}' not found in project workspace")
-    return candidate
-
-
-def _resolve_workspace_targets(root: Path, tokens: Optional[List[str]]) -> List[Path]:
-    values = tokens or []
-    if not values:
-        values = ["."]
-    resolved: List[Path] = []
-    for index, token in enumerate(values, start=1):
-        resolved.append(_resolve_workspace_target(root, token, label=f"path #{index}"))
-    return resolved
-
-
-def _resolve_workspace_file(root: Path, token: Optional[str], *, label: str) -> Path:
-    path = _resolve_workspace_target(root, token, label=label)
-    if not path.is_file():
-        raise ValueError(f"{label} must refer to a file within the project workspace")
-    return path
-
-
 @app.on_event("startup")
 def _startup() -> None:
     init_db(DEFAULT_DB_PATH)
@@ -176,10 +132,10 @@ def scan(
     current_user: auth_routes.CurrentUser = Depends(require_current_user),
 ) -> Dict[str, Any]:
     project = _require_project_record(session, req.project_id, req.project_slug)
-    project_root = _project_workspace_root(project)
     try:
-        path_objs = _resolve_workspace_targets(project_root, req.paths)
-    except ValueError as exc:
+        project_root = get_project_workspace(project)
+        path_objs = resolve_workspace_paths(project_root, req.paths)
+    except WorkspacePathError as exc:
         raise HTTPException(400, str(exc)) from exc
 
     cost_options = None
@@ -187,18 +143,18 @@ def scan(
         cost_options = {}
         if req.cost_usage_file:
             try:
-                usage_path = _resolve_workspace_file(
-                    project_root, req.cost_usage_file, label="cost_usage_file"
+                usage_path = resolve_workspace_file(
+                    project_root, req.cost_usage_file, label="cost usage file"
                 )
-            except ValueError as exc:
+            except WorkspacePathError as exc:
                 raise HTTPException(400, str(exc)) from exc
             cost_options["usage_file"] = usage_path
 
     plan_path: Optional[Path] = None
     if req.plan_path:
         try:
-            plan_path = _resolve_workspace_file(project_root, req.plan_path, label="plan_path")
-        except ValueError as exc:
+            plan_path = resolve_workspace_file(project_root, req.plan_path, label="plan file")
+        except WorkspacePathError as exc:
             raise HTTPException(400, str(exc)) from exc
 
     scan_context = {
@@ -370,6 +326,23 @@ def delete_report_api(
     return {"status": "deleted", "id": report_id}
 
 
+def _safe_extract_zip(data: bytes, destination: Path) -> None:
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        for member in zf.infolist():
+            name = member.filename
+            if not name or name.endswith("/"):
+                continue
+            target = destination / name
+            resolved = target.resolve()
+            try:
+                resolved.relative_to(destination)
+            except ValueError as exc:
+                raise HTTPException(400, f"zip entry '{name}' escapes workspace") from exc
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(member, "r") as src, resolved.open("wb") as handle:
+                shutil.copyfileobj(src, handle)
+
+
 @app.post("/scan/upload")
 async def scan_upload(
     files: List[UploadFile] = File(...),
@@ -378,32 +351,42 @@ async def scan_upload(
     include_cost: bool = Form(False),
     cost_usage_file: UploadFile | None = File(None),
     plan_file: UploadFile | None = File(None),
+    project_id: str | None = Form(None),
+    project_slug: str | None = Form(None),
     session: Session = Depends(get_session_dependency),
-    _current_user: auth_routes.CurrentUser = Depends(require_current_user),
+    current_user: auth_routes.CurrentUser = Depends(require_current_user),
 ) -> Dict[str, Any]:
     if not files:
         raise HTTPException(400, "no files uploaded")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        root = Path(tmpdir)
-        targets: List[Path] = []
-        usage_path: Optional[Path] = None
-        plan_path: Optional[Path] = None
+    project = _require_project_record(session, project_id, project_slug)
+    try:
+        project_root = get_project_workspace(project)
+    except WorkspacePathError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
+    upload_root = project_root / "uploads" / f"scan-{uuid.uuid4().hex}"
+    upload_root.mkdir(parents=True, exist_ok=True)
+
+    targets: List[Path] = []
+    usage_path: Optional[Path] = None
+    plan_path: Optional[Path] = None
+    report_id: Optional[str] = None
+
+    try:
         for upload in files:
             filename = Path(upload.filename or "upload.tf")
             data = await upload.read()
-            dest = root / filename.name
+            dest = upload_root / filename.name
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
 
             suffix = dest.suffix.lower()
             if suffix == ".zip":
-                extract_root = root / filename.stem
+                extract_root = upload_root / f"{filename.stem}-{uuid.uuid4().hex[:8]}"
                 extract_root.mkdir(parents=True, exist_ok=True)
                 try:
-                    with zipfile.ZipFile(BytesIO(data)) as zf:
-                        zf.extractall(extract_root)
+                    _safe_extract_zip(data, extract_root)
                 except zipfile.BadZipFile as exc:
                     raise HTTPException(400, f"invalid zip archive: {filename}") from exc
                 targets.append(extract_root)
@@ -412,19 +395,18 @@ async def scan_upload(
             elif suffix == ".json" and plan_path is None:
                 plan_path = dest
             else:
-                # ignore other file types by default
                 continue
 
         if include_cost and cost_usage_file is not None:
             usage_bytes = await cost_usage_file.read()
             usage_filename = cost_usage_file.filename or "usage.yml"
-            usage_path = root / usage_filename
+            usage_path = upload_root / usage_filename
             usage_path.write_bytes(usage_bytes)
 
         if plan_file is not None:
             plan_bytes = await plan_file.read()
             plan_filename = plan_file.filename or "plan.json"
-            plan_path = root / plan_filename
+            plan_path = upload_root / plan_filename
             plan_path.write_bytes(plan_bytes)
 
         if not targets:
@@ -441,6 +423,8 @@ async def scan_upload(
         scan_context = {
             "source": "api.scan_upload",
             "user": current_user.user.email if current_user.user else None,
+            "project_id": project["id"],
+            "project_slug": project.get("slug"),
         }
         report = scan_paths(
             targets,
@@ -451,17 +435,18 @@ async def scan_upload(
             context=scan_context,
         )
 
-        report_id: Optional[str] = None
         if save:
             report_id = str(uuid.uuid4())
             save_report(report_id, report.get("summary", {}), report, session=session)
             report["id"] = report_id
+    finally:
+        shutil.rmtree(upload_root, ignore_errors=True)
 
-        return {
-            "id": report_id,
-            "summary": report.get("summary", {}),
-            "report": report,
-        }
+    return {
+        "id": report_id,
+        "summary": report.get("summary", {}),
+        "report": report,
+    }
 
 
 class ConfigPayload(BaseModel):

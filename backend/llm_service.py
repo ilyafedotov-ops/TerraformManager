@@ -9,14 +9,14 @@ the helper functions defined here once credentials are provided.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
 import hashlib
 import json
 import os
-import time
 import re
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence
 
 try:
     from openai import OpenAI
@@ -36,9 +36,9 @@ except ImportError:  # pragma: no cover - optional dependency
     APIStatusError = _MissingOpenAISDK
     OpenAIError = _MissingOpenAISDK
 
-DEFAULT_OPENAI_MODEL = "gpt-4.1-mini"
-
 from backend.utils.logging import get_logger
+
+DEFAULT_OPENAI_MODEL = "gpt-4.1-mini"
 
 LOGGER = get_logger(__name__)
 

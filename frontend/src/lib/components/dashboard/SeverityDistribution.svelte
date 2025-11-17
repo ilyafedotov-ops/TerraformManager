@@ -66,12 +66,6 @@ $effect(() => {
 	}
 });
 
-$effect(() => {
-	const stats = props.stats ?? null;
-	const limit = props.recentLimit ?? 5;
-
-});
-
 const displayedEntries = $derived(
 	(() =>
 		selectedTab === 'recent' && recentSeverityEntries.length

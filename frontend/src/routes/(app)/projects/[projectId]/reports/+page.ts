@@ -1,5 +1,5 @@
 import type { PageLoad } from './$types';
-import { listReports, type ReportListResponse, ApiError } from '$lib/api/client';
+import { listReports, ApiError } from '$lib/api/client';
 
 export const load: PageLoad = async ({ fetch, parent, params }) => {
 	const { token } = await parent();

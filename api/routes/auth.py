@@ -21,17 +21,13 @@ from pydantic import BaseModel, EmailStr
 from backend.auth import auth_settings
 from backend.auth.tokens import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
-    REFRESH_TOKEN_EXPIRE_MINUTES,
     TokenError,
     TokenPayload,
-    TokenType,
     TokenService,
-    InvalidCredentialsError,
     InactiveUserError,
     RefreshTokenError,
     RefreshTokenExpiredError,
     RefreshTokenReuseError,
-    decode_token,
     ensure_scopes,
 )
 from backend.auth.limiter import LoginRateLimiter

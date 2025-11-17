@@ -151,6 +151,13 @@ pnpm dev -- --open
 - Promoting an artifact now opens a structured dialog where you can capture asset type, tags, notes, and JSON metadata before saving it to the library. The dialog remembers your last-used defaults, suggests tags from existing assets, and the library view lets you edit metadata in-place as requirements evolve.
 - Library diffs support unified or side-by-side layouts, an “ignore whitespace” toggle, and copy/download helpers so reviewers can share patches or skim large changes quickly.
 
+## Linting & Formatting
+
+- **Python** — install dev tools with `pip install -r requirements-dev.txt` (keeps runtime deps separate) and run `scripts/lint.py`. The helper wraps `ruff check api backend scripts tests` and will exit non-zero on violations. Pass `--fix` to auto-apply safe Ruff fixes.
+- **Frontend** — `scripts/lint.py` also shells out to `pnpm lint`, which synchronises SvelteKit, loads `frontend/eslint.config.js`, and runs ESLint across `.ts` and `.svelte` files. Existing warnings remain visible but will not fail CI until you tighten the rules.
+- Run lint components independently if needed: `python -m ruff check api backend scripts tests` or `cd frontend && pnpm lint`.
+- Adjust project-wide Ruff behaviour via `pyproject.toml` and ESLint rules in `frontend/eslint.config.js`.
+
 ### Authentication Settings
 
 | Variable | Default | Purpose |

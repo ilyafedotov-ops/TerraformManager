@@ -482,7 +482,6 @@ def check_backup_plan_copy_action(file: Path, text: str) -> List[Dict[str, Any]]
 def check_alb_https(file: Path, text: str) -> List[Dict[str, Any]]:
     findings: List[Dict[str, Any]] = []
     https_listeners = set()
-    alb_names = set(match.group(1) for match in re.finditer(r'resource\s+"aws_lb"\s+"([^"]+)"\s*{', text))
     for match in re.finditer(r'resource\s+"aws_lb_listener"\s+"([^"]+)"\s*{', text):
         listener_name = match.group(1)
         block = text[match.start(): match.start() + 2500]

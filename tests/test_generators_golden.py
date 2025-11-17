@@ -240,10 +240,6 @@ def test_aws_rds_baseline_golden() -> None:
 
 def test_azure_diagnostics_golden() -> None:
     template = Template(_read(Path("backend/generators/azure_diagnostics_baseline.tf.j2")))
-
-
-def test_azure_diagnostics_golden() -> None:
-    template = Template(_read(Path("backend/generators/azure_diagnostics_baseline.tf.j2")))
     rendered = template.render(
         rg_name="rg",
         rg_actual_name="rg-diag",

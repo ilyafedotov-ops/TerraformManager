@@ -67,8 +67,13 @@ import type { PageData, PageProps } from './$types';
             error = 'Attach at least one .tf or .zip file to scan.';
             return;
         }
+        if (!projectId) {
+            error = 'Project context missing. Navigate through the Projects workspace before running a scan.';
+            return;
+        }
 
         const formData = new FormData();
+        formData.append('project_id', projectId);
         Array.from(selectedFiles).forEach((file) => formData.append('files', file));
         formData.append('terraform_validate', shouldValidate ? 'true' : 'false');
         formData.append('save', shouldSave ? 'true' : 'false');

@@ -2,8 +2,6 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, Iterable
-
 import pytest
 from jinja2 import Template
 

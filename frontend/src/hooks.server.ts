@@ -71,7 +71,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 			setRefreshArtifacts(data.refresh_token ?? null, data.anti_csrf_token ?? null, refreshMaxAge);
 			accessToken = data.access_token;
 			return true;
-		} catch (error) {
+		} catch (_error) {
 			clearSession();
 			return false;
 		}

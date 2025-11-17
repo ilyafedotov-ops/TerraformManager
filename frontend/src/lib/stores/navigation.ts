@@ -3,7 +3,7 @@ import type { NavigationSection, NavigationItem } from '$lib/navigation/types';
 import { navigationSections } from '$lib/navigation/data';
 import { activeProject } from '$lib/stores/project';
 
-interface NavigationState {
+export interface NavigationState {
 	sidebarOpen: boolean;
 	commandOpen: boolean;
 	commandQuery: string;

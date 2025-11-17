@@ -1949,7 +1949,6 @@ $effect(() => {
 																			type="button"
 																			class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1 text-[0.65rem] font-semibold text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
 																			onclick={() => {
-																				diffLayout = diffLayout;
 																				void handleDiffVersion(asset, version, previousVersion?.id ?? null, {
 																					ignoreWhitespace: diffState?.ignoreWhitespace ?? false
 																				});

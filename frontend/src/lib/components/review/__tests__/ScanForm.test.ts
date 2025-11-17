@@ -11,7 +11,7 @@ const steps = [
 describe('ScanForm', () => {
     it('emits submit with current state', async () => {
         const submit = vi.fn();
-        const { getByLabelText, getByText, component } = render(ScanForm, {
+        const { getByLabelText, getByText } = render(ScanForm, {
             props: { steps, files: null, terraformValidate: false, saveReport: true, isSubmitting: false, error: null },
             events: { submit }
         });

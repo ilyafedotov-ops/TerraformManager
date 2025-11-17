@@ -1,7 +1,13 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { projectState, activeProject, activeProjectRuns, activeProjectLibrary } from '../project';
+import {
+	projectState,
+	activeProject,
+	activeProjectRuns,
+	activeProjectLibrary,
+	type ProjectState
+} from '../project';
 
 const mocks = vi.hoisted(() => ({
 	listProjects: vi.fn(),
@@ -43,12 +49,15 @@ vi.mock('$lib/api/client', () => ({
 	getProjectOverview: mocks.getProjectOverview
 }));
 
-const snapshot = () => {
-	let value: any;
+const snapshot = (): ProjectState => {
+	let value: ProjectState | null = null;
 	const unsubscribe = projectState.subscribe((state) => {
 		value = state;
 	});
 	unsubscribe();
+	if (!value) {
+		throw new Error('projectState snapshot unavailable');
+	}
 	return value;
 };
 
@@ -131,7 +140,7 @@ describe('projectState', () => {
 			metadata: { owner: 'team' }
 		});
 		const state = snapshot();
-		const project = state.projects.find((item: any) => item.id === mockProject.id);
+		const project = state.projects.find((item) => item.id === mockProject.id);
 		expect(project?.description).toBe('Updated');
 		expect(project?.metadata).toEqual({ owner: 'team' });
 	});
