@@ -1,9 +1,22 @@
 import type { PageLoad } from './$types';
 import { listAuthEvents, listReports } from '$lib/api/client';
+import type { ListReportsParams } from '$lib/api/client';
 import type { DashboardStats } from '$lib/types/dashboard';
 
-async function buildDashboardStats(fetchFn: typeof fetch, token: string): Promise<DashboardStats> {
-	const payload = await listReports(fetchFn, token, { limit: 20 });
+async function buildDashboardStats(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId?: string | null,
+	projectSlug?: string | null
+): Promise<DashboardStats> {
+	const params: ListReportsParams = { limit: 20 };
+	if (projectId) {
+		params.project_id = projectId;
+	}
+	if (projectSlug) {
+		params.project_slug = projectSlug;
+	}
+	const payload = await listReports(fetchFn, token, params);
 	const reports = payload.items ?? [];
 	const severityCounts: Record<string, number> = {};
 	const recentSeverityCounts: Record<string, number> = {};
@@ -34,7 +47,7 @@ const humaniseError = (error: unknown): string =>
 	error instanceof Error ? error.message : 'Failed to load dashboard data';
 
 export const load = (async ({ fetch, parent }) => {
-	const { token } = await parent();
+	const { token, project, projectId, projectSlug } = await parent();
 
 	if (!token) {
 		return {
@@ -45,7 +58,9 @@ export const load = (async ({ fetch, parent }) => {
 		};
 	}
 
-	const statsPromise = buildDashboardStats(fetch, token);
+	const resolvedProjectId = (projectId as string | null) ?? (project?.id as string | null) ?? null;
+	const resolvedProjectSlug = (projectSlug as string | null) ?? (project?.slug as string | null) ?? null;
+	const statsPromise = buildDashboardStats(fetch, token, resolvedProjectId, resolvedProjectSlug);
 	const eventsPromise = listAuthEvents(fetch, token, 20).then((payload) => payload.events);
 	const safeEventsPromise = eventsPromise.catch(() => []);
 

@@ -49,6 +49,7 @@ from backend.storage import (
     update_project_run,
     save_run_artifact,
     register_generated_asset,
+    report_belongs_to_project,
 )
 from backend.preview_html import render_preview_html
 from backend.report_csv import render_csv_report
@@ -153,8 +154,21 @@ def _require_project_record(session: Session, project_id: str | None, project_sl
         raise HTTPException(400, "project_id or project_slug is required")
     record = get_project(project_id=project_id, slug=project_slug, session=session)
     if not record:
-        raise HTTPException(404, "project not found")
+        identifier = project_id or project_slug or "<missing>"
+        raise HTTPException(404, f"project '{identifier}' not found")
     return record
+
+
+def _require_report_project_context(
+    session: Session,
+    report_id: str,
+    project_id: str | None,
+    project_slug: str | None,
+) -> Dict[str, Any]:
+    project = _require_project_record(session, project_id, project_slug)
+    if not report_belongs_to_project(report_id, project["id"], session=session):
+        raise HTTPException(404, "report not found in the specified project")
+    return project
 
 
 def _merge_tags(*tag_groups: Optional[List[str]]) -> List[str]:
@@ -455,6 +469,7 @@ def reports(
     search: Optional[str] = Query(None, description="Case-insensitive search across id, assignee, notes"),
     order: str = Query("desc", description="Sort direction: asc or desc"),
     project_id: Optional[str] = Query(None, description="Restrict results to a specific project"),
+    project_slug: Optional[str] = Query(None, description="Restrict results to a project slug"),
     session: Session = Depends(get_session_dependency),
     current_user: auth_routes.CurrentUser = Depends(require_current_user),
 ) -> Dict[str, Any]:
@@ -472,6 +487,7 @@ def reports(
             search=search,
             order=order_normalised,
             project_id=project_id,
+            project_slug=project_slug,
             session=session,
         )
     except ValueError as exc:
@@ -494,9 +510,12 @@ def get_report_json(
 def update_report_review_metadata(
     report_id: str,
     payload: ReportReviewUpdatePayload,
+    project_id: Optional[str] = Query(None, description="Owning project id"),
+    project_slug: Optional[str] = Query(None, description="Owning project slug"),
     session: Session = Depends(get_session_dependency),
     _current_user: auth_routes.CurrentUser = Depends(require_current_user),
 ) -> Dict[str, Any]:
+    _require_report_project_context(session, report_id, project_id, project_slug)
     data = payload.dict(exclude_unset=True)
     if not data:
         existing = get_report(report_id, session=session)
@@ -526,9 +545,12 @@ def update_report_review_metadata(
 @api_router.get("/reports/{report_id}/comments")
 def list_report_comments_api(
     report_id: str,
+    project_id: Optional[str] = Query(None, description="Owning project id"),
+    project_slug: Optional[str] = Query(None, description="Owning project slug"),
     session: Session = Depends(get_session_dependency),
     _current_user: auth_routes.CurrentUser = Depends(require_current_user),
 ) -> Dict[str, Any]:
+    _require_report_project_context(session, report_id, project_id, project_slug)
     try:
         comments = list_report_comments(report_id, session=session)
     except ReportNotFoundError as exc:
@@ -540,9 +562,12 @@ def list_report_comments_api(
 def create_report_comment_api(
     report_id: str,
     payload: ReportCommentCreatePayload,
+    project_id: Optional[str] = Query(None, description="Owning project id"),
+    project_slug: Optional[str] = Query(None, description="Owning project slug"),
     session: Session = Depends(get_session_dependency),
     _current_user: auth_routes.CurrentUser = Depends(require_current_user),
 ) -> Dict[str, Any]:
+    _require_report_project_context(session, report_id, project_id, project_slug)
     try:
         return create_report_comment(
             report_id,
@@ -560,9 +585,12 @@ def create_report_comment_api(
 def delete_report_comment_api(
     report_id: str,
     comment_id: str,
+    project_id: Optional[str] = Query(None, description="Owning project id"),
+    project_slug: Optional[str] = Query(None, description="Owning project slug"),
     session: Session = Depends(get_session_dependency),
     _current_user: auth_routes.CurrentUser = Depends(require_current_user),
 ) -> Dict[str, Any]:
+    _require_report_project_context(session, report_id, project_id, project_slug)
     deleted = delete_report_comment(report_id, comment_id, session=session)
     if not deleted:
         raise HTTPException(404, "comment not found")
@@ -943,6 +971,15 @@ def knowledge_sync(
 ) -> Dict[str, Any]:
     sources = req.sources or [
         "https://github.com/hashicorp/policy-library-azure-storage-terraform",
+        "https://github.com/terraform-aws-modules/terraform-aws-vpc",
+        "https://github.com/terraform-aws-modules/terraform-aws-eks",
+        "https://github.com/terraform-aws-modules/terraform-aws-rds",
+        "https://github.com/terraform-aws-modules/terraform-aws-security-group",
+        "https://github.com/Azure/terraform-azurerm-aks",
+        "https://github.com/Azure/terraform-azurerm-network",
+        "https://github.com/Azure/terraform-azurerm-storage",
+        "https://github.com/kubernetes/examples",
+        "https://github.com/argoproj/argo-cd",
     ]
     results = sync_many(sources)
     return {
@@ -963,13 +1000,20 @@ class KnowledgeSearchResponse(BaseModel):
 
 
 @api_router.get("/knowledge/search")
-def knowledge_search(q: str, top_k: int = Query(3, ge=1, le=10)) -> KnowledgeSearchResponse:
-    snippets = retrieve_snippets(q, top_k=top_k, max_chars=800)
+def knowledge_search(
+    q: str,
+    top_k: int = Query(3, ge=1, le=10),
+    provider: Optional[str] = Query(None, description="Filter by provider: aws, azure, kubernetes")
+) -> KnowledgeSearchResponse:
+    snippets = retrieve_snippets(q, top_k=top_k, max_chars=800, provider=provider)
     return KnowledgeSearchResponse(items=[
         {
             "source": item["source"],
             "content": item["content"],
             "score": item.get("score", 0.0),
+            "provider": item.get("provider"),
+            "service": item.get("service"),
+            "category": item.get("category"),
         }
         for item in snippets
     ])

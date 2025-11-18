@@ -673,6 +673,7 @@ export interface ListReportsParams {
 	created_before?: string;
 	order?: 'asc' | 'desc';
 	project_id?: string;
+	project_slug?: string;
 }
 
 export async function listReports(
@@ -704,6 +705,9 @@ export async function listReports(
 	}
 	if (params.project_id) {
 		searchParams.set('project_id', params.project_id);
+	}
+	if (params.project_slug) {
+		searchParams.set('project_slug', params.project_slug);
 	}
 	if (params.status) {
 		const statuses = Array.isArray(params.status) ? params.status : [params.status];
@@ -808,23 +812,45 @@ export async function updateReportReviewMetadata(
 	fetchFn: typeof fetch,
 	token: string,
 	id: string,
-	payload: ReportReviewUpdatePayload
+	payload: ReportReviewUpdatePayload,
+	options?: { projectId?: string | null; projectSlug?: string | null }
 ): Promise<ReportReviewMetadata> {
+	const searchParams = new URLSearchParams();
+	if (options?.projectId) {
+		searchParams.set('project_id', options.projectId);
+	}
+	if (options?.projectSlug) {
+		searchParams.set('project_slug', options.projectSlug);
+	}
 	return apiFetch<ReportReviewMetadata>(fetchFn, `/reports/${encodeURIComponent(id)}`, {
 		method: 'PATCH',
 		token,
-		body: payload
+		body: payload,
+		searchParams: searchParams.size ? searchParams : undefined
 	});
 }
 
 export async function listReportComments(
 	fetchFn: typeof fetch,
 	token: string,
-	reportId: string
+	reportId: string,
+	options?: { projectId?: string | null; projectSlug?: string | null }
 ): Promise<ReportComment[]> {
-	const response = await apiFetch<{ items: ReportComment[] }>(fetchFn, `/reports/${encodeURIComponent(reportId)}/comments`, {
-		token
-	});
+	const searchParams = new URLSearchParams();
+	if (options?.projectId) {
+		searchParams.set('project_id', options.projectId);
+	}
+	if (options?.projectSlug) {
+		searchParams.set('project_slug', options.projectSlug);
+	}
+	const response = await apiFetch<{ items: ReportComment[] }>(
+		fetchFn,
+		`/reports/${encodeURIComponent(reportId)}/comments`,
+		{
+			token,
+			searchParams: searchParams.size ? searchParams : undefined
+		}
+	);
 	return response.items;
 }
 
@@ -833,11 +859,20 @@ export async function createReportComment(
 	token: string,
 	reportId: string,
 	body: string,
-	author?: string | null
+	author?: string | null,
+	options?: { projectId?: string | null; projectSlug?: string | null }
 ): Promise<ReportComment> {
+	const searchParams = new URLSearchParams();
+	if (options?.projectId) {
+		searchParams.set('project_id', options.projectId);
+	}
+	if (options?.projectSlug) {
+		searchParams.set('project_slug', options.projectSlug);
+	}
 	return apiFetch<ReportComment>(fetchFn, `/reports/${encodeURIComponent(reportId)}/comments`, {
 		method: 'POST',
 		token,
+		searchParams: searchParams.size ? searchParams : undefined,
 		body: {
 			body,
 			author: author ?? undefined
@@ -849,11 +884,20 @@ export async function deleteReportComment(
 	fetchFn: typeof fetch,
 	token: string,
 	reportId: string,
-	commentId: string
+	commentId: string,
+	options?: { projectId?: string | null; projectSlug?: string | null }
 ): Promise<{ status: string; id: string }> {
+	const searchParams = new URLSearchParams();
+	if (options?.projectId) {
+		searchParams.set('project_id', options.projectId);
+	}
+	if (options?.projectSlug) {
+		searchParams.set('project_slug', options.projectSlug);
+	}
 	return apiFetch(fetchFn, `/reports/${encodeURIComponent(reportId)}/comments/${encodeURIComponent(commentId)}`, {
 		method: 'DELETE',
-		token
+		token,
+		searchParams: searchParams.size ? searchParams : undefined
 	});
 }
 

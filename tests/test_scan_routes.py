@@ -40,11 +40,30 @@ def test_scan_rejects_paths_outside_workspace(
     payload = {
         "paths": ["../etc"],
         "project_id": project["id"],
+        "project_slug": project["slug"],
         "save": False,
     }
     response = client.post("/scan", json=payload, headers=auth_headers(token))
     assert response.status_code == 400
     assert "workspace" in response.json()["detail"]
+
+
+def test_scan_allows_project_slug_only(
+    projects_client: ProjectsClientFixture,
+) -> None:
+    client, token, _, _ = projects_client
+    project = _create_project(client, token, "Slug Scan")
+    project_root = Path(project["root_path"])
+    demo_dir = project_root / "services" / "demo"
+    demo_dir.mkdir(parents=True, exist_ok=True)
+    (demo_dir / "main.tf").write_text('resource "null_resource" "demo" {}', encoding="utf-8")
+    payload = {
+        "paths": ["services/demo"],
+        "project_slug": project["slug"],
+        "save": False,
+    }
+    response = client.post("/scan", json=payload, headers=auth_headers(token))
+    assert response.status_code == 200
 
 
 def test_scan_uses_project_workspace_paths(
@@ -74,6 +93,7 @@ def test_scan_uses_project_workspace_paths(
     payload = {
         "paths": ["modules/app"],
         "project_id": project["id"],
+        "project_slug": project["slug"],
         "plan_path": "plans/plan.json",
         "save": False,
     }
@@ -119,6 +139,7 @@ def test_scan_upload_uses_workspace(
     files = {"files": ("scan.tf", b'resource "null_resource" "example" {}', "text/plain")}
     data = {
         "project_id": project["id"],
+        "project_slug": project["slug"],
         "terraform_validate": "false",
         "save": "false",
     }
@@ -154,6 +175,35 @@ def test_scan_upload_rejects_zip_escape(projects_client: Tuple[TestClient, str, 
     response = client.post("/scan/upload", data=data, files=files, headers=auth_headers(token))
     assert response.status_code == 400
     assert "zip entry" in response.text
+
+
+def test_scan_upload_accepts_project_slug_only(
+    projects_client: Tuple[TestClient, str, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, token, _, _ = projects_client
+    project = _create_project(client, token, "Slug Upload")
+    project_root = Path(project["root_path"])
+    captured: Dict[str, object] = {}
+
+    def fake_scan_paths(paths, **kwargs):
+        captured["paths"] = paths
+        captured["context"] = kwargs.get("context")
+        return {"summary": {"issues_found": 0}, "findings": []}
+
+    monkeypatch.setattr("api.main.scan_paths", fake_scan_paths)
+
+    files = {"files": ("scan.tf", b'resource "null_resource" "example" {}', "text/plain")}
+    data = {
+        "project_slug": project["slug"],
+        "terraform_validate": "false",
+        "save": "false",
+    }
+    response = client.post("/scan/upload", data=data, files=files, headers=auth_headers(token))
+    assert response.status_code == 200
+    context = captured["context"]
+    assert isinstance(context, dict)
+    assert context.get("project_slug") == project["slug"]
 
 
 def test_scan_save_persists_report_asset(

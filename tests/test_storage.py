@@ -252,6 +252,74 @@ def test_project_and_run_artifacts(storage_context: Dict[str, Path]) -> None:
     assert not (projects_root / project["slug"]).exists()
 
 
+def test_list_reports_filters_by_project_slug(storage_context: Dict[str, Path]) -> None:
+    db_path = storage_context["db_path"]
+    projects_root = storage_context["projects_root"]
+
+    workspace_a = storage.create_project(
+        "Workspace A",
+        projects_root=projects_root,
+        db_path=db_path,
+    )
+    workspace_b = storage.create_project(
+        "Workspace B",
+        projects_root=projects_root,
+        db_path=db_path,
+    )
+
+    storage.save_report(
+        "report-a",
+        {"issues_found": 2},
+        {"summary": {"issues_found": 2}},
+        db_path=db_path,
+    )
+    storage.save_report(
+        "report-b",
+        {"issues_found": 1},
+        {"summary": {"issues_found": 1}},
+        db_path=db_path,
+    )
+
+    storage.create_project_run(
+        workspace_a["id"],
+        label="Run A",
+        kind="review",
+        report_id="report-a",
+        projects_root=projects_root,
+        db_path=db_path,
+    )
+    storage.create_project_run(
+        workspace_b["id"],
+        label="Run B",
+        kind="review",
+        report_id="report-b",
+        projects_root=projects_root,
+        db_path=db_path,
+    )
+
+    scoped = storage.list_reports(project_slug=workspace_a["slug"], db_path=db_path)
+    assert scoped["total_count"] == 1
+    assert scoped["items"][0]["id"] == "report-a"
+
+    combined = storage.list_reports(
+        project_id=workspace_a["id"],
+        project_slug=workspace_a["slug"],
+        db_path=db_path,
+    )
+    assert combined["total_count"] == 1
+    assert combined["items"][0]["id"] == "report-a"
+
+    with pytest.raises(ValueError):
+        storage.list_reports(project_slug="missing-workspace", db_path=db_path)
+
+    with pytest.raises(ValueError):
+        storage.list_reports(
+            project_id=workspace_a["id"],
+            project_slug=workspace_b["slug"],
+            db_path=db_path,
+        )
+
+
 def test_generated_asset_promotion_and_versioning(storage_context: Dict[str, Path]) -> None:
     db_path = storage_context["db_path"]
     projects_root = storage_context["projects_root"]

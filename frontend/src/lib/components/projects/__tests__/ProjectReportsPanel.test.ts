@@ -135,10 +135,42 @@ describe('ProjectReportsPanel', () => {
 		});
 		await fireEvent.click(getByText('Apply filters'));
 
-		await waitFor(() => expect(mockListReports).toHaveBeenCalledWith(expect.any(Function), 'token', expect.objectContaining({
-			project_id: 'proj-1'
-		})));
+		await waitFor(() =>
+			expect(mockListReports).toHaveBeenCalledWith(
+				expect.any(Function),
+				'token',
+				expect.objectContaining({
+					project_id: 'proj-1',
+					project_slug: 'proj-1'
+				})
+			)
+		);
 		expect(await findByRole('button', { name: 'rpt-2' })).toBeInTheDocument();
+	});
+
+	it('fetches reports when only the project slug is available', async () => {
+		mockListReports.mockResolvedValueOnce(baseResponse);
+
+		const { getByText } = render(ProjectReportsPanel, {
+			token: 'token',
+			projectId: null,
+			projectSlug: 'workspace-a',
+			initialReports: baseResponse,
+			showWorkspaceBanner: false
+		});
+
+		await fireEvent.click(getByText('Apply filters'));
+
+		await waitFor(() =>
+			expect(mockListReports).toHaveBeenCalledWith(
+				expect.any(Function),
+				'token',
+				expect.objectContaining({
+					project_id: undefined,
+					project_slug: 'workspace-a'
+				})
+			)
+		);
 	});
 
 	it('saves review metadata for a selected report', async () => {
@@ -161,7 +193,14 @@ describe('ProjectReportsPanel', () => {
 		});
 
 		await fireEvent.click(getByRole('button', { name: 'rpt-1' }));
-		await waitFor(() => expect(mockListReportComments).toHaveBeenCalledWith(expect.any(Function), 'token', 'rpt-1'));
+		await waitFor(() =>
+			expect(mockListReportComments).toHaveBeenCalledWith(
+				expect.any(Function),
+				'token',
+				'rpt-1',
+				expect.objectContaining({ projectId: 'proj-1', projectSlug: 'proj-1' })
+			)
+		);
 
 		const statusSelect = getByLabelText('Status') as HTMLSelectElement;
 		await fireEvent.change(statusSelect, { target: { value: 'resolved' } });
@@ -172,7 +211,8 @@ describe('ProjectReportsPanel', () => {
 				expect.any(Function),
 				'token',
 				'rpt-1',
-				expect.objectContaining({ review_status: 'resolved' })
+				expect.objectContaining({ review_status: 'resolved' }),
+				expect.objectContaining({ projectId: 'proj-1', projectSlug: 'proj-1' })
 			)
 		);
 		expect(await findByText('Review metadata saved.')).toBeInTheDocument();

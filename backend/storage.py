@@ -2480,6 +2480,7 @@ def list_reports(
     search: Optional[str] = None,
     order: str = "desc",
     project_id: Optional[str] = None,
+    project_slug: Optional[str] = None,
 ) -> Dict[str, Any]:
     parsed_created_after = _parse_datetime(created_after) if created_after is not None else None
     parsed_created_before = _parse_datetime(created_before) if created_before is not None else None
@@ -2520,6 +2521,16 @@ def list_reports(
     secondary_order = Report.id.desc() if order_normalised != "asc" else Report.id.asc()
 
     with _get_session(session, db_path) as db:
+        resolved_project_id = project_id
+        if project_slug:
+            slug_stmt = select(Project.id).where(Project.slug == project_slug)
+            slug_match = db.execute(slug_stmt).scalar_one_or_none()
+            if not slug_match:
+                raise ValueError(f"project '{project_slug}' not found")
+            if resolved_project_id and slug_match != resolved_project_id:
+                raise ValueError("project_id and project_slug refer to different projects")
+            resolved_project_id = slug_match
+
         base = select(
             Report.id,
             Report.summary,
@@ -2530,28 +2541,30 @@ def list_reports(
             Report.review_due_at,
             Report.review_notes,
         )
-        if project_id:
+        if resolved_project_id:
             try:
-                _get_project_or_raise(db, project_id)
+                _get_project_or_raise(db, resolved_project_id)
             except ProjectNotFoundError as exc:
-                raise ValueError(f"project '{project_id}' not found") from exc
-            base = base.join(ProjectRun, Report.id == ProjectRun.report_id).where(ProjectRun.project_id == project_id)
+                raise ValueError(f"project '{resolved_project_id}' not found") from exc
+            base = base.join(ProjectRun, Report.id == ProjectRun.report_id).where(
+                ProjectRun.project_id == resolved_project_id
+            )
         if filters:
             base = base.where(*filters)
 
         total_stmt = select(func.count(func.distinct(Report.id))).select_from(Report)
-        if project_id:
+        if resolved_project_id:
             total_stmt = total_stmt.join(ProjectRun, Report.id == ProjectRun.report_id).where(
-                ProjectRun.project_id == project_id
+                ProjectRun.project_id == resolved_project_id
             )
         if filters:
             total_stmt = total_stmt.where(*filters)
         total_count = int(db.execute(total_stmt).scalar_one())
 
         status_counts_stmt = select(Report.review_status, func.count()).select_from(Report).group_by(Report.review_status)
-        if project_id:
+        if resolved_project_id:
             status_counts_stmt = status_counts_stmt.join(ProjectRun, Report.id == ProjectRun.report_id).where(
-                ProjectRun.project_id == project_id
+                ProjectRun.project_id == resolved_project_id
             )
         if filters:
             status_counts_stmt = status_counts_stmt.where(*filters)
@@ -2559,9 +2572,9 @@ def list_reports(
         status_counts: Dict[str, int] = {row[0]: int(row[1] or 0) for row in status_counts_rows}
 
         summary_stmt = select(Report.summary).select_from(Report)
-        if project_id:
+        if resolved_project_id:
             summary_stmt = summary_stmt.join(ProjectRun, Report.id == ProjectRun.report_id).where(
-                ProjectRun.project_id == project_id
+                ProjectRun.project_id == resolved_project_id
             )
         if filters:
             summary_stmt = summary_stmt.where(*filters)
@@ -2610,6 +2623,22 @@ def list_reports(
                 "severity_counts": severity_counts,
             },
         }
+
+
+def report_belongs_to_project(
+    report_id: str,
+    project_id: str,
+    *,
+    db_path: Path = DEFAULT_DB_PATH,
+    session: Session | None = None,
+) -> bool:
+    with _get_session(session, db_path) as db:
+        stmt = (
+            select(ProjectRun.id)
+            .where(ProjectRun.report_id == report_id, ProjectRun.project_id == project_id)
+            .limit(1)
+        )
+        return db.execute(stmt).scalar_one_or_none() is not None
 
 
 def get_report(

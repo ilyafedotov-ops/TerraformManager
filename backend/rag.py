@@ -1,4 +1,5 @@
 import re
+import yaml
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -115,19 +116,52 @@ def retrieve(query: str, top_k: int = 3) -> List[Tuple[str, str]]:
     return [(p.source, p.content) for p in retrieve_passages(query, top_k)]
 
 
-def retrieve_snippets(query: str, top_k: int = 3, max_chars: Optional[int] = 800) -> List[Dict[str, object]]:
+def _parse_frontmatter(content: str) -> Tuple[Dict, str]:
+    """Extract YAML frontmatter and content from markdown."""
+    if not content.startswith("---"):
+        return {}, content
+
+    parts = content.split("---", 2)
+    if len(parts) < 3:
+        return {}, content
+
+    try:
+        frontmatter = yaml.safe_load(parts[1]) or {}
+        body = parts[2].strip()
+        return frontmatter, body
+    except Exception:
+        return {}, content
+
+
+def retrieve_snippets(query: str, top_k: int = 3, max_chars: Optional[int] = 800, provider: Optional[str] = None) -> List[Dict[str, object]]:
     results: List[Dict[str, object]] = []
-    for passage in retrieve_passages(query, top_k):
+    for passage in retrieve_passages(query, top_k * 2):  # Get more to filter
         text = passage.content
+        frontmatter, _ = _parse_frontmatter(text)
+
+        # Filter by provider if specified
+        if provider:
+            doc_provider = frontmatter.get("provider", "").lower()
+            if doc_provider != provider.lower():
+                continue
+
         if max_chars is not None and len(text) > max_chars:
             text = text[:max_chars]
+
         results.append(
             {
                 "source": passage.source,
                 "content": text,
                 "score": passage.score,
+                "provider": frontmatter.get("provider"),
+                "service": frontmatter.get("service"),
+                "category": frontmatter.get("category"),
             }
         )
+
+        if len(results) >= top_k:
+            break
+
     return results
 
 
