@@ -32,11 +32,18 @@ from backend.storage import (
     save_report,
     save_run_artifact,
     update_project_run,
+    update_project_artifact,
     get_project_workspace,
     resolve_workspace_paths,
     resolve_workspace_file,
+    ArtifactPathError,
     WorkspacePathError,
 )
+
+
+BASELINE_DEFAULT_OUT = "tfreview.baseline.yaml"
+DOCS_DEFAULT_OUT = "docs/generators"
+DOCS_DEFAULT_KNOWLEDGE_OUT = "knowledge/generated"
 
 
 PRECOMMIT_TEMPLATE = """repos:
@@ -112,6 +119,32 @@ def _save_run_artifact_from_path(
         return
     data = source.read_bytes()
     save_run_artifact(project_id, run_id, path=relative_path, data=data)
+
+
+def _resolve_workspace_destination(
+    project_root: Path,
+    path_token: str,
+    *,
+    label: str,
+    expect_dir: bool = False,
+) -> Path:
+    root = project_root.expanduser().resolve()
+    token_path = Path(path_token)
+    if token_path.is_absolute():
+        resolved = token_path.expanduser().resolve()
+    else:
+        resolved = (root / token_path).resolve()
+
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:  # noqa: BLE001
+        raise WorkspacePathError(f"{label} must stay inside the project workspace") from exc
+
+    if expect_dir:
+        resolved.mkdir(parents=True, exist_ok=True)
+    else:
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+    return resolved
 
 
 def _print_json(data: Any) -> None:
@@ -401,7 +434,11 @@ def main() -> None:
 
     baseline = sub.add_parser("baseline", help="Generate a baseline file listing current findings for waivers")
     baseline.add_argument("--path", action="append", required=True, help="Path to a .tf file or directory (repeatable)")
-    baseline.add_argument("--out", default="tfreview.baseline.yaml", help="Output file path (YAML by default)")
+    baseline.add_argument(
+        "--out",
+        default=None,
+        help="Output file path (default: tfreview.baseline.yaml)",
+    )
     baseline.add_argument(
         "--format",
         choices=("yaml", "json"),
@@ -413,6 +450,10 @@ def main() -> None:
         action="store_true",
         help="Include findings already waived by existing configuration",
     )
+    baseline_project = baseline.add_argument_group("Project integration")
+    baseline_project_ref = baseline_project.add_mutually_exclusive_group()
+    baseline_project_ref.add_argument("--project-id", help="Resolve paths inside the specified project workspace")
+    baseline_project_ref.add_argument("--project-slug", help="Resolve paths inside the specified project workspace")
 
     precommit = sub.add_parser("precommit", help="Generate a sample pre-commit configuration for Terraform policies")
     precommit.add_argument(
@@ -428,13 +469,16 @@ def main() -> None:
     docs_cmd = sub.add_parser("docs", help="Generate Terraform docs for generator templates")
     docs_cmd.add_argument(
         "--out",
-        default="docs/generators",
+        default=None,
         help="Directory to write generated documentation (default: docs/generators)",
     )
     docs_cmd.add_argument(
         "--knowledge-out",
-        default="knowledge/generated",
-        help="Optional knowledge directory to mirror generated docs (default: knowledge/generated)",
+        default=None,
+        help=(
+            "Optional knowledge directory to mirror generated docs (default: knowledge/generated). "
+            "Pass an empty string to skip the knowledge mirror."
+        ),
     )
     docs_cmd.add_argument(
         "--config",
@@ -451,6 +495,10 @@ def main() -> None:
         action="store_true",
         help="Skip knowledge base reindex after docs generation.",
     )
+    docs_project = docs_cmd.add_argument_group("Project integration")
+    docs_project_ref = docs_project.add_mutually_exclusive_group()
+    docs_project_ref.add_argument("--project-id", help="Write docs inside the specified project workspace")
+    docs_project_ref.add_argument("--project-slug", help="Write docs inside the specified project workspace")
 
     auth = sub.add_parser("auth", help="Authenticate against the FastAPI service")
     auth_sub = auth.add_subparsers(dest="auth_cmd", required=True)
@@ -531,6 +579,29 @@ def main() -> None:
         action="store_true",
         help="Output JSON instead of human-readable summary",
     )
+    project_upload = project_sub.add_parser("upload", help="Upload files into a project run workspace")
+    project_upload.add_argument("--project-id", required=True, help="Project identifier")
+    project_upload.add_argument("--run-id", required=True, help="Run identifier")
+    project_upload.add_argument("--file", required=True, help="Path to the local file to upload")
+    project_upload.add_argument(
+        "--dest",
+        help="Destination relative path inside the run directory (defaults to the source filename)",
+    )
+    project_upload.add_argument(
+        "--overwrite",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Overwrite existing artifact if it already exists (default: true)",
+    )
+    project_upload.add_argument(
+        "--tags",
+        help="Comma-separated tags to store with the uploaded artifact",
+    )
+    project_upload.add_argument(
+        "--metadata",
+        help="Inline JSON object or path describing artifact metadata",
+    )
+    project_upload.add_argument("--media-type", help="Optional media type override for the artifact")
     project_generator = project_sub.add_parser("generator", help="Invoke a registered generator via the API")
     project_generator.add_argument("--project-id", required=True, help="Project identifier")
     project_generator.add_argument("--slug", required=True, help="Generator slug (e.g., aws/s3-secure-bucket)")
@@ -785,17 +856,59 @@ def main() -> None:
             )
             sys.exit(2)
     elif args.cmd == "baseline":
-        paths = [Path(p) for p in args.path]
-        report = scan_paths(paths, use_terraform_validate=False, context={"source": "cli.baseline"})
+        project_record: Dict[str, Any] | None = None
+        project_workspace: Path | None = None
+        if args.project_id or args.project_slug:
+            try:
+                project_record = _resolve_project_reference(args.project_id, args.project_slug)
+                project_workspace = get_project_workspace(project_record)
+            except ValueError as exc:
+                logger.error(str(exc))
+                sys.exit(1)
+            except WorkspacePathError as exc:
+                logger.error("Failed to resolve project workspace: %s", exc)
+                sys.exit(1)
+
+        try:
+            if project_workspace:
+                paths = resolve_workspace_paths(project_workspace, args.path)
+            else:
+                paths = [Path(p) for p in args.path]
+        except WorkspacePathError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
+
+        context = {"source": "cli.baseline"}
+        if project_record:
+            context.update({"project_id": project_record["id"], "project_slug": project_record.get("slug")})
+
+        report = scan_paths(paths, use_terraform_validate=False, context=context)
         baseline_data = _build_baseline(report, include_waived=args.include_waived)
-        out_path = Path(args.out)
-        _ensure_parent(out_path)
+
+        output_name = args.out or BASELINE_DEFAULT_OUT
+        if project_workspace:
+            relative_token = output_name if args.out else str(Path("configs") / BASELINE_DEFAULT_OUT)
+            try:
+                out_path = _resolve_workspace_destination(
+                    project_workspace,
+                    relative_token,
+                    label="baseline output file",
+                )
+            except WorkspacePathError as exc:
+                logger.error(str(exc))
+                sys.exit(1)
+        else:
+            out_path = Path(output_name)
+            if not out_path.is_absolute():
+                out_path = Path.cwd() / out_path
+            _ensure_parent(out_path)
+
         if args.format == "json":
             payload = json.dumps(baseline_data, indent=2)
         else:
             payload = yaml.safe_dump(baseline_data, sort_keys=False)
         out_path.write_text(payload, encoding="utf-8")
-        print(f"Wrote baseline to {args.out}")
+        print(f"Wrote baseline to {out_path}")
     elif args.cmd == "precommit":
         out_path = Path(args.out)
         if out_path.exists() and not args.force:
@@ -805,8 +918,50 @@ def main() -> None:
         out_path.write_text(PRECOMMIT_TEMPLATE, encoding="utf-8")
         print(f"Wrote pre-commit configuration to {out_path}")
     elif args.cmd == "docs":
-        out_dir = Path(args.out)
-        knowledge_dir = Path(args.knowledge_out) if args.knowledge_out else None
+        project_record: Dict[str, Any] | None = None
+        project_workspace: Path | None = None
+        if args.project_id or args.project_slug:
+            try:
+                project_record = _resolve_project_reference(args.project_id, args.project_slug)
+                project_workspace = get_project_workspace(project_record)
+            except ValueError as exc:
+                logger.error(str(exc))
+                sys.exit(1)
+            except WorkspacePathError as exc:
+                logger.error("Failed to resolve project workspace: %s", exc)
+                sys.exit(1)
+
+        out_value = (args.out or DOCS_DEFAULT_OUT).strip() or DOCS_DEFAULT_OUT
+        knowledge_raw = args.knowledge_out
+        if knowledge_raw is None:
+            knowledge_value: str | None = DOCS_DEFAULT_KNOWLEDGE_OUT
+        else:
+            knowledge_value = knowledge_raw.strip()
+        knowledge_value = knowledge_value or None
+
+        try:
+            if project_workspace:
+                out_dir = _resolve_workspace_destination(
+                    project_workspace,
+                    out_value,
+                    label="docs output directory",
+                    expect_dir=True,
+                )
+                knowledge_dir = None
+                if knowledge_value:
+                    knowledge_dir = _resolve_workspace_destination(
+                        project_workspace,
+                        knowledge_value,
+                        label="knowledge mirror directory",
+                        expect_dir=True,
+                    )
+            else:
+                out_dir = Path(out_value)
+                knowledge_dir = Path(knowledge_value) if knowledge_value else None
+        except WorkspacePathError as exc:
+            logger.error(str(exc))
+            sys.exit(1)
+
         config_path = Path(args.config) if args.config else None
         result = generate_docs(
             output_dir=out_dir,
@@ -895,6 +1050,79 @@ def main() -> None:
                     for entry in entries:
                         marker = "<dir>" if entry["is_dir"] else f"{entry.get('size', 0)} bytes"
                         print(f"{entry['path'] or '.'}  {marker}  modified={entry.get('modified_at')}")
+            elif args.project_cmd == "upload":
+                source = Path(args.file)
+                if not source.exists() or not source.is_file():
+                    logger.error("Upload source %s not found or not a file", source)
+                    sys.exit(1)
+                destination = (args.dest or "").strip() or source.name
+                try:
+                    data = source.read_bytes()
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Failed to read %s: %s", source, exc)
+                    sys.exit(1)
+                try:
+                    entry = save_run_artifact(
+                        project_id=args.project_id,
+                        run_id=args.run_id,
+                        path=destination,
+                        data=data,
+                        overwrite=args.overwrite,
+                    )
+                except ValueError:
+                    logger.error("Project or run not found")
+                    sys.exit(1)
+                except FileExistsError:
+                    logger.error(
+                        "Artifact %s already exists for run %s. Re-run with --overwrite to replace it.",
+                        destination,
+                        args.run_id,
+                    )
+                    sys.exit(1)
+                except ArtifactPathError as exc:
+                    logger.error("Invalid destination path: %s", exc)
+                    sys.exit(1)
+
+                tags_payload = _parse_cli_tags(args.tags)
+                metadata_payload: Dict[str, Any] | None = None
+                if args.metadata:
+                    try:
+                        metadata_payload = _load_json_payload(args.metadata)
+                    except ValueError as exc:
+                        logger.error("Invalid metadata payload: %s", exc)
+                        sys.exit(1)
+
+                needs_update = (
+                    args.tags is not None
+                    or args.metadata is not None
+                    or args.media_type is not None
+                )
+                artifact_record: Dict[str, Any] = dict(entry)
+                artifact_id = entry.get("artifact_id")
+                if needs_update and artifact_id:
+                    updated = update_project_artifact(
+                        artifact_id,
+                        project_id=args.project_id,
+                        tags=tags_payload if args.tags is not None else None,
+                        metadata=metadata_payload if args.metadata is not None else None,
+                        media_type=args.media_type,
+                    )
+                    if updated:
+                        artifact_record = updated
+                        artifact_id = updated.get("id", artifact_id)
+
+                relative_path = (
+                    artifact_record.get("path")
+                    or artifact_record.get("relative_path")
+                    or destination
+                )
+                size = artifact_record.get("size") or artifact_record.get("size_bytes")
+                size_suffix = f" ({size} bytes)" if size is not None else ""
+                final_id = artifact_id or artifact_record.get("id")
+                print(
+                    f"Uploaded {source} -> {relative_path}"
+                    f" (artifact_id={final_id}){size_suffix}"
+                )
             elif args.project_cmd == "generator":
                 auth_payload = _load_cli_auth_credentials(logger)
                 payload = _load_json_payload(args.payload)
