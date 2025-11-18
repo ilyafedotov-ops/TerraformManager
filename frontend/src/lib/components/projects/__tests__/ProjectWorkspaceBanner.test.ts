@@ -1,9 +1,9 @@
 import { fireEvent, render } from '@testing-library/svelte';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { writable } from 'svelte/store';
 import type { ProjectSummary } from '$lib/api/client';
 
 const stores = vi.hoisted(() => {
-	const { writable } = require('svelte/store');
 	const projectStore = writable({ projects: [] as ProjectSummary[], activeProjectId: null as string | null });
 	const activeStore = writable<ProjectSummary | null>(null);
 	const setActiveProjectMock = vi.fn();
