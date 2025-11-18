@@ -44,7 +44,7 @@ resource "aws_db_instance" "primary" {
   storage_encrypted          = true
   kms_key_id                 = "arn:aws:kms:us-east-1:123456789012:key/primary"
   backup_retention_period    = 7
-  preferred_backup_window    = "03:00-04:00"
+  backup_window              = "03:00-04:00"
   maintenance_window         = "sun:05:00-sun:06:00"
   deletion_protection        = true
   copy_tags_to_snapshot      = true
@@ -66,6 +66,7 @@ resource "aws_db_instance" "replica" {
   publicly_accessible    = false
   monitoring_interval    = 60
   performance_insights_enabled = true
+  backup_window          = "03:00-04:00"
   kms_key_id             = "arn:aws:kms:us-west-2:123456789012:key/replica"
   db_subnet_group_name   = aws_db_subnet_group.replica.name
   storage_encrypted      = true

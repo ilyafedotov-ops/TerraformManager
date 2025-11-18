@@ -195,7 +195,7 @@ RULES_REGISTRY: Dict[str, RuleMetadata] = {
         title="Storage account '{resource}' does not enforce HTTPS",
         severity="HIGH",
         description="Allowing HTTP exposes traffic to downgrade and interception attacks.",
-        recommendation="Set `enable_https_traffic_only = true` on storage account '{resource}'.",
+        recommendation="Set `https_traffic_only_enabled = true` on storage account '{resource}'.",
         knowledge_ref="knowledge/azure_best_practices.md#azure-best-practices-selected",
     ),
     "AZ-STORAGE-BLOB-PUBLIC": RuleMetadata(
@@ -203,7 +203,7 @@ RULES_REGISTRY: Dict[str, RuleMetadata] = {
         title="Storage account '{resource}' allows blob public access",
         severity="HIGH",
         description="Account-level public access makes blobs readable by anyone on the internet.",
-        recommendation="Set `allow_blob_public_access = false` for storage account '{resource}'.",
+        recommendation="Set `allow_nested_items_to_be_public = false` for storage account '{resource}'.",
         knowledge_ref="knowledge/azure_best_practices.md#azure-best-practices-selected",
     ),
     "AZ-STORAGE-MIN-TLS": RuleMetadata(

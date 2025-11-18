@@ -14,6 +14,14 @@ provider "azurerm" {
   features {}
 }
 
+{%- if rg_name != "rg" %}
+moved {
+  from = azurerm_resource_group.rg
+  to   = azurerm_resource_group.{{ rg_name }}
+}
+
+{%- endif %}
+
 locals {
   tags = {
     ManagedBy   = "TerraformManager"

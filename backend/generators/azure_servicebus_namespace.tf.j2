@@ -14,6 +14,38 @@ provider "azurerm" {
   features {}
 }
 
+{%- if rg_name != "rg" %}
+moved {
+  from = azurerm_resource_group.rg
+  to   = azurerm_resource_group.{{ rg_name }}
+}
+
+{%- endif %}
+
+{%- if namespace_name != "namespace" %}
+moved {
+  from = azurerm_servicebus_namespace.namespace
+  to   = azurerm_servicebus_namespace.{{ namespace_name }}
+}
+
+{%- if diagnostics %}
+moved {
+  from = azurerm_monitor_diagnostic_setting.namespace_diag
+  to   = azurerm_monitor_diagnostic_setting.{{ namespace_name }}_diag
+}
+
+{%- endif %}
+
+{%- if private_endpoint %}
+moved {
+  from = azurerm_private_endpoint.namespace_pe
+  to   = azurerm_private_endpoint.{{ namespace_name }}_pe
+}
+
+{%- endif %}
+
+{%- endif %}
+
 locals {
   tags = {
     ManagedBy   = "TerraformManager"

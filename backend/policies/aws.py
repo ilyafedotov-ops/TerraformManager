@@ -386,7 +386,7 @@ def check_rds_backup_retention(file: Path, text: str) -> List[Dict[str, Any]]:
                     line=find_line_number(text, match.group(0)),
                     context={"resource": name},
                     snippet=block[:200],
-                    suggested_fix_snippet='backup_retention_period = 7\npreferred_backup_window = "03:00-04:00"\n',
+                    suggested_fix_snippet='backup_retention_period = 7\nbackup_window = "03:00-04:00"\n',
                     unique_id=f"AWS-RDS-BACKUP::{name}",
                 )
             )

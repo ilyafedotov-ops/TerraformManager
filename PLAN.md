@@ -327,8 +327,9 @@ Goal: simplify the entire product around a single “Project” hub so users can
 - ✅ Expose new auth events in UI once activity/history surfaces are designed.
 
 ### C. Prepare Terraform Generator Safety Nets
-- When duplicating or refactoring templates for the new UI flows, add `moved` blocks in Terraform modules as needed so downstream users can run `terraform apply` without state loss (per `/hashicorp/terraform` planning guidance).
-- Extend generator smoke tests to cover new Kubernetes flows once UI wiring lands, ensuring `terraform validate` passes for generated archives.
+- ✅ Added Terraform `moved` blocks to Azure generator templates (storage account, key vault) so the upcoming UI-driven resource-name refactors migrate existing state instead of recreating infrastructure.
+- ✅ Propagated the `moved` block pattern across remaining Azure templates (VNet, diagnostics, AKS, API Management, Function App, Service Bus) to cover resource-group and primary component renames ahead of sanitized identifiers.
+- ✅ Extend generator smoke tests to cover new Kubernetes flows (namespace baseline, HPA/PDB, PSA namespace labelling) so `terraform validate` runs against each archive.
 
 ### D. UX Enhancements to Support Upcoming Work
 - ✅ Add a reusable toast/notification store in `frontend/src/lib/stores/notifications.ts` to announce outcomes (knowledge sync success, auth errors). Trigger from `/knowledge/sync` calls and generator submissions.

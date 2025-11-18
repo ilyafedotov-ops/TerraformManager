@@ -217,3 +217,94 @@ def test_cli_project_upload_updates_metadata(tmp_path: Path, monkeypatch: pytest
     assert update_params["artifact_id"] == "artifact-123"
     assert update_params["tags"] == ["report", "scan"]
     assert update_params["media_type"] == "application/json"
+
+
+def test_cli_project_generator_posts_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project_root = tmp_path / "projects" / "project-generator"
+    project_root.mkdir(parents=True, exist_ok=True)
+    output_path = project_root / "outputs" / "generated.tf"
+
+    request_log: Dict[str, Any] = {}
+    generated_source = 'resource "null_resource" "example" {}\n'
+
+    class DummyResponse:
+        status_code = 201
+
+        @staticmethod
+        def json() -> Dict[str, Any]:
+            return {
+                "output": {"filename": "aws_s3.tf", "content": generated_source},
+                "asset": {"id": "asset-1", "name": "CLI Asset"},
+                "version": {"id": "version-1"},
+                "run": {"id": "run-123", "status": "completed"},
+            }
+
+    class DummyClient:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: D401
+            request_log["base_url"] = kwargs.get("base_url")
+
+        def __enter__(self) -> "DummyClient":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:  # noqa: D401
+            return None
+
+        def post(self, url: str, json: Dict[str, Any], headers: Dict[str, str]) -> DummyResponse:
+            request_log["url"] = url
+            request_log["payload"] = json
+            request_log["headers"] = headers
+            return DummyResponse()
+
+    monkeypatch.setattr(cli.httpx, "Client", DummyClient)
+    monkeypatch.setattr(
+        cli,
+        "_load_cli_auth_credentials",
+        lambda logger: {"base_url": "https://cli.example", "access_token": "token-123"},
+    )
+    monkeypatch.setenv("TFM_LOG_LEVEL", "ERROR")
+
+    argv = [
+        "backend.cli",
+        "project",
+        "generator",
+        "--project-id",
+        "project-generator",
+        "--slug",
+        "aws/s3-secure-bucket",
+        "--payload",
+        '{"bucket_name": "cli-demo"}',
+        "--out",
+        str(output_path),
+        "--asset-name",
+        "CLI Demo Asset",
+        "--description",
+        "Generated via CLI",
+        "--tags",
+        "cli,automation",
+        "--metadata",
+        '{"ticket": "INC-2024"}',
+        "--notes",
+        "Saved via CLI",
+        "--run-label",
+        "CLI Generator Run",
+        "--force-save",
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    cli.main()
+
+    assert output_path.exists()
+    assert output_path.read_text(encoding="utf-8") == generated_source
+    assert request_log["base_url"] == "https://cli.example"
+    assert request_log["url"] == "/projects/project-generator/generators/aws/s3-secure-bucket"
+    assert request_log["headers"]["Authorization"] == "Bearer token-123"
+    posted = request_log["payload"]
+    assert posted["payload"] == {"bucket_name": "cli-demo"}
+    options = posted["options"]
+    assert options["asset_name"] == "CLI Demo Asset"
+    assert options["description"] == "Generated via CLI"
+    assert options["tags"] == ["cli", "automation"]
+    assert options["metadata"] == {"ticket": "INC-2024"}
+    assert options["notes"] == "Saved via CLI"
+    assert options["run_label"] == "CLI Generator Run"
+    assert options["force_save"] is True

@@ -45,7 +45,7 @@ resource "aws_db_instance" "prod-app-db" {
   storage_encrypted          = true
   kms_key_id                = "arn:aws:kms:us-east-1:123456789012:key/example"
   backup_retention_period    = 7
-  preferred_backup_window    = "03:00-04:00"
+  backup_window              = "03:00-04:00"
   maintenance_window         = "sun:05:00-sun:06:00"
   deletion_protection        = true
   copy_tags_to_snapshot      = true

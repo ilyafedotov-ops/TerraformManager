@@ -22,9 +22,9 @@ resource "azurerm_storage_account" "sa" {
   location                 = azurerm_resource_group.rg.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
-  allow_blob_public_access  = false
-  enable_https_traffic_only = true
-  min_tls_version           = "TLS1_2"
+  allow_nested_items_to_be_public = false
+  https_traffic_only_enabled      = true
+  min_tls_version                 = "TLS1_2"
   blob_properties {
     versioning_enabled = true
   }
@@ -32,7 +32,7 @@ resource "azurerm_storage_account" "sa" {
   network_rules {
     default_action             = "Deny"
     bypass                     = ["AzureServices"]
-    ip_rules                   = ["10.0.0.0/24","10.0.1.0/24"]
+    ip_rules                   = ["52.160.0.0/24","52.161.0.0/24"]
   }
   
   tags = {

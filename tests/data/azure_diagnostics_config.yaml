@@ -10,6 +10,5 @@ cases:
   - AZ-DIAGNOSTICS-MISSING::network_security_group.app
   - AZ-DIAGNOSTICS-MISSING::storage_account.logs
   - AZ-NET-FLOW-LOGS::app
-  - AZ-STORAGE-HTTPS::logs
   - AZ-LAW-HEALTH-ALERT::law
   - AZ-STORAGE-PRIVATE-ENDPOINT::logs

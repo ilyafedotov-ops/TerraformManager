@@ -3,6 +3,22 @@ provider "azurerm" {
   features {}
 }
 
+{%- if rg_name != "rg" %}
+moved {
+  from = azurerm_resource_group.rg
+  to   = azurerm_resource_group.{{ rg_name }}
+}
+
+{%- endif %}
+
+{%- if apim_name != "apim" %}
+moved {
+  from = azurerm_api_management.apim
+  to   = azurerm_api_management.{{ apim_name }}
+}
+
+{%- endif %}
+
 locals {
   tags = {
     ManagedBy   = "TerraformManager"

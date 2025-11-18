@@ -265,12 +265,12 @@ class AzureStorageGeneratorPayload(BaseModel):
     )
     restrict_network: bool = Field(
         False,
-        description="Toggle to enable network rules restricting public access.",
+        description="Toggle to enable storage firewall rules restricting access to specific public IP ranges.",
     )
     allowed_ips: List[str] = Field(
         default_factory=list,
-        description="List of CIDR blocks allowed when network restrictions are enabled.",
-        examples=[["10.0.0.0/24", "10.0.1.0/24"]],
+        description="List of public IP CIDR blocks allowed when storage firewall rules are enabled.",
+        examples=[["52.160.0.0/24", "52.161.0.0/24"]],
     )
     private_endpoint: Optional[AzureStoragePrivateEndpointSettings] = Field(
         None,
