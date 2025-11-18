@@ -13,6 +13,24 @@ const resolveBrowserBase = () => {
 const resolvedBase = env.PUBLIC_API_BASE ?? resolveBrowserBase();
 export const API_BASE = resolvedBase.replace(/\/$/, '');
 
+type ProjectResolver = () => string | null;
+let projectIdentifierResolver: ProjectResolver | null = null;
+
+export const registerProjectIdentifierResolver = (resolver: ProjectResolver) => {
+	projectIdentifierResolver = resolver;
+};
+
+const resolveProjectIdentifier = (projectId?: string | null): string => {
+	if (projectId && projectId.trim().length > 0) {
+		return projectId;
+	}
+	const resolved = projectIdentifierResolver?.() ?? null;
+	if (resolved && resolved.trim().length > 0) {
+		return resolved;
+	}
+	throw new Error('Project context is required. Pass projectId explicitly or set an active project.');
+};
+
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export interface ApiRequestOptions<TBody = unknown> {
@@ -1084,11 +1102,12 @@ export interface ProjectGeneratorRunResponse {
 export async function runProjectGenerator(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	slug: string,
 	request: ProjectGeneratorRunRequest
 ): Promise<ProjectGeneratorRunResponse> {
-	return apiFetch(fetchFn, `/projects/${projectId}/generators/${slug}`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}/generators/${slug}`, {
 		method: 'POST',
 		token,
 		body: request
@@ -1261,18 +1280,24 @@ export async function createProject(
 export async function updateProject(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	payload: ProjectUpdatePayload
 ): Promise<ProjectDetail> {
-	return apiFetch(fetchFn, `/projects/${projectId}`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}`, {
 		method: 'PATCH',
 		token,
 		body: payload
 	});
 }
 
-export async function getProject(fetchFn: typeof fetch, token: string, projectId: string): Promise<ProjectDetail> {
-	return apiFetch(fetchFn, `/projects/${projectId}`, {
+export async function getProject(
+	fetchFn: typeof fetch,
+	token: string,
+	projectId: string | null
+): Promise<ProjectDetail> {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}`, {
 		token
 	});
 }
@@ -1285,9 +1310,10 @@ export interface GetProjectOverviewOptions {
 export async function getProjectOverview(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	options: GetProjectOverviewOptions = {}
 ): Promise<ProjectOverview> {
+	const identifier = resolveProjectIdentifier(projectId);
 	const searchParams: Record<string, string> = {};
 	if (typeof options.recentAssets === 'number') {
 		searchParams.recent_assets = String(options.recentAssets);
@@ -1297,7 +1323,7 @@ export async function getProjectOverview(
 	} else if (options.includeMetadata === true) {
 		searchParams.include_metadata = 'true';
 	}
-	return apiFetch(fetchFn, `/projects/${projectId}/overview`, {
+	return apiFetch(fetchFn, `/projects/${identifier}/overview`, {
 		token,
 		searchParams: Object.keys(searchParams).length ? searchParams : undefined
 	});
@@ -1306,10 +1332,11 @@ export async function getProjectOverview(
 export async function deleteProject(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	removeFiles = false
 ): Promise<void> {
-	await apiFetch(fetchFn, `/projects/${projectId}`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	await apiFetch(fetchFn, `/projects/${identifier}`, {
 		method: 'DELETE',
 		token,
 		searchParams: removeFiles ? { remove_files: 'true' } : undefined
@@ -1323,14 +1350,15 @@ export interface ListProjectConfigsOptions {
 export async function listProjectConfigs(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	options: ListProjectConfigsOptions = {}
 ): Promise<ProjectConfigRecord[]> {
+	const identifier = resolveProjectIdentifier(projectId);
 	const searchParams: Record<string, string> = {};
 	if (options.includePayload) {
 		searchParams.include_payload = 'true';
 	}
-	return apiFetch(fetchFn, `/projects/${projectId}/configs`, {
+	return apiFetch(fetchFn, `/projects/${identifier}/configs`, {
 		token,
 		searchParams: Object.keys(searchParams).length ? searchParams : undefined
 	});
@@ -1339,10 +1367,11 @@ export async function listProjectConfigs(
 export async function createProjectConfig(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	payload: ProjectConfigCreatePayload
 ): Promise<ProjectConfigRecord> {
-	return apiFetch(fetchFn, `/projects/${projectId}/configs`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}/configs`, {
 		method: 'POST',
 		token,
 		body: payload
@@ -1352,11 +1381,12 @@ export async function createProjectConfig(
 export async function updateProjectConfig(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	configId: string,
 	payload: ProjectConfigUpdatePayload
 ): Promise<ProjectConfigRecord> {
-	return apiFetch(fetchFn, `/projects/${projectId}/configs/${configId}`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}/configs/${configId}`, {
 		method: 'PATCH',
 		token,
 		body: payload
@@ -1366,10 +1396,11 @@ export async function updateProjectConfig(
 export async function deleteProjectConfig(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	configId: string
 ): Promise<void> {
-	await apiFetch(fetchFn, `/projects/${projectId}/configs/${configId}`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	await apiFetch(fetchFn, `/projects/${identifier}/configs/${configId}`, {
 		method: 'DELETE',
 		token
 	});
@@ -1378,15 +1409,16 @@ export async function deleteProjectConfig(
 export async function getProjectConfig(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	configId: string,
 	options: { includePayload?: boolean } = {}
 ): Promise<ProjectConfigRecord> {
+	const identifier = resolveProjectIdentifier(projectId);
 	const searchParams: Record<string, string> = {};
 	if (options.includePayload === false) {
 		searchParams.include_payload = 'false';
 	}
-	return apiFetch(fetchFn, `/projects/${projectId}/configs/${configId}`, {
+	return apiFetch(fetchFn, `/projects/${identifier}/configs/${configId}`, {
 		token,
 		searchParams: Object.keys(searchParams).length ? searchParams : undefined
 	});
@@ -1406,9 +1438,10 @@ interface ProjectRunListResponse {
 export async function listProjectRuns(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	options: ListProjectRunsOptions = {}
 ): Promise<PaginatedResult<ProjectRunSummary>> {
+	const identifier = resolveProjectIdentifier(projectId);
 	const searchParams: Record<string, string> = {};
 	if (typeof options.limit === 'number') {
 		searchParams.limit = String(options.limit);
@@ -1416,7 +1449,7 @@ export async function listProjectRuns(
 	if (options.cursor) {
 		searchParams.cursor = options.cursor;
 	}
-	const response = await apiFetch<ProjectRunListResponse>(fetchFn, `/projects/${projectId}/runs`, {
+	const response = await apiFetch<ProjectRunListResponse>(fetchFn, `/projects/${identifier}/runs`, {
 		token,
 		searchParams: Object.keys(searchParams).length ? searchParams : undefined
 	});
@@ -1430,10 +1463,11 @@ export async function listProjectRuns(
 export async function createProjectRun(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	payload: ProjectRunCreatePayload
 ): Promise<ProjectRunSummary> {
-	return apiFetch(fetchFn, `/projects/${projectId}/runs`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}/runs`, {
 		method: 'POST',
 		token,
 		body: payload
@@ -1443,11 +1477,12 @@ export async function createProjectRun(
 export async function updateProjectRun(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	runId: string,
 	payload: ProjectRunUpdatePayload
 ): Promise<ProjectRunSummary> {
-	return apiFetch(fetchFn, `/projects/${projectId}/runs/${runId}`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}/runs/${runId}`, {
 		method: 'PATCH',
 		token,
 		body: payload
@@ -1457,11 +1492,12 @@ export async function updateProjectRun(
 export async function listRunArtifacts(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	runId: string,
 	path?: string
 ): Promise<ArtifactEntry[]> {
-	return apiFetch(fetchFn, `/projects/${projectId}/runs/${runId}/artifacts`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}/runs/${runId}/artifacts`, {
 		token,
 		searchParams: path ? { path } : undefined
 	});
@@ -1470,10 +1506,11 @@ export async function listRunArtifacts(
 export async function uploadRunArtifact(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	runId: string,
 	options: { path: string; file: File | Blob; filename?: string; overwrite?: boolean }
 ): Promise<ArtifactEntry> {
+	const identifier = resolveProjectIdentifier(projectId);
 	const formData = new FormData();
 	formData.set('path', options.path);
 	formData.set('overwrite', options.overwrite === false ? 'false' : 'true');
@@ -1481,7 +1518,7 @@ export async function uploadRunArtifact(
 		options.filename ?? (typeof File !== 'undefined' && options.file instanceof File ? options.file.name : 'artifact');
 	formData.set('file', options.file, filename);
 
-	return apiFetch(fetchFn, `/projects/${projectId}/runs/${runId}/artifacts`, {
+	return apiFetch(fetchFn, `/projects/${identifier}/runs/${runId}/artifacts`, {
 		method: 'POST',
 		token,
 		body: formData
@@ -1491,11 +1528,12 @@ export async function uploadRunArtifact(
 export async function deleteRunArtifact(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	runId: string,
 	path: string
 ): Promise<void> {
-	await apiFetch(fetchFn, `/projects/${projectId}/runs/${runId}/artifacts`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	await apiFetch(fetchFn, `/projects/${identifier}/runs/${runId}/artifacts`, {
 		method: 'DELETE',
 		token,
 		searchParams: { path }
@@ -1505,11 +1543,12 @@ export async function deleteRunArtifact(
 export async function downloadRunArtifact(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	runId: string,
 	path: string
 ): Promise<Response> {
-	const url = new URL(`/projects/${projectId}/runs/${runId}/artifacts/download`, API_BASE);
+	const identifier = resolveProjectIdentifier(projectId);
+	const url = new URL(`/projects/${identifier}/runs/${runId}/artifacts/download`, API_BASE);
 	url.searchParams.set('path', path);
 	const response = await fetchFn(url.toString(), {
 		method: 'GET',
@@ -1533,9 +1572,10 @@ export interface ListProjectArtifactsOptions {
 export async function listProjectArtifacts(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	options: ListProjectArtifactsOptions = {}
 ): Promise<ProjectArtifactListResponse> {
+	const identifier = resolveProjectIdentifier(projectId);
 	const searchParams: Record<string, string> = {};
 	if (options.runId) {
 		searchParams.run_id = options.runId;
@@ -1548,7 +1588,7 @@ export async function listProjectArtifacts(
 	}
 	const response = await apiFetch<{ items: ProjectArtifactRecord[]; next_cursor?: string | null; total_count: number }>(
 		fetchFn,
-		`/projects/${projectId}/artifacts`,
+		`/projects/${identifier}/artifacts`,
 		{
 			token,
 			searchParams: Object.keys(searchParams).length ? searchParams : undefined
@@ -1564,10 +1604,11 @@ export async function listProjectArtifacts(
 export async function getProjectArtifact(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	artifactId: string
 ): Promise<ProjectArtifactRecord> {
-	return apiFetch(fetchFn, `/projects/${projectId}/artifacts/${artifactId}`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}/artifacts/${artifactId}`, {
 		token
 	});
 }
@@ -1575,11 +1616,12 @@ export async function getProjectArtifact(
 export async function updateProjectArtifact(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	artifactId: string,
 	payload: ProjectArtifactUpdatePayload
 ): Promise<ProjectArtifactRecord> {
-	return apiFetch(fetchFn, `/projects/${projectId}/artifacts/${artifactId}`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}/artifacts/${artifactId}`, {
 		method: 'PATCH',
 		token,
 		body: payload
@@ -1589,11 +1631,12 @@ export async function updateProjectArtifact(
 export async function syncProjectRunArtifacts(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	runId: string,
 	options: { pruneMissing?: boolean } = {}
 ): Promise<ProjectArtifactSyncResponse> {
-	return apiFetch(fetchFn, `/projects/${projectId}/runs/${runId}/artifacts/sync`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}/runs/${runId}/artifacts/sync`, {
 		method: 'POST',
 		token,
 		body: {
@@ -1617,9 +1660,10 @@ interface ProjectLibraryListResponse {
 export async function listProjectLibrary(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	options: ListProjectLibraryOptions = {}
 ): Promise<PaginatedResult<GeneratedAssetSummary>> {
+	const identifier = resolveProjectIdentifier(projectId);
 	const searchParams: Record<string, string> = {};
 	if (options.includeVersions) {
 		searchParams.include_versions = 'true';
@@ -1630,7 +1674,7 @@ export async function listProjectLibrary(
 	if (options.cursor) {
 		searchParams.cursor = options.cursor;
 	}
-	const response = await apiFetch<ProjectLibraryListResponse>(fetchFn, `/projects/${projectId}/library`, {
+	const response = await apiFetch<ProjectLibraryListResponse>(fetchFn, `/projects/${identifier}/library`, {
 		token,
 		searchParams: Object.keys(searchParams).length ? searchParams : undefined
 	});
@@ -1644,11 +1688,12 @@ export async function listProjectLibrary(
 export async function getProjectLibraryAsset(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	assetId: string,
 	includeVersions = true
 ): Promise<GeneratedAssetSummary> {
-	return apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}/library/${assetId}`, {
 		token,
 		searchParams: includeVersions ? { include_versions: 'true' } : undefined
 	});
@@ -1657,10 +1702,11 @@ export async function getProjectLibraryAsset(
 export async function registerProjectLibraryAsset(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	payload: GeneratedAssetCreatePayload
 ): Promise<GeneratedAssetRegisterResponse> {
-	return apiFetch(fetchFn, `/projects/${projectId}/library`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}/library`, {
 		method: 'POST',
 		token,
 		body: payload
@@ -1670,11 +1716,12 @@ export async function registerProjectLibraryAsset(
 export async function addProjectLibraryAssetVersion(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	assetId: string,
 	payload: GeneratedAssetVersionCreatePayload
 ): Promise<GeneratedAssetRegisterResponse> {
-	return apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}/versions`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}/library/${assetId}/versions`, {
 		method: 'POST',
 		token,
 		body: payload
@@ -1684,11 +1731,12 @@ export async function addProjectLibraryAssetVersion(
 export async function updateProjectLibraryAsset(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	assetId: string,
 	payload: GeneratedAssetUpdatePayload
 ): Promise<GeneratedAssetSummary> {
-	return apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}/library/${assetId}`, {
 		method: 'PATCH',
 		token,
 		body: payload
@@ -1698,12 +1746,13 @@ export async function updateProjectLibraryAsset(
 export async function deleteProjectLibraryAssetVersion(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	assetId: string,
 	versionId: string,
 	removeFiles = true
 ): Promise<void> {
-	await apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}/versions/${versionId}`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	await apiFetch(fetchFn, `/projects/${identifier}/library/${assetId}/versions/${versionId}`, {
 		method: 'DELETE',
 		token,
 		searchParams: removeFiles ? { remove_files: 'true' } : undefined
@@ -1713,11 +1762,12 @@ export async function deleteProjectLibraryAssetVersion(
 export async function deleteProjectLibraryAsset(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	assetId: string,
 	removeFiles = false
 ): Promise<void> {
-	await apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	await apiFetch(fetchFn, `/projects/${identifier}/library/${assetId}`, {
 		method: 'DELETE',
 		token,
 		searchParams: removeFiles ? { remove_files: 'true' } : undefined
@@ -1727,11 +1777,12 @@ export async function deleteProjectLibraryAsset(
 export async function downloadProjectLibraryAssetVersion(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	assetId: string,
 	versionId: string
 ): Promise<Response> {
-	const url = new URL(`/projects/${projectId}/library/${assetId}/versions/${versionId}/download`, API_BASE);
+	const identifier = resolveProjectIdentifier(projectId);
+	const url = new URL(`/projects/${identifier}/library/${assetId}/versions/${versionId}/download`, API_BASE);
 	const response = await fetchFn(url.toString(), {
 		method: 'GET',
 		headers: {
@@ -1748,17 +1799,18 @@ export async function downloadProjectLibraryAssetVersion(
 export async function diffProjectLibraryAssetVersions(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	assetId: string,
 	versionId: string,
 	againstVersionId: string,
 	options?: { ignoreWhitespace?: boolean }
 ): Promise<GeneratedAssetDiffResponse> {
+	const identifier = resolveProjectIdentifier(projectId);
 	const searchParams: Record<string, string> = { against: againstVersionId };
 	if (options?.ignoreWhitespace) {
 		searchParams.ignore_whitespace = 'true';
 	}
-	return apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}/versions/${versionId}/diff`, {
+	return apiFetch(fetchFn, `/projects/${identifier}/library/${assetId}/versions/${versionId}/diff`, {
 		token,
 		searchParams
 	});
@@ -1767,11 +1819,12 @@ export async function diffProjectLibraryAssetVersions(
 export async function listProjectLibraryVersionFiles(
 	fetchFn: typeof fetch,
 	token: string,
-	projectId: string,
+	projectId: string | null,
 	assetId: string,
 	versionId: string
 ): Promise<GeneratedAssetVersionFile[]> {
-	return apiFetch(fetchFn, `/projects/${projectId}/library/${assetId}/versions/${versionId}/files`, {
+	const identifier = resolveProjectIdentifier(projectId);
+	return apiFetch(fetchFn, `/projects/${identifier}/library/${assetId}/versions/${versionId}/files`, {
 		token
 	});
 }
