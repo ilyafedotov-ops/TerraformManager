@@ -13,13 +13,13 @@ const sections = [
 				title: 'Dashboard',
 				icon: 'grid',
 		projectScoped: true,
-		projectPath: '/projects/{projectSlug}/dashboard'
+		projectPath: '/projects?project={projectSlug}&tab=overview'
 	},
 			{
 				title: 'Reports',
 				icon: 'file',
 		projectScoped: true,
-		projectPath: '/projects/{projectSlug}/reports'
+		projectPath: '/projects?project={projectSlug}&tab=reports'
 			},
 			{ title: 'Knowledge', href: '/knowledge', icon: 'book' }
 		]
@@ -165,7 +165,7 @@ describe('Command palette interactions', () => {
 		await fireEvent.keyDown(input, { key: 'Enter' });
 
 	await waitFor(() =>
-		expect(selectHandler).toHaveBeenCalledWith(`/projects/${demoProject.slug}/reports`)
+		expect(selectHandler).toHaveBeenCalledWith(`/projects?project=${demoProject.slug}&tab=reports`)
 	);
 	});
 });
