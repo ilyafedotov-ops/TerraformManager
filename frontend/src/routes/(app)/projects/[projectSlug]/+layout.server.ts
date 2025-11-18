@@ -20,9 +20,11 @@ export const load = async ({ parent, params, fetch }) => {
 		throw redirect(302, '/projects');
 	}
 	const project = await response.json();
+	const canonicalSlug = project?.slug ?? projectSlug ?? project?.id ?? null;
 	return {
 		project,
 		projectId: project?.id ?? null,
-		projectSlug
+		projectSlug: canonicalSlug,
+		projectSlugParam: projectSlug
 	};
 };

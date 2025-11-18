@@ -97,12 +97,12 @@ const displayedFindings = findings.slice(0, 50);
 	};
 </script>
 
-<section class="space-y-6">
+<section class="space-y-6 overflow-x-hidden">
 	<header class="space-y-2">
 		<a class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 hover:text-sky-500" href={projectReportsHref}>
 			← Back to reports
 		</a>
-		<h2 class="text-3xl font-semibold text-slate-700">Report {params.id}</h2>
+		<h2 class="break-words text-2xl font-semibold text-slate-700 sm:text-3xl">Report {params.id}</h2>
 		<p class="max-w-2xl text-sm text-slate-500">
 			Download artifacts or inspect severity trends from this run. The embedded findings table will land in a follow-up
 			iteration utilising the existing FastAPI viewer endpoints.
@@ -154,16 +154,16 @@ const displayedFindings = findings.slice(0, 50);
 				highlightReportId={params.id}
 			/>
 
-			<div class="grid gap-4 md:grid-cols-3">
+			<div class="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
 				<div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
 					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Issues found</p>
-					<p class="mt-3 text-4xl font-semibold text-slate-700">{issuesFound}</p>
+					<p class="mt-3 text-3xl font-semibold text-slate-700 sm:text-4xl">{issuesFound}</p>
 				</div>
 				<div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
 					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Findings</p>
-					<p class="mt-3 text-4xl font-semibold text-slate-700">{findingCount}</p>
+					<p class="mt-3 text-3xl font-semibold text-slate-700 sm:text-4xl">{findingCount}</p>
 				</div>
-				<div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+				<div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2 md:col-span-1">
 					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Top severity</p>
 					<p class="mt-3 text-2xl font-semibold text-slate-700">
 						{severityEntries.length ? severityEntries[0][0] : '—'}
@@ -192,7 +192,7 @@ const displayedFindings = findings.slice(0, 50);
 			{#if hasCost}
 				<section class="space-y-4">
 					<h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Cost insights</h3>
-					<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+					<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 						<div class="rounded-2xl border border-slate-200 bg-sky-50 p-4 text-slate-700">
 							<p class="text-xs font-semibold uppercase tracking-[0.3em] text-sky-500">Total monthly</p>
 							<p class="mt-2 text-2xl font-semibold">{formatCurrency(totalMonthlyCost)}</p>
@@ -213,26 +213,28 @@ const displayedFindings = findings.slice(0, 50);
 
 					{#if costProjects.length}
 						<div class="overflow-x-auto rounded-2xl border border-slate-200">
-							<table class="min-w-full divide-y divide-slate-100 text-sm text-slate-600">
-								<thead class="bg-slate-50 text-xs uppercase tracking-[0.25em] text-slate-400">
-									<tr>
-										<th class="px-4 py-3 text-left">Project</th>
-										<th class="px-4 py-3 text-left">Path</th>
-										<th class="px-4 py-3 text-right">Monthly</th>
-										<th class="px-4 py-3 text-right">Δ Monthly</th>
-									</tr>
-								</thead>
-								<tbody class="divide-y divide-slate-100">
-									{#each costProjects as project}
-										<tr class="bg-white">
-											<td class="px-4 py-3">{project?.name ?? '—'}</td>
-											<td class="px-4 py-3 text-xs text-slate-500">{project?.path ?? '—'}</td>
-											<td class="px-4 py-3 text-right">{formatCurrency((project?.monthly_cost as number | null) ?? null)}</td>
-											<td class="px-4 py-3 text-right">{formatCurrency((project?.diff_monthly_cost as number | null) ?? null)}</td>
+							<div class="min-w-max">
+								<table class="w-full divide-y divide-slate-100 text-sm text-slate-600">
+									<thead class="bg-slate-50 text-xs uppercase tracking-[0.25em] text-slate-400">
+										<tr>
+											<th class="whitespace-nowrap px-4 py-3 text-left">Project</th>
+											<th class="whitespace-nowrap px-4 py-3 text-left">Path</th>
+											<th class="whitespace-nowrap px-4 py-3 text-right">Monthly</th>
+											<th class="whitespace-nowrap px-4 py-3 text-right">Δ Monthly</th>
 										</tr>
-									{/each}
-								</tbody>
-							</table>
+									</thead>
+									<tbody class="divide-y divide-slate-100">
+										{#each costProjects as project}
+											<tr class="bg-white">
+												<td class="whitespace-nowrap px-4 py-3">{project?.name ?? '—'}</td>
+												<td class="max-w-xs truncate px-4 py-3 text-xs text-slate-500" title={project?.path ?? ''}>{project?.path ?? '—'}</td>
+												<td class="whitespace-nowrap px-4 py-3 text-right">{formatCurrency((project?.monthly_cost as number | null) ?? null)}</td>
+												<td class="whitespace-nowrap px-4 py-3 text-right">{formatCurrency((project?.diff_monthly_cost as number | null) ?? null)}</td>
+											</tr>
+										{/each}
+									</tbody>
+								</table>
+							</div>
 						</div>
 					{/if}
 
@@ -261,7 +263,7 @@ const displayedFindings = findings.slice(0, 50);
 						</div>
 
 						{#if driftCountEntries.length}
-							<ul class="grid gap-2 md:grid-cols-2 lg:grid-cols-4">
+							<ul class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
 								{#each driftCountEntries as [action, value]}
 									<li class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
 										<span class="block text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">{action}</span>
@@ -315,37 +317,39 @@ const displayedFindings = findings.slice(0, 50);
 						Findings ({findings.length})
 					</h3>
 					<div class="overflow-x-auto rounded-2xl border border-slate-200 bg-slate-50">
-						<table class="min-w-full divide-y divide-slate-200 text-sm">
-							<thead class="bg-slate-100 text-xs uppercase tracking-[0.3em] text-slate-400">
-								<tr>
-									<th class="px-4 py-3 text-left">Severity</th>
-									<th class="px-4 py-3 text-left">Rule</th>
-									<th class="px-4 py-3 text-left">Title</th>
-									<th class="px-4 py-3 text-left">Location</th>
-								</tr>
-							</thead>
-							<tbody class="divide-y divide-slate-100 text-slate-600">
-								{#each displayedFindings as finding, index (finding.id ?? finding.rule ?? index)}
-									<tr class="hover:bg-sky-50">
-										<td class="px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-											{finding.severity ?? 'unknown'}
-										</td>
-										<td class="px-4 py-3 font-mono text-xs text-slate-500">
-											{finding.rule ?? '—'}
-										</td>
-										<td class="px-4 py-3 text-sm text-slate-600">
-											{finding.title ?? 'Untitled finding'}
-										</td>
-										<td class="px-4 py-3 text-xs text-slate-500">
-											{finding.file ?? '—'}
-											{#if finding.line}
-												: {finding.line}
-											{/if}
-										</td>
+						<div class="min-w-max">
+							<table class="w-full divide-y divide-slate-200 text-sm">
+								<thead class="bg-slate-100 text-xs uppercase tracking-[0.3em] text-slate-400">
+									<tr>
+										<th class="whitespace-nowrap px-4 py-3 text-left">Severity</th>
+										<th class="whitespace-nowrap px-4 py-3 text-left">Rule</th>
+										<th class="px-4 py-3 text-left">Title</th>
+										<th class="whitespace-nowrap px-4 py-3 text-left">Location</th>
 									</tr>
-								{/each}
-							</tbody>
-						</table>
+								</thead>
+								<tbody class="divide-y divide-slate-100 text-slate-600">
+									{#each displayedFindings as finding, index (finding.id ?? finding.rule ?? index)}
+										<tr class="hover:bg-sky-50">
+											<td class="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+												{finding.severity ?? 'unknown'}
+											</td>
+											<td class="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-500">
+												{finding.rule ?? '—'}
+											</td>
+											<td class="max-w-md px-4 py-3 text-sm text-slate-600">
+												{finding.title ?? 'Untitled finding'}
+											</td>
+											<td class="max-w-xs truncate px-4 py-3 text-xs text-slate-500" title="{finding.file ?? '—'}{finding.line ? ` : ${finding.line}` : ''}">
+												{finding.file ?? '—'}
+												{#if finding.line}
+													: {finding.line}
+												{/if}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
 					</div>
 					{#if findings.length > displayedFindings.length}
 						<p class="text-xs text-slate-400">
