@@ -388,6 +388,29 @@ def _ensure_report_review_columns(db: Session) -> None:
     )
 
 
+def _ensure_generated_asset_version_columns(db: Session) -> None:
+    """Ensure generated asset versions table has the JSON columns required by the ORM."""
+    existing_columns = {
+        row[1]
+        for row in db.execute(text("PRAGMA table_info(generated_asset_versions)"))
+    }
+    if "metadata" not in existing_columns:
+        db.execute(
+            text("ALTER TABLE generated_asset_versions ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'"),
+        )
+        db.execute(
+            text("UPDATE generated_asset_versions SET metadata = '{}' WHERE metadata IS NULL OR metadata = ''"),
+        )
+    if "validation_summary" not in existing_columns:
+        db.execute(
+            text("ALTER TABLE generated_asset_versions ADD COLUMN validation_summary TEXT"),
+        )
+    if "payload_fingerprint" not in existing_columns:
+        db.execute(
+            text("ALTER TABLE generated_asset_versions ADD COLUMN payload_fingerprint TEXT"),
+        )
+
+
 def _apply_report_review_metadata(report: Report, metadata: Optional[Dict[str, Any]]) -> None:
     if not metadata:
         return
@@ -2334,6 +2357,7 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
     init_models(db_path)
     with session_scope(db_path) as db:
         _ensure_report_review_columns(db)
+        _ensure_generated_asset_version_columns(db)
 
 
 def upsert_config(

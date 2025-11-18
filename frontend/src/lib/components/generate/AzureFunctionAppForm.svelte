@@ -1,6 +1,4 @@
 <script lang="ts">
-    import { enhance } from '$app/forms';
-    import type { SubmitFunction } from '@sveltejs/kit';
     import type { GeneratorResult } from '$lib/api/client';
     import type { GeneratorFormStyles } from './types';
 
@@ -31,14 +29,12 @@
     export let onSubmit: (event: SubmitEvent) => void;
     export let onCopy: () => void;
     export let onDownload: () => void;
-    export let enhanceAction: SubmitFunction | null = null;
 </script>
 
 <form
     method="POST"
     class="grid gap-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]"
     on:submit={onSubmit}
-    use:enhance={enhanceAction ?? undefined}
 >
     <div class="space-y-6">
         <div class="grid gap-4 md:grid-cols-2">

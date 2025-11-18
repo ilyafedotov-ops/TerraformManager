@@ -57,9 +57,11 @@ from backend.storage import (
     get_project_overview,
 )
 from backend.terraform_validation import TerraformSourceFile, validate_terraform_sources
+from backend.utils.logging import get_logger, log_context
 
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+LOGGER = get_logger(__name__)
 
 
 def _value_error_to_http(exc: ValueError) -> HTTPException:
@@ -79,6 +81,15 @@ def _merge_tags(*tag_lists: Optional[List[str]]) -> List[str]:
             merged.append(cleaned)
             seen.add(cleaned)
     return merged
+
+
+def _get_project_or_404(identifier: str, session: Session) -> Dict[str, Any]:
+    project = get_project(project_id=identifier, session=session)
+    if not project and identifier:
+        project = get_project(slug=identifier, session=session)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    return project
 
 
 def _extract_environment(payload: Dict[str, Any]) -> Optional[str]:
@@ -566,9 +577,7 @@ def project_detail(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    project = _get_project_or_404(project_id, session)
     return project
 
 
@@ -579,9 +588,10 @@ def project_update(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
+    project = _get_project_or_404(project_id, session)
     try:
         updated = update_project(
-            project_id,
+            project["id"],
             name=payload.name,
             description=payload.description,
             metadata=payload.metadata,
@@ -605,7 +615,8 @@ def project_delete(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Response:
-    deleted = delete_project(project_id, remove_files=remove_files, session=session)
+    project = _get_project_or_404(project_id, session)
+    deleted = delete_project(project["id"], remove_files=remove_files, session=session)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -618,8 +629,10 @@ def project_configs_index(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> List[Dict[str, Any]]:
+    project = _get_project_or_404(project_id, session)
+    resolved_project_id = project["id"]
     try:
-        records = list_project_configs(project_id=project_id, include_payload=include_payload, session=session)
+        records = list_project_configs(project_id=resolved_project_id, include_payload=include_payload, session=session)
     except ValueError as exc:
         raise _value_error_to_http(exc) from exc
     return [ProjectConfigResponse.model_validate(record) for record in records]
@@ -632,6 +645,7 @@ def project_config_create(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
+    project = _get_project_or_404(project_id, session)
     if not (payload.config_name and payload.config_name.strip()) and not (payload.payload and payload.payload.strip()):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -639,7 +653,7 @@ def project_config_create(
         )
     try:
         record = create_project_config(
-            project_id=project_id,
+            project_id=project["id"],
             name=payload.name,
             slug=payload.slug,
             description=payload.description,
@@ -664,7 +678,8 @@ def project_config_detail(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
-    record = get_project_config(config_id, project_id=project_id, include_payload=include_payload, session=session)
+    project = _get_project_or_404(project_id, session)
+    record = get_project_config(config_id, project_id=project["id"], include_payload=include_payload, session=session)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="config not found")
     return ProjectConfigResponse.model_validate(record)
@@ -678,11 +693,12 @@ def project_config_update(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
+    project = _get_project_or_404(project_id, session)
     data = payload.model_dump(exclude_unset=True)
     try:
         updated = update_project_config(
             config_id,
-            project_id=project_id,
+            project_id=project["id"],
             **data,
             session=session,
         )
@@ -704,7 +720,8 @@ def project_config_delete(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Response:
-    deleted = delete_project_config(config_id, project_id=project_id, session=session)
+    project = _get_project_or_404(project_id, session)
+    deleted = delete_project_config(config_id, project_id=project["id"], session=session)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="config not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -726,9 +743,10 @@ def project_runs_index(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
+    project = _get_project_or_404(project_id, session)
     try:
         runs = list_project_runs(
-            project_id=project_id,
+            project_id=project["id"],
             limit=limit,
             cursor=cursor,
             session=session,
@@ -750,9 +768,7 @@ def project_run_create(
     current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    project = _get_project_or_404(project_id, session)
     label = payload.label.strip()
     kind = payload.kind.strip()
     if not label:
@@ -762,7 +778,7 @@ def project_run_create(
 
     try:
         return create_project_run(
-            project_id=project_id,
+            project_id=project["id"],
             label=label,
             kind=kind,
             parameters=payload.parameters,
@@ -784,10 +800,9 @@ def project_run_detail(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
-    run = get_project_run(run_id=run_id, project_id=project_id, session=session)
+    project = _get_project_or_404(project_id, session)
+    resolved_project_id = project["id"]
+    run = get_project_run(run_id=run_id, project_id=resolved_project_id, session=session)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
     return run
@@ -801,16 +816,14 @@ def project_run_update(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    project = _get_project_or_404(project_id, session)
     status_value: Optional[str] = payload.status.strip() if payload.status else None
     if payload.status is not None and not status_value:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="status cannot be empty")
 
     updated = update_project_run(
         run_id=run_id,
-        project_id=project_id,
+        project_id=project["id"],
         status=status_value,
         summary=payload.summary,
         started_at=payload.started_at,
@@ -831,9 +844,11 @@ def project_run_artifacts_list(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> List[Dict[str, Any]]:
+    project = _get_project_or_404(project_id, session)
+    resolved_project_id = project["id"]
     path_value = path or None
     try:
-        return list_run_artifacts(project_id=project_id, run_id=run_id, path=path_value, session=session)
+        return list_run_artifacts(project_id=resolved_project_id, run_id=run_id, path=path_value, session=session)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project or run not found")
     except FileNotFoundError:
@@ -852,10 +867,12 @@ async def project_run_artifact_upload(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
+    project = _get_project_or_404(project_id, session)
+    resolved_project_id = project["id"]
     data = await file.read()
     try:
         return save_run_artifact(
-            project_id=project_id,
+            project_id=resolved_project_id,
             run_id=run_id,
             path=path,
             data=data,
@@ -883,8 +900,10 @@ def project_run_artifact_download(
 ) -> FileResponse:
     if not path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="path is required")
+    project = _get_project_or_404(project_id, session)
+    resolved_project_id = project["id"]
     try:
-        artifact_path = get_run_artifact_path(project_id=project_id, run_id=run_id, path=path, session=session)
+        artifact_path = get_run_artifact_path(project_id=resolved_project_id, run_id=run_id, path=path, session=session)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project or run not found")
     except FileNotFoundError:
@@ -910,8 +929,10 @@ def project_run_artifact_delete(
 ) -> Response:
     if not path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="path is required")
+    project = _get_project_or_404(project_id, session)
+    resolved_project_id = project["id"]
     try:
-        deleted = delete_run_artifact(project_id=project_id, run_id=run_id, path=path, session=session)
+        deleted = delete_run_artifact(project_id=resolved_project_id, run_id=run_id, path=path, session=session)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project or run not found")
     except ArtifactPathError as exc:
@@ -934,9 +955,11 @@ def project_run_artifact_sync(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
+    project = _get_project_or_404(project_id, session)
+    resolved_project_id = project["id"]
     try:
         result = sync_project_run_artifacts(
-            project_id=project_id,
+            project_id=resolved_project_id,
             run_id=run_id,
             prune_missing=payload.prune_missing,
             session=session,
@@ -963,9 +986,11 @@ def project_artifacts_index(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
+    project = _get_project_or_404(project_id, session)
+    resolved_project_id = project["id"]
     try:
         payload = list_project_artifacts(
-            project_id=project_id,
+            project_id=resolved_project_id,
             run_id=run_id,
             limit=limit,
             cursor=cursor,
@@ -984,7 +1009,8 @@ def project_artifact_detail(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
-    record = get_project_artifact(artifact_id, project_id=project_id, session=session)
+    project = _get_project_or_404(project_id, session)
+    record = get_project_artifact(artifact_id, project_id=project["id"], session=session)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="artifact not found")
     return ProjectArtifactResponse.model_validate(record)
@@ -998,10 +1024,11 @@ def project_artifact_update(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
+    project = _get_project_or_404(project_id, session)
     data = payload.model_dump(exclude_unset=True)
     updated = update_project_artifact(
         artifact_id,
-        project_id=project_id,
+        project_id=project["id"],
         **data,
         session=session,
     )
@@ -1021,9 +1048,8 @@ def project_generate_blueprint(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> ProjectBlueprintRunResponse:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    project = _get_project_or_404(project_id, session)
+    resolved_project_id = project["id"]
 
     options = payload.options
     blueprint = payload.blueprint
@@ -1032,7 +1058,7 @@ def project_generate_blueprint(
 
     try:
         run_record = create_project_run(
-            project_id=project_id,
+            project_id=resolved_project_id,
             label=run_label,
             kind="generator/blueprint",
             status="running",
@@ -1048,7 +1074,7 @@ def project_generate_blueprint(
     try:
         rendered = render_blueprint_bundle(blueprint)
     except Exception as exc:  # noqa: BLE001
-        _mark_run_failure(run_record["id"], project_id, message=str(exc), started_at=started_at, session=session)
+        _mark_run_failure(run_record["id"], resolved_project_id, message=str(exc), started_at=started_at, session=session)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     asset_name = _build_blueprint_asset_name(blueprint.name, options=options, generated_at=generated_at)
@@ -1085,7 +1111,7 @@ def project_generate_blueprint(
     if validation_status == "failed" and not options.force_save:
         _mark_run_failure(
             run_record["id"],
-            project_id,
+            resolved_project_id,
             message="Terraform validation failed",
             started_at=started_at,
             session=session,
@@ -1100,7 +1126,7 @@ def project_generate_blueprint(
 
     try:
         asset_result = register_generated_asset(
-            project_id=project_id,
+            project_id=resolved_project_id,
             name=asset_name,
             asset_type="blueprint_bundle",
             description=options.description,
@@ -1118,7 +1144,7 @@ def project_generate_blueprint(
             session=session,
         )
     except (ValueError, FileExistsError) as exc:
-        _mark_run_failure(run_record["id"], project_id, message=str(exc), started_at=started_at, session=session)
+        _mark_run_failure(run_record["id"], resolved_project_id, message=str(exc), started_at=started_at, session=session)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     finished_at = datetime.now(timezone.utc)
@@ -1132,7 +1158,7 @@ def project_generate_blueprint(
     }
     updated_run = update_project_run(
         run_record["id"],
-        project_id=project_id,
+        project_id=resolved_project_id,
         status="completed",
         summary=summary,
         started_at=started_at,
@@ -1169,9 +1195,8 @@ def project_generator_run(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> ProjectGeneratorRunResponse:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    project = _get_project_or_404(project_id, session)
+    resolved_project_id = project["id"]
 
     try:
         definition = get_generator_definition(slug)
@@ -1188,120 +1213,161 @@ def project_generator_run(
     payload_dump = typed_payload.model_dump(exclude_none=True)
     run_label = options.run_label or f"{definition.title} ({generated_at.strftime('%Y-%m-%d %H:%M:%S')})"
 
-    try:
-        run_record = create_project_run(
-            project_id=project_id,
-            label=run_label,
-            kind=f"generator/{definition.slug}",
-            status="running",
-            parameters={
+    context_values = {
+        "project_id": resolved_project_id,
+        "project_slug": project.get("slug"),
+        "generator_slug": definition.slug,
+    }
+    scoped_context = {key: value for key, value in context_values.items() if value}
+
+    with log_context(**scoped_context):
+        LOGGER.info(
+            "Starting project generator run",
+            extra={
+                "run_label": run_label,
+                "force_save": options.force_save,
+                "has_tags": bool(options.tags),
+            },
+        )
+
+        try:
+            run_record = create_project_run(
+                project_id=resolved_project_id,
+                label=run_label,
+                kind=f"generator/{definition.slug}",
+                status="running",
+                parameters={
+                    "generator_slug": definition.slug,
+                    "payload": payload_dump,
+                },
+                session=session,
+            )
+        except ValueError as exc:
+            LOGGER.warning("Failed to create project run record", extra={"error": str(exc)})
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+        started_at = generated_at
+        with log_context(run_id=run_record["id"]):
+            try:
+                rendered = definition.render(typed_payload)
+            except ValueError as exc:
+                LOGGER.warning("Generator render failed", extra={"error": str(exc)})
+                _mark_run_failure(run_record["id"], resolved_project_id, message=str(exc), started_at=started_at, session=session)
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("Unexpected error while rendering generator output")
+                _mark_run_failure(run_record["id"], project_id, message=str(exc), started_at=started_at, session=session)
+                raise
+
+            asset_name = _build_generator_asset_name(definition, payload_dump, options=options, generated_at=generated_at)
+            tags = _merge_tags(definition.tags, options.tags, ["generator", f"generator:{definition.slug}"])
+            metadata = _build_generator_metadata(
+                definition,
+                payload_dump,
+                generated_at=generated_at,
+                options=options,
+                extra={"output_filename": rendered["filename"]},
+            )
+            validation_files = [
+                TerraformSourceFile(path=rendered["filename"], content=rendered["content"].encode("utf-8"))
+            ]
+            validation_summary = validate_terraform_sources(validation_files)
+            metadata.setdefault("validation", validation_summary)
+            payload_fingerprint = _fingerprint_payload(payload_dump)
+            version_metadata = {
                 "generator_slug": definition.slug,
-                "payload": payload_dump,
-            },
-            session=session,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+                "environment": _extract_environment(payload_dump),
+                "output_filename": rendered["filename"],
+                "force_save": options.force_save,
+            }
 
-    started_at = generated_at
-    try:
-        rendered = definition.render(typed_payload)
-    except ValueError as exc:
-        _mark_run_failure(run_record["id"], project_id, message=str(exc), started_at=started_at, session=session)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        _mark_run_failure(run_record["id"], project_id, message=str(exc), started_at=started_at, session=session)
-        raise
+            validation_status = (validation_summary.get("status") or "").lower() if isinstance(validation_summary, dict) else ""
+            LOGGER.info(
+                "Terraform validation completed",
+                extra={
+                    "validation_status": validation_status or "unknown",
+                    "force_save_override": options.force_save,
+                },
+            )
+            if validation_status == "failed" and not options.force_save:
+                LOGGER.warning("Terraform validation failed", extra={"validation_summary": validation_summary})
+                _mark_run_failure(
+                    run_record["id"],
+                    resolved_project_id,
+                    message="Terraform validation failed",
+                    started_at=started_at,
+                    session=session,
+                )
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error": "validation_failed",
+                        "validation_summary": validation_summary,
+                    },
+                )
 
-    asset_name = _build_generator_asset_name(definition, payload_dump, options=options, generated_at=generated_at)
-    tags = _merge_tags(definition.tags, options.tags, ["generator", f"generator:{definition.slug}"])
-    metadata = _build_generator_metadata(
-        definition,
-        payload_dump,
-        generated_at=generated_at,
-        options=options,
-        extra={"output_filename": rendered["filename"]},
-    )
-    validation_files = [
-        TerraformSourceFile(path=rendered["filename"], content=rendered["content"].encode("utf-8"))
-    ]
-    validation_summary = validate_terraform_sources(validation_files)
-    metadata.setdefault("validation", validation_summary)
-    payload_fingerprint = _fingerprint_payload(payload_dump)
-    version_metadata = {
-        "generator_slug": definition.slug,
-        "environment": _extract_environment(payload_dump),
-        "output_filename": rendered["filename"],
-        "force_save": options.force_save,
-    }
+            try:
+                asset_result = register_generated_asset(
+                    project_id=resolved_project_id,
+                    name=asset_name,
+                    asset_type="terraform_config",
+                    description=options.description,
+                    tags=tags,
+                    metadata=metadata,
+                    run_id=run_record["id"],
+                    storage_filename=rendered["filename"],
+                    data=rendered["content"].encode("utf-8"),
+                    media_type="text/plain",
+                    notes=options.notes,
+                    version_metadata=version_metadata,
+                    payload_fingerprint=payload_fingerprint,
+                    validation_summary=validation_summary,
+                    session=session,
+                )
+            except (ValueError, FileExistsError) as exc:
+                LOGGER.warning("Failed to register generated asset", extra={"error": str(exc)})
+                _mark_run_failure(run_record["id"], resolved_project_id, message=str(exc), started_at=started_at, session=session)
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    validation_status = (validation_summary.get("status") or "").lower() if isinstance(validation_summary, dict) else ""
-    if validation_status == "failed" and not options.force_save:
-        _mark_run_failure(
-            run_record["id"],
-            project_id,
-            message="Terraform validation failed",
-            started_at=started_at,
-            session=session,
-        )
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": "validation_failed",
-                "validation_summary": validation_summary,
-            },
-        )
+            finished_at = datetime.now(timezone.utc)
+            summary = {
+                "asset_id": asset_result["asset"]["id"],
+                "version_id": asset_result["version"]["id"],
+                "filename": rendered["filename"],
+                "generator_slug": definition.slug,
+                "validation": validation_summary,
+            }
+            updated_run = update_project_run(
+                run_record["id"],
+                project_id=resolved_project_id,
+                status="completed",
+                summary=summary,
+                started_at=started_at,
+                finished_at=finished_at,
+                session=session,
+            ) or run_record
 
-    try:
-        asset_result = register_generated_asset(
-            project_id=project_id,
-            name=asset_name,
-            asset_type="terraform_config",
-            description=options.description,
-            tags=tags,
-            metadata=metadata,
-            run_id=run_record["id"],
-            storage_filename=rendered["filename"],
-            data=rendered["content"].encode("utf-8"),
-            media_type="text/plain",
-            notes=options.notes,
-            version_metadata=version_metadata,
-            payload_fingerprint=payload_fingerprint,
-            validation_summary=validation_summary,
-            session=session,
-        )
-    except (ValueError, FileExistsError) as exc:
-        _mark_run_failure(run_record["id"], project_id, message=str(exc), started_at=started_at, session=session)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            asset_payload = GeneratedAssetSummary.model_validate(asset_result["asset"])
+            version_payload = GeneratedAssetVersionSummary.model_validate(asset_result["version"])
+            run_payload = ProjectRunResponse.model_validate(updated_run)
+            output_payload = GeneratorResponse(**rendered)
 
-    finished_at = datetime.now(timezone.utc)
-    summary = {
-        "asset_id": asset_result["asset"]["id"],
-        "version_id": asset_result["version"]["id"],
-        "filename": rendered["filename"],
-        "generator_slug": definition.slug,
-        "validation": validation_summary,
-    }
-    updated_run = update_project_run(
-        run_record["id"],
-        project_id=project_id,
-        status="completed",
-        summary=summary,
-        started_at=started_at,
-        finished_at=finished_at,
-        session=session,
-    ) or run_record
+            with log_context(asset_id=summary["asset_id"], asset_version_id=summary["version_id"]):
+                LOGGER.info(
+                    "Generator run completed",
+                    extra={
+                        "asset_name": asset_name,
+                        "validation_status": validation_status or "skipped",
+                        "run_status": updated_run.get("status"),
+                    },
+                )
 
-    asset_payload = GeneratedAssetSummary.model_validate(asset_result["asset"])
-    version_payload = GeneratedAssetVersionSummary.model_validate(asset_result["version"])
-    run_payload = ProjectRunResponse.model_validate(updated_run)
-    output_payload = GeneratorResponse(**rendered)
-    return ProjectGeneratorRunResponse(
-        output=output_payload,
-        asset=asset_payload,
-        version=version_payload,
-        run=run_payload,
-    )
+            return ProjectGeneratorRunResponse(
+                output=output_payload,
+                asset=asset_payload,
+                version=version_payload,
+                run=run_payload,
+            )
 
 
 @router.get("/{project_id}/library", response_model=ProjectLibraryListResponse)
@@ -1321,12 +1387,11 @@ def project_library_index(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    project = _get_project_or_404(project_id, session)
+    resolved_project_id = project["id"]
     try:
         assets = list_generated_assets(
-            project_id=project_id,
+            project_id=resolved_project_id,
             include_versions=include_versions,
             limit=limit,
             cursor=cursor,
@@ -1346,12 +1411,10 @@ def project_library_detail(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> GeneratedAssetSummary:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    project = _get_project_or_404(project_id, session)
     asset = get_generated_asset(
         asset_id,
-        project_id=project_id,
+        project_id=project["id"],
         include_versions=include_versions,
         session=session,
     )
@@ -1376,9 +1439,10 @@ def project_overview(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
+    project = _get_project_or_404(project_id, session)
     try:
         overview = get_project_overview(
-            project_id=project_id,
+            project_id=project["id"],
             recent_assets=recent_assets,
             include_metadata=include_metadata,
             session=session,
@@ -1417,9 +1481,8 @@ def project_library_register(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> GeneratedAssetRegisterResponse:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    project = _get_project_or_404(project_id, session)
+    resolved_project_id = project["id"]
 
     data_bytes: Optional[bytes] = None
     if payload.content_base64:
@@ -1437,7 +1500,7 @@ def project_library_register(
             )
         try:
             artifact_source = get_run_artifact_path(
-                project_id=project_id,
+                project_id=resolved_project_id,
                 run_id=payload.run_id,
                 path=payload.artifact_path,
                 session=session,
@@ -1457,7 +1520,7 @@ def project_library_register(
 
     try:
         result = register_generated_asset(
-            project_id=project_id,
+            project_id=resolved_project_id,
             name=payload.name,
             asset_type=payload.asset_type,
             description=payload.description,
@@ -1492,9 +1555,8 @@ def project_library_add_version(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> GeneratedAssetRegisterResponse:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    project = _get_project_or_404(project_id, session)
+    resolved_project_id = project["id"]
 
     data_bytes: Optional[bytes] = None
     if payload.content_base64:
@@ -1512,7 +1574,7 @@ def project_library_add_version(
             )
         try:
             artifact_source = get_run_artifact_path(
-                project_id=project_id,
+                project_id=resolved_project_id,
                 run_id=payload.run_id,
                 path=payload.artifact_path,
                 session=session,
@@ -1533,7 +1595,7 @@ def project_library_add_version(
     try:
         result = add_generated_asset_version(
             asset_id,
-            project_id=project_id,
+            project_id=resolved_project_id,
             run_id=payload.run_id,
             report_id=payload.report_id,
             storage_filename=payload.storage_filename,
@@ -1560,14 +1622,11 @@ def project_library_update(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> GeneratedAssetSummary:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
-
+    project = _get_project_or_404(project_id, session)
     try:
         updated = update_generated_asset(
             asset_id,
-            project_id=project_id,
+            project_id=project["id"],
             name=payload.name,
             asset_type=payload.asset_type,
             description=payload.description,
@@ -1596,14 +1655,11 @@ def project_library_delete_version(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Response:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
-
+    project = _get_project_or_404(project_id, session)
     deleted = delete_generated_asset_version(
         asset_id,
         version_id,
-        project_id=project_id,
+        project_id=project["id"],
         remove_files=remove_files,
         session=session,
     )
@@ -1620,14 +1676,12 @@ def project_library_version_download(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> FileResponse:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    project = _get_project_or_404(project_id, session)
     try:
         version = get_generated_asset_version(
             asset_id,
             version_id,
-            project_id=project_id,
+            project_id=project["id"],
             session=session,
         )
         if not version:
@@ -1635,7 +1689,7 @@ def project_library_version_download(
         path = get_generated_asset_version_path(
             asset_id,
             version_id,
-            project_id=project_id,
+            project_id=project["id"],
             session=session,
         )
     except ValueError as exc:
@@ -1658,14 +1712,12 @@ def project_library_version_files(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> List[GeneratedAssetVersionFileResponse]:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    project = _get_project_or_404(project_id, session)
     try:
         files = list_generated_asset_version_files(
             asset_id=asset_id,
             version_id=version_id,
-            project_id=project_id,
+            project_id=project["id"],
             session=session,
         )
     except ValueError as exc:
@@ -1683,9 +1735,7 @@ def project_library_version_diff(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Dict[str, Any]:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
+    project = _get_project_or_404(project_id, session)
     if version_id == against:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Versions must be different")
     try:
@@ -1693,7 +1743,7 @@ def project_library_version_diff(
             asset_id,
             base_version_id=against,
             compare_version_id=version_id,
-            project_id=project_id,
+            project_id=project["id"],
             ignore_whitespace=ignore_whitespace,
             session=session,
         )
@@ -1716,13 +1766,10 @@ def project_library_delete(
     _current_user: CurrentUser = Depends(require_current_user),
     session: Session = Depends(get_session_dependency),
 ) -> Response:
-    project = get_project(project_id=project_id, session=session)
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="project not found")
-
+    project = _get_project_or_404(project_id, session)
     deleted = delete_generated_asset(
         asset_id,
-        project_id=project_id,
+        project_id=project["id"],
         remove_files=remove_files,
         session=session,
     )
