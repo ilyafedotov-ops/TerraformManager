@@ -1,6 +1,6 @@
 # Azure Best Practices (selected)
 
-- Storage Account: `enable_https_traffic_only = true`, `allow_blob_public_access = false`, `min_tls_version >= TLS1_2`, and expose data through Private Endpoints mapped into trusted subnets.
+- Storage Account: `https_traffic_only_enabled = true`, `allow_nested_items_to_be_public = false`, `min_tls_version >= TLS1_2`, and expose data through Private Endpoints mapped into trusted subnets.
 - Diagnostics: route platform telemetry into Log Analytics and add SearchServiceAvailability metric alerts so operators catch ingestion issues quickly.
 - NSG: avoid broad `source_address_prefix = "*" / "0.0.0.0/0"` for sensitive ports (22/3389).
 - Use Private Endpoints where possible; prefer managed identities over secrets.

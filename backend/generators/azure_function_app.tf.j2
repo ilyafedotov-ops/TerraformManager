@@ -3,6 +3,46 @@ provider "azurerm" {
   features {}
 }
 
+{%- if rg_name != "rg" %}
+moved {
+  from = azurerm_resource_group.rg
+  to   = azurerm_resource_group.{{ rg_name }}
+}
+
+{%- endif %}
+
+{%- if storage_name != "storage" %}
+moved {
+  from = azurerm_storage_account.storage
+  to   = azurerm_storage_account.{{ storage_name }}
+}
+
+{%- endif %}
+
+{%- if plan_name != "plan" %}
+moved {
+  from = azurerm_service_plan.plan
+  to   = azurerm_service_plan.{{ plan_name }}
+}
+
+{%- endif %}
+
+{%- if function_name != "func" %}
+moved {
+  from = azurerm_linux_function_app.func
+  to   = azurerm_linux_function_app.{{ function_name }}
+}
+
+{%- endif %}
+
+{%- if enable_application_insights and insights_name != "insights" %}
+moved {
+  from = azurerm_application_insights.insights
+  to   = azurerm_application_insights.{{ insights_name }}
+}
+
+{%- endif %}
+
 locals {
   tags = {
     ManagedBy   = "TerraformManager"
@@ -25,8 +65,8 @@ resource "azurerm_storage_account" "{{ storage_name }}" {
   account_tier             = "Standard"
   account_replication_type = "{{ storage_replication }}"
   min_tls_version          = "TLS1_2"
-  allow_blob_public_access = false
-  enable_https_traffic_only = true
+  allow_nested_items_to_be_public = false
+  https_traffic_only_enabled      = true
   account_kind             = "StorageV2"
   tags = local.tags
 }

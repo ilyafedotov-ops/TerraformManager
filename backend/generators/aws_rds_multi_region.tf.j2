@@ -67,7 +67,7 @@ resource "aws_db_instance" "{{ primary_resource_name }}" {
   storage_encrypted          = true
   {% if primary_kms_key_id %}kms_key_id                = "{{ primary_kms_key_id }}"{% endif %}
   backup_retention_period    = {{ backup_retention }}
-  preferred_backup_window    = "{{ preferred_backup_window }}"
+  backup_window              = "{{ backup_window }}"
   maintenance_window         = "{{ preferred_maintenance_window }}"
   deletion_protection        = true
   copy_tags_to_snapshot      = true
@@ -97,6 +97,7 @@ resource "aws_db_instance" "{{ replica_resource_name }}" {
   apply_immediately      = false
   monitoring_interval    = 60
   performance_insights_enabled = true
+  backup_window          = "{{ replica_backup_window }}"
   {% if replica_kms_key_id %}kms_key_id = "{{ replica_kms_key_id }}"{% endif %}
   db_subnet_group_name   = aws_db_subnet_group.{{ replica_subnet_group_resource_name }}.name
   vpc_security_group_ids = {{ replica_security_group_ids_literal }}

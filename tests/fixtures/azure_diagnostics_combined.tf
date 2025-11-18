@@ -38,8 +38,8 @@ resource "azurerm_storage_account" "logs" {
   account_tier             = "Standard"
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
-  allow_blob_public_access = false
-  enable_https_traffic_only = true
+  allow_nested_items_to_be_public = false
+  https_traffic_only_enabled      = true
 }
 
 resource "azurerm_monitor_diagnostic_setting" "subnet_diag" {

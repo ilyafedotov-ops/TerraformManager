@@ -36,9 +36,9 @@ resource "azurerm_storage_account" "logstorage" {
   resource_group_name      = azurerm_resource_group.rg.name
   account_tier             = "Standard"
   account_replication_type = "LRS"
-  allow_blob_public_access  = false
-  enable_https_traffic_only = true
-  min_tls_version           = "TLS1_2"
+  allow_nested_items_to_be_public = false
+  https_traffic_only_enabled      = true
+  min_tls_version                 = "TLS1_2"
   tags = local.tags
 }
 

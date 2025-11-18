@@ -55,7 +55,7 @@ resource "aws_db_instance" "{{ db_identifier }}" {
   storage_encrypted          = true
   {% if kms_key_id %}kms_key_id                = "{{ kms_key_id }}"{% endif %}
   backup_retention_period    = {{ backup_retention }}
-  preferred_backup_window    = "{{ preferred_backup_window }}"
+  backup_window              = "{{ backup_window }}"
   maintenance_window         = "{{ preferred_maintenance_window }}"
   deletion_protection        = true
   copy_tags_to_snapshot      = true

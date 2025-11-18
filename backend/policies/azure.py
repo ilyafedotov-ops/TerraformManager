@@ -12,7 +12,7 @@ def check_storage_https(file: Path, text: str) -> List[Dict[str, Any]]:
     for match in re.finditer(r'resource\s+"azurerm_storage_account"\s+"([^"]+)"\s*{', text):
         name = match.group(1)
         block = text[match.start(): match.start() + 2000]
-        https_setting = re.search(r'enable_https_traffic_only\s*=\s*(true|false)', block)
+        https_setting = re.search(r'(?:enable_https_traffic_only|https_traffic_only_enabled)\s*=\s*(true|false)', block)
         if https_setting and https_setting.group(1) == "true":
             continue
         snippet = https_setting.group(0) if https_setting else match.group(0)
@@ -23,7 +23,7 @@ def check_storage_https(file: Path, text: str) -> List[Dict[str, Any]]:
                 line=find_line_number(text, snippet),
                 context={"resource": name},
                 snippet=snippet,
-                suggested_fix_snippet='enable_https_traffic_only = true\n',
+                suggested_fix_snippet='https_traffic_only_enabled = true\n',
                 unique_id=f"AZ-STORAGE-HTTPS::{name}",
             )
         )
@@ -35,7 +35,7 @@ def check_storage_blob_public(file: Path, text: str) -> List[Dict[str, Any]]:
     for match in re.finditer(r'resource\s+"azurerm_storage_account"\s+"([^"]+)"\s*{', text):
         name = match.group(1)
         block = text[match.start(): match.start() + 2000]
-        public_access = re.search(r'allow_blob_public_access\s*=\s*(true|false)', block)
+        public_access = re.search(r'(?:allow_blob_public_access|allow_nested_items_to_be_public)\s*=\s*(true|false)', block)
         if public_access and public_access.group(1) == "true":
             snippet = public_access.group(0)
             findings.append(
@@ -45,7 +45,7 @@ def check_storage_blob_public(file: Path, text: str) -> List[Dict[str, Any]]:
                     line=find_line_number(text, snippet),
                     context={"resource": name},
                     snippet=snippet,
-                    suggested_fix_snippet='allow_blob_public_access = false\n',
+                    suggested_fix_snippet='allow_nested_items_to_be_public = false\n',
                     unique_id=f"AZ-STORAGE-BLOB-PUBLIC::{name}",
                 )
             )

@@ -81,7 +81,7 @@ class PolicyRuleTests(unittest.TestCase):
             """
             resource "azurerm_storage_account" "bad" {
               name = "stbad"
-              enable_https_traffic_only = false
+              https_traffic_only_enabled = false
             }
             """
         )
@@ -91,14 +91,14 @@ class PolicyRuleTests(unittest.TestCase):
         finding = findings[0]
         self.assertEqual(finding["rule_id"], "AZ-STORAGE-HTTPS")
         self.assertEqual(finding["context"]["resource"], "bad")
-        self.assertIn("enable_https_traffic_only = true", finding["suggested_fix_snippet"])
+        self.assertIn("https_traffic_only_enabled = true", finding["suggested_fix_snippet"])
 
     def test_azure_storage_private_endpoint_missing(self) -> None:
         text = textwrap.dedent(
             """
             resource "azurerm_storage_account" "secure" {
               name = "stsecure"
-              enable_https_traffic_only = true
+              https_traffic_only_enabled = true
             }
             """
         )

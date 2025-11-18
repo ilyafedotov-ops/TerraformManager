@@ -11,7 +11,7 @@ resource "azurerm_storage_account" "sa" {
   location                 = azurerm_resource_group.rg.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
-  enable_https_traffic_only = false
-  allow_blob_public_access  = true
+  https_traffic_only_enabled = false
+  allow_nested_items_to_be_public  = true
   min_tls_version           = "TLS1_0"
 }
