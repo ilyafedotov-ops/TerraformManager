@@ -42,18 +42,42 @@ export let projectId: string | null = null;
 		return typeof value === 'string' ? value : null;
 	})();
 
-	let artifactPaths: string[] = [];
-	$: artifactPaths = (() => {
-		const value = summaryValue('artifacts');
-		if (!value) return [];
-		if (Array.isArray(value)) {
-			return value.filter((entry): entry is string => typeof entry === 'string');
-		}
-		return [];
-	})();
+let artifactPaths: string[] = [];
+$: artifactPaths = (() => {
+    const value = summaryValue('artifacts');
+    if (!value) return [];
+    if (Array.isArray(value)) {
+        return value.filter((entry): entry is string => typeof entry === 'string');
+    }
+    return [];
+})();
 
-	let hasLibraryMetadata = false;
-	$: hasLibraryMetadata = Boolean(assetId || versionId || artifactPaths.length);
+let hasLibraryMetadata = false;
+$: hasLibraryMetadata = Boolean(assetId || versionId || artifactPaths.length);
+
+let libraryLink: string | null = null;
+$: libraryLink = (() => {
+    if (!projectId || !assetId) return null;
+    const params = new URLSearchParams({
+        tab: 'library',
+        project: projectId,
+        asset: assetId,
+    });
+    return `/projects?${params.toString()}`;
+})();
+
+let diffLink: string | null = null;
+$: diffLink = (() => {
+    if (!projectId || !assetId || !versionId) return null;
+    const params = new URLSearchParams({
+        tab: 'library',
+        project: projectId,
+        asset: assetId,
+        version: versionId,
+        action: 'diff',
+    });
+    return `/projects?${params.toString()}`;
+})();
 
 	const copyValue = async (value: string, label: string) => {
 		if (!value) return;
@@ -166,7 +190,23 @@ const driftHasChanges = Boolean((driftSummary as { has_changes?: boolean } | nul
 							on:click={() => copyValue(versionId ?? '', 'Version ID')}
 						>
 							Copy version id
-						</button>
+					</button>
+					{/if}
+					{#if libraryLink}
+						<a
+							class="rounded-xl border border-emerald-200 bg-white/60 px-3 py-1 text-emerald-700 transition hover:bg-white"
+							href={libraryLink}
+						>
+							Open in library
+						</a>
+					{/if}
+					{#if diffLink}
+						<a
+							class="rounded-xl border border-emerald-200 bg-white/60 px-3 py-1 text-emerald-700 transition hover:bg-white"
+							href={diffLink}
+						>
+							Diff vs previous
+						</a>
 					{/if}
 				</div>
 			</div>
