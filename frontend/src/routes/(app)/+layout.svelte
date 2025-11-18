@@ -3,8 +3,8 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { onDestroy, onMount, tick } from 'svelte';
-	import { clearToken, token } from '$lib/stores/auth';
-	import { API_BASE } from '$lib/api/client';
+import { clearToken, token } from '$lib/stores/auth';
+import { API_BASE, ApiError } from '$lib/api/client';
 import MainNav from '$lib/components/navigation/MainNav.svelte';
 import { navigationSectionsStore, navigationState, commandResults, materialiseNavigationSections } from '$lib/stores/navigation';
 import { projectState, activeProject } from '$lib/stores/project';
@@ -30,11 +30,37 @@ import type { NavigationItem } from '$lib/navigation/types';
 	let section = $state<{ title: string; subtitle?: string | null; breadcrumbs?: Array<{ href: string; label: string }> } | null>(
 		toMutableSection(data.section ?? null)
 	);
-	let unsubscribe: (() => void) | null = null;
-	let lastServerToken = $state<string | null>(data.token ?? null);
-	let commandInput = $state<HTMLInputElement | null>(null);
-	let commandDialog = $state<HTMLDivElement | null>(null);
+let unsubscribe: (() => void) | null = null;
+let lastServerToken = $state<string | null>(data.token ?? null);
+let commandInput = $state<HTMLInputElement | null>(null);
+let commandDialog = $state<HTMLDivElement | null>(null);
 let previouslyFocused: HTMLElement | null = null;
+let redirectingToLogin = false;
+let headerSearchInput = $state<HTMLInputElement | null>(null);
+let headerSearchDropdown = $state<HTMLDivElement | null>(null);
+let showHeaderSearch = $state(false);
+let headerSearchQuery = $state('');
+
+const redirectToLogin = () => {
+	if (!browser || redirectingToLogin) {
+		return;
+	}
+	redirectingToLogin = true;
+	const currentPath = window.location.pathname + window.location.search;
+	const redirectTarget = currentPath && currentPath !== '/' ? currentPath : '/projects';
+	void goto(`/login?redirect=${encodeURIComponent(redirectTarget)}`, { replaceState: true });
+};
+
+const handleProjectStoreError = (error: unknown, label: string) => {
+	console.error(label, error);
+	if (error instanceof ApiError && error.status === 401) {
+		clearToken();
+		if (browser) {
+			document.cookie = 'tm_refresh_csrf=; Path=/; Max-Age=0; SameSite=Lax';
+		}
+		redirectToLogin();
+	}
+};
 
 	if (browser) {
 		unsubscribe = token.subscribe((value) => {
@@ -66,12 +92,26 @@ let previouslyFocused: HTMLElement | null = null;
 			} else if (commandOpen && event.key === 'Escape') {
 				event.preventDefault();
 				closeCommandPalette();
+			} else if (showHeaderSearch && event.key === 'Escape') {
+				event.preventDefault();
+				closeHeaderSearch();
+			}
+		};
+
+		const clickHandler = (event: MouseEvent) => {
+			if (showHeaderSearch && headerSearchDropdown && headerSearchInput) {
+				const target = event.target as Node;
+				if (!headerSearchDropdown.contains(target) && !headerSearchInput.contains(target)) {
+					closeHeaderSearch();
+				}
 			}
 		};
 
 		window.addEventListener('keydown', handler);
+		window.addEventListener('click', clickHandler);
 		return () => {
 			window.removeEventListener('keydown', handler);
+			window.removeEventListener('click', clickHandler);
 		};
 	});
 
@@ -218,6 +258,20 @@ const actionableCommandItems = $derived(
 const commandItemKey = (item: NavigationItem) => `${item.href ?? 'nohref'}::${item.title}`;
 const firstCommandHref = $derived(actionableCommandItems[0]?.href);
 
+const headerSearchResults = $derived(() => {
+	const query = headerSearchQuery.trim().toLowerCase();
+	if (!query) return [];
+
+	const allItems = materialiseNavigationSections($navigationSectionsStore, $activeProject?.id ?? null)
+		.flatMap(section => section.items);
+
+	return allItems
+		.filter((item): item is NavigationItem & { href: string } =>
+			Boolean(item.href) && item.title.toLowerCase().includes(query)
+		)
+		.slice(0, 8);
+});
+
 const projectNavigationSections = $derived(
 	materialiseNavigationSections($navigationSectionsStore, $activeProject?.id ?? null)
 );
@@ -262,10 +316,10 @@ const handleQuickAction = async (href: string) => {
 			projectState.reset();
 			return;
 		}
-		if (!projectsInitialised) {
+	if (!projectsInitialised) {
 			projectsInitialised = true;
 			void projectState.loadProjects(fetch, currentToken).catch((err) => {
-				console.error('Failed to load projects', err);
+				handleProjectStoreError(err, 'Failed to load projects');
 			});
 		}
 	});
@@ -284,7 +338,7 @@ const handleQuickAction = async (href: string) => {
 		}
 		lastRunsProjectId = projectId;
 		void projectState.refreshRuns(fetch, currentToken, projectId, 10).catch((err) => {
-			console.error('Failed to load project runs', err);
+			handleProjectStoreError(err, 'Failed to load project runs');
 		});
 	});
 
@@ -294,7 +348,7 @@ const handleProjectChange = async (event: Event) => {
 	projectState.setActiveProject(projectId);
 	if (projectId && browser && currentToken) {
 		await projectState.refreshRuns(fetch, currentToken, projectId, 10).catch((err) => {
-			console.error('Failed to refresh runs', err);
+			handleProjectStoreError(err, 'Failed to refresh runs');
 		});
 		const slug = projectState.getProjectSlug(projectId);
 		await goto(slug ? `/projects/${slug}/dashboard` : '/projects', { replaceState: false });
@@ -304,8 +358,36 @@ const handleProjectChange = async (event: Event) => {
 	const handleReloadProjects = async () => {
 		if (!browser || !currentToken) return;
 		await projectState.loadProjects(fetch, currentToken).catch((err) => {
-			console.error('Failed to reload projects', err);
+			handleProjectStoreError(err, 'Failed to reload projects');
 		});
+	};
+
+	const closeHeaderSearch = () => {
+		showHeaderSearch = false;
+		headerSearchQuery = '';
+	};
+
+	const handleHeaderSearchInput = (event: Event) => {
+		const input = event.target as HTMLInputElement;
+		headerSearchQuery = input.value;
+		showHeaderSearch = headerSearchQuery.trim().length > 0;
+	};
+
+	const handleHeaderSearchSelect = async (href: string) => {
+		closeHeaderSearch();
+		await goto(href, { replaceState: false });
+		navigationState.setActivePath(href);
+	};
+
+	const handleHeaderSearchKeydown = (event: KeyboardEvent) => {
+		const results = headerSearchResults();
+		if (event.key === 'Enter' && results.length > 0) {
+			event.preventDefault();
+			void handleHeaderSearchSelect(results[0].href);
+		} else if (event.key === 'Escape') {
+			event.preventDefault();
+			closeHeaderSearch();
+		}
 	};
 </script>
 
@@ -458,13 +540,50 @@ const handleProjectChange = async (event: Event) => {
 						</span>
 					{/if}
 				</div>
-				<button
-					type="button"
-					class="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-sky-200 transition hover:bg-sky-600"
-					onclick={() => void openCommandPalette()}
-				>
-					Command Palette
-				</button>
+				<div class="relative">
+					<input
+						type="text"
+						bind:this={headerSearchInput}
+						bind:value={headerSearchQuery}
+						class="w-64 rounded-xl border border-slate-200 bg-white px-4 py-2 pr-24 text-sm text-slate-700 transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
+						class:border-sky-400={showHeaderSearch}
+						class:ring-2={showHeaderSearch}
+						class:ring-sky-200={showHeaderSearch}
+						placeholder="Search or jump to..."
+						oninput={handleHeaderSearchInput}
+						onkeydown={handleHeaderSearchKeydown}
+					/>
+					<div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+						<kbd class="inline-flex items-center gap-1 rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-400">
+							{browser ? (navigator.platform.includes('Mac') ? '⌘K' : 'Ctrl+K') : 'Ctrl+K'}
+						</kbd>
+					</div>
+					{#if showHeaderSearch}
+						<div
+							bind:this={headerSearchDropdown}
+							class="absolute right-0 top-full z-50 mt-2 w-96 rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10"
+						>
+							{#if headerSearchResults().length > 0}
+								<ul class="divide-y divide-slate-100 text-sm text-slate-600">
+									{#each headerSearchResults() as item (commandItemKey(item))}
+										<li>
+											<button
+												class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-sky-50 hover:text-sky-600"
+												type="button"
+												onclick={() => void handleHeaderSearchSelect(item.href)}
+											>
+												<span class="font-semibold">{item.title}</span>
+												<span class="text-xs uppercase tracking-[0.2em] text-slate-400">{item.href}</span>
+											</button>
+										</li>
+									{/each}
+								</ul>
+							{:else}
+								<p class="px-4 py-6 text-sm text-slate-400">No matching pages found.</p>
+							{/if}
+						</div>
+					{/if}
+				</div>
 				<button
 					type="button"
 					class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-50"
@@ -482,8 +601,8 @@ const handleProjectChange = async (event: Event) => {
 			</div>
 		</header>
 
-		<main class="flex-1 px-6 py-10">
-			<div class="mx-auto w-full max-w-6xl">
+		<main class="flex-1 px-4 py-10 sm:px-6">
+			<div class="mx-auto w-full max-w-[90rem]">
 				{@render children?.()}
 			</div>
 		</main>

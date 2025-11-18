@@ -111,52 +111,54 @@ const handleRowClick = (report: ReportSummary) => {
 </script>
 
 <div class="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-300/40">
-    <table class="min-w-full divide-y divide-slate-100 text-sm">
-        <thead class="bg-slate-50 text-xs uppercase tracking-[0.3em] text-slate-400">
-            <tr>
-                <th class="px-6 py-4 text-left">Report ID</th>
-                <th class="px-6 py-4 text-left">Created</th>
-                <th class="px-6 py-4 text-left">Status</th>
-                <th class="px-6 py-4 text-left">Assignee</th>
-                <th class="px-6 py-4 text-left">Due</th>
-                <th class="px-6 py-4 text-left">Severity</th>
-                <th class="px-6 py-4 text-left">Issues</th>
-                <th class="px-6 py-4 text-left">Cost Δ</th>
-                <th class="px-6 py-4 text-left">Drift</th>
-                <th class="px-6 py-4 text-right">Actions</th>
-            </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-100 text-slate-500">
-            {#each props.reports as report (report.id)}
-                <tr
-                    class={`transition ${props.selectable ? 'cursor-pointer hover:bg-sky-50' : ''} ${isSelected(report.id) ? 'bg-sky-50' : ''}`}
-                    onclick={() => handleRowClick(report)}
-                >
-                    <td class="px-6 py-4 font-mono text-sm text-slate-600">{report.id}</td>
-                    <td class="px-6 py-4">{formatDate(report.created_at)}</td>
-                    <td class="px-6 py-4">
-                        <span class={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${statusBadgeClass(report.review_status)}`}>
-                            {formatStatus(report.review_status)}
-                        </span>
-                    </td>
-                    <td class="px-6 py-4 text-slate-600">{report.review_assignee ?? '—'}</td>
-                    <td class="px-6 py-4">{formatDueDate(report.review_due_at)}</td>
-                    <td class="px-6 py-4 uppercase tracking-[0.2em] text-slate-500">{severityLabel(report.summary)}</td>
-                    <td class="px-6 py-4">{issuesCount(report.summary)}</td>
-                    <td class="px-6 py-4">{costDelta(report.summary)}</td>
-                    <td class="px-6 py-4">{driftStatus(report.summary)}</td>
-                    <td class="px-6 py-4 text-right" onclick={(event) => event.stopPropagation()}>
-                        <ReportActions
-                            id={report.id}
-                            apiBase={apiBase}
-                            projectId={viewProjectId}
-                            deleting={isDeleting(report.id)}
-                            deleteEnabled={Boolean(props.token)}
-                            on:delete={() => dispatch('delete', { id: report.id })}
-                        />
-                    </td>
+    <div class="min-w-max">
+        <table class="w-full divide-y divide-slate-100 text-sm">
+            <thead class="bg-slate-50 text-xs uppercase tracking-[0.3em] text-slate-400">
+                <tr>
+                    <th class="whitespace-nowrap px-4 py-4 text-left sm:px-6">Report ID</th>
+                    <th class="whitespace-nowrap px-4 py-4 text-left sm:px-6">Created</th>
+                    <th class="whitespace-nowrap px-4 py-4 text-left sm:px-6">Status</th>
+                    <th class="whitespace-nowrap px-4 py-4 text-left sm:px-6">Assignee</th>
+                    <th class="whitespace-nowrap px-4 py-4 text-left sm:px-6">Due</th>
+                    <th class="whitespace-nowrap px-4 py-4 text-left sm:px-6">Severity</th>
+                    <th class="whitespace-nowrap px-4 py-4 text-left sm:px-6">Issues</th>
+                    <th class="whitespace-nowrap px-4 py-4 text-left sm:px-6">Cost Δ</th>
+                    <th class="whitespace-nowrap px-4 py-4 text-left sm:px-6">Drift</th>
+                    <th class="whitespace-nowrap px-4 py-4 text-right sm:px-6">Actions</th>
                 </tr>
-            {/each}
-        </tbody>
-    </table>
+            </thead>
+            <tbody class="divide-y divide-slate-100 text-slate-500">
+                {#each props.reports as report (report.id)}
+                    <tr
+                        class={`transition ${props.selectable ? 'cursor-pointer hover:bg-sky-50' : ''} ${isSelected(report.id) ? 'bg-sky-50' : ''}`}
+                        onclick={() => handleRowClick(report)}
+                    >
+                        <td class="whitespace-nowrap px-4 py-4 font-mono text-sm text-slate-600 sm:px-6">{report.id}</td>
+                        <td class="whitespace-nowrap px-4 py-4 sm:px-6">{formatDate(report.created_at)}</td>
+                        <td class="px-4 py-4 sm:px-6">
+                            <span class={`inline-flex items-center whitespace-nowrap rounded-full border px-3 py-1 text-xs font-semibold ${statusBadgeClass(report.review_status)}`}>
+                                {formatStatus(report.review_status)}
+                            </span>
+                        </td>
+                        <td class="max-w-[200px] truncate px-4 py-4 text-slate-600 sm:px-6" title={report.review_assignee ?? ''}>{report.review_assignee ?? '—'}</td>
+                        <td class="whitespace-nowrap px-4 py-4 sm:px-6">{formatDueDate(report.review_due_at)}</td>
+                        <td class="whitespace-nowrap px-4 py-4 uppercase tracking-[0.2em] text-slate-500 sm:px-6">{severityLabel(report.summary)}</td>
+                        <td class="whitespace-nowrap px-4 py-4 sm:px-6">{issuesCount(report.summary)}</td>
+                        <td class="whitespace-nowrap px-4 py-4 sm:px-6">{costDelta(report.summary)}</td>
+                        <td class="whitespace-nowrap px-4 py-4 sm:px-6">{driftStatus(report.summary)}</td>
+                        <td class="whitespace-nowrap px-4 py-4 text-right sm:px-6" onclick={(event) => event.stopPropagation()}>
+                            <ReportActions
+                                id={report.id}
+                                apiBase={apiBase}
+                                projectId={viewProjectId}
+                                deleting={isDeleting(report.id)}
+                                deleteEnabled={Boolean(props.token)}
+                                on:delete={() => dispatch('delete', { id: report.id })}
+                            />
+                        </td>
+                    </tr>
+                {/each}
+            </tbody>
+        </table>
+    </div>
 </div>

@@ -31,15 +31,15 @@ const tabs = [
 	);
 </script>
 
-<section class="space-y-6">
-	<header class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40">
+<section class="space-y-6 overflow-x-hidden">
+	<header class="rounded-3xl border border-slate-200 bg-white p-4 shadow-xl shadow-slate-300/40 sm:p-6">
 		<div class="flex flex-col gap-2">
 			<p class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">
 				Project workspace
 			</p>
-			<h2 class="text-3xl font-semibold text-slate-700">{project?.name ?? 'Project'}</h2>
+			<h2 class="break-words text-2xl font-semibold text-slate-700 sm:text-3xl">{project?.name ?? 'Project'}</h2>
 			{#if project?.description}
-				<p class="text-sm text-slate-500">{project.description}</p>
+				<p class="break-words text-sm text-slate-500">{project.description}</p>
 			{/if}
 		</div>
 		<nav class="mt-6 flex flex-wrap gap-3 text-sm font-semibold text-slate-500">
@@ -58,7 +58,7 @@ const tabs = [
 		</nav>
 	</header>
 
-	<div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/30">
+	<div class="overflow-x-hidden rounded-3xl border border-slate-200 bg-white p-4 shadow-xl shadow-slate-300/30 sm:p-6">
 		{@render children?.()}
 	</div>
 </section>
