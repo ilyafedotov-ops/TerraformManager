@@ -10,6 +10,10 @@ describe('ScanSummary', () => {
 				summary: {
 					issues_found: 4,
 					files_scanned: 2,
+					asset_id: 'asset-1',
+					asset_name: 'Weekly scan',
+					asset_type: 'scan_report',
+					version_id: 'version-1',
 					cost: {
 						total_monthly_cost: 120,
 						diff_monthly_cost: 10,
@@ -61,6 +65,14 @@ describe('ScanSummary', () => {
 		const viewLink = getByText('View');
 		expect(viewLink.getAttribute('href')).toBe('/projects/proj-1/reports/rpt-123');
 		expect(getByText('JSON')).toHaveAttribute('href', 'https://api.example.dev/reports/rpt-123');
+		expect(getByText('Open in library')).toHaveAttribute(
+			'href',
+			'/projects?tab=library&project=proj-1&asset=asset-1'
+		);
+		expect(getByText('Diff vs previous')).toHaveAttribute(
+			'href',
+			'/projects?tab=library&project=proj-1&asset=asset-1&version=version-1&action=diff'
+		);
 		expect(queryByText('Delete')).not.toBeInTheDocument();
 	});
 
