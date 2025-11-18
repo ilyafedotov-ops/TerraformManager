@@ -77,7 +77,7 @@ This document outlines the detailed tasks required to elevate the TerraformManag
 - [ ] **3.2 UI/UX polish**
   - [x] Inline step indicators and contextual tooltips guide reviewers through upload → review → export, and saved scans now surface inline asset/version metadata with copy helpers.
   - [x] Success toasts announce the library asset id/version created by `/scan/upload`; validation failures still raise error toasts with actionable text.
-  - [ ] Drag-and-drop upload affordances plus skeleton loaders keep the experience responsive while scans run.
+  - [x] Drag-and-drop upload affordances plus skeleton loaders keep the experience responsive while scans run.
 
 - [ ] **3.3 Project run logging helper**
   - Extract run logging into `$lib/stores/projectRuns.ts` shared by review/report pages; handle missing token/project gracefully.

@@ -1,4 +1,4 @@
-<script lang="ts" context="module">
+<script lang="ts" module>
 export type ScanFormData = {
 	files: FileList | null;
 	terraformValidate: boolean;
@@ -13,18 +13,87 @@ export type ScanFormData = {
 import StepBar from '$lib/components/dashboard/StepBar.svelte';
 import { createEventDispatcher } from 'svelte';
 
+type ScanFormProps = {
+	steps: { title: string; description?: string; status?: 'completed' | 'current' | 'upcoming' }[];
+	files?: FileList | null;
+	terraformValidate?: boolean;
+	saveReport?: boolean;
+	includeCost?: boolean;
+	usageFiles?: FileList | null;
+	planFiles?: FileList | null;
+	isSubmitting?: boolean;
+	error?: string | null;
+};
+
 /** Upload form for reviewer scans with validation toggles and workflow steps. */
-export let steps: { title: string; description?: string; status?: 'completed' | 'current' | 'upcoming' }[];
-export let files: FileList | null = null;
-export let terraformValidate = false;
-export let saveReport = true;
-export let includeCost = false;
-export let usageFiles: FileList | null = null;
-export let planFiles: FileList | null = null;
-export let isSubmitting = false;
-export let error: string | null = null;
+let {
+	steps,
+	files = $bindable<FileList | null>(null),
+	terraformValidate = $bindable(false),
+	saveReport = $bindable(true),
+	includeCost = $bindable(false),
+	usageFiles = $bindable<FileList | null>(null),
+	planFiles = $bindable<FileList | null>(null),
+	isSubmitting = false,
+	error = null
+}: ScanFormProps = $props();
 
 const dispatch = createEventDispatcher<{ submit: ScanFormData }>();
+
+const acceptedExtensions = ['tf', 'zip'];
+let isDragActive = $state(false);
+let fileInput = $state<HTMLInputElement | null>(null);
+
+const normaliseFiles = (list: FileList | null): FileList | null => {
+	if (!list) return null;
+	const entries = Array.from(list).filter((file) => {
+		const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+		return acceptedExtensions.includes(ext);
+	});
+	if (!entries.length) return null;
+	if (typeof DataTransfer === 'undefined') {
+		return list;
+	}
+	const dt = new DataTransfer();
+	entries.forEach((file) => dt.items.add(file));
+	return dt.files;
+};
+
+const handleDragOver = (event: DragEvent) => {
+	event.preventDefault();
+	event.stopPropagation();
+	isDragActive = true;
+};
+
+const handleDragLeave = (event: DragEvent) => {
+	event.preventDefault();
+	if (event.currentTarget === event.target) {
+		isDragActive = false;
+	}
+};
+
+const handleDrop = (event: DragEvent) => {
+	event.preventDefault();
+	event.stopPropagation();
+	isDragActive = false;
+	const dropped = normaliseFiles(event.dataTransfer?.files ?? null);
+	if (dropped) {
+		files = dropped;
+	}
+};
+
+const handleKeyActivate = (event: KeyboardEvent) => {
+	if (event.key !== 'Enter' && event.key !== ' ') {
+		return;
+	}
+	event.preventDefault();
+	fileInput?.click();
+};
+
+const selectedFileNames = () => {
+	if (!files) return [] as string[];
+	return Array.from(files as FileList).map((file: File) => file.name);
+};
 
 const handleSubmit = (event: Event) => {
 	event.preventDefault();
@@ -44,17 +113,53 @@ const handleSubmit = (event: Event) => {
 		<StepBar steps={steps} />
 	</div>
 	<div class="space-y-4">
-		<label class="block text-sm font-semibold text-slate-600">
+	<section class="space-y-2">
+		<p class="text-sm font-semibold text-slate-600">
 			<span class="uppercase tracking-[0.3em] text-slate-400">Terraform files / archives</span>
+		</p>
+		<div
+			class={`relative flex min-h-[9rem] flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed px-6 py-5 text-center text-sm transition ${
+				isDragActive ? 'border-sky-500 bg-sky-50/60 text-sky-700' : 'border-slate-200 bg-slate-50 text-slate-500'
+			}`}
+			role="button"
+			tabindex="0"
+			aria-label="Terraform files dropzone"
+			ondragover={handleDragOver}
+			ondragleave={handleDragLeave}
+			ondrop={handleDrop}
+			onkeydown={handleKeyActivate}
+		>
 			<input
-				class="mt-2 w-full cursor-pointer rounded-2xl border border-dashed border-sky-500/40 bg-slate-50 px-4 py-6 text-sm text-slate-500 transition hover:border-sky-400 hover:bg-slate-50"
+				class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
 				type="file"
 				multiple
 				accept=".tf,.zip"
 				bind:files
 				aria-label="Terraform files or zip archives"
+				bind:this={fileInput}
+				onchange={() => {
+					files = normaliseFiles(files);
+				}}
 			/>
-		</label>
+			<div class="pointer-events-none space-y-1">
+				<p class="font-semibold">
+					{#if isDragActive}
+						Release to upload
+					{:else}
+						Drag and drop files or click to browse
+					{/if}
+				</p>
+				<p class="text-xs text-slate-500">Accepts `.tf` modules or `.zip` bundles. Up to 50 files per run.</p>
+			</div>
+		</div>
+		{#if selectedFileNames().length}
+			<ul class="space-y-1 rounded-2xl border border-slate-100 bg-white px-4 py-3 text-left text-xs text-slate-500">
+				{#each selectedFileNames() as name}
+					<li class="truncate">{name}</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
 
 		<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
 			<label class="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
