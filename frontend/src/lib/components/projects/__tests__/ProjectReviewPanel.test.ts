@@ -1,6 +1,7 @@
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import type { ProjectRunSummary } from '$lib/api/client';
+import type { Writable } from 'svelte/store';
+import type { ProjectRunSummary, ProjectSummary } from '$lib/api/client';
 
 const { mockCreateRun, mockUpsertRun, mockUpdateProjectRun } = vi.hoisted(() => ({
 	mockCreateRun: vi.fn(),
@@ -87,7 +88,8 @@ describe('ProjectReviewPanel', () => {
 			kind: 'review',
 			status: 'completed'
 		} satisfies ProjectRunSummary);
-		activeProject.set({ id: 'proj-1', slug: 'proj-1', name: 'Demo project' } as unknown as Record<string, unknown>);
+	const activeProjectStore = activeProject as unknown as Writable<ProjectSummary | null>;
+	activeProjectStore.set({ id: 'proj-1', slug: 'proj-1', name: 'Demo project', root_path: '/workspace' });
 
 		const { getByLabelText, getByText, findByText } = render(ProjectReviewPanel, {
 			token: 'test-token',

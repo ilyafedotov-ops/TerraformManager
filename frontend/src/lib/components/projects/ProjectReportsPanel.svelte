@@ -233,10 +233,6 @@ const submitSearch = async (event?: Event) => {
 	await refreshReports({ offset: 0 });
 };
 
-const goToPage = async (nextOffset: number) => {
-	await refreshReports({ offset: nextOffset });
-};
-
 const selectReport = async (id: string | null) => {
 	selectedReportId = id;
 	const record = reports.find((item) => item.id === id);
@@ -555,14 +551,10 @@ $effect(() => {
 				<ReportTable
 					token={token}
 					projectId={projectIdentifier ?? undefined}
-					data={reportsPayload}
-					items={reports}
-					isLoading={isLoading}
-					offset={offset}
-					limit={pageSize}
-					on:pageChange={(event) => void goToPage(event.detail)}
-					on:select={(event) => void selectReport(event.detail)}
-					on:delete={(event) => void handleDelete(event.detail)}
+					reports={reports}
+					selectable
+					on:select={({ detail }) => void selectReport(detail.id)}
+					on:delete={({ detail }) => void handleDelete(detail.id)}
 					deletingId={deletingId}
 					selectedId={selectedReportId}
 				/>
