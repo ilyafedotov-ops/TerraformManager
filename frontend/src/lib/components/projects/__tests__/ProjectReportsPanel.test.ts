@@ -1,6 +1,9 @@
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import type { ReportListResponse, ReportSummary } from '$lib/api/client';
+import RunArtifactsPanelStub from './stubs/RunArtifactsPanelStub.svelte';
+import ReportActionsStub from './stubs/ReportActionsStub.svelte';
+import ReportTableStub from './stubs/ReportTableStub.svelte';
 
 const {
 	mockListReports,
@@ -18,17 +21,17 @@ const {
 	mockDeleteReport: vi.fn()
 }));
 
-vi.mock('$lib/components/projects/RunArtifactsPanel.svelte', () =>
-	import('./stubs/RunArtifactsPanelStub.svelte')
-);
+vi.mock('$lib/components/projects/RunArtifactsPanel.svelte', () => ({
+	default: RunArtifactsPanelStub
+}));
 
-vi.mock('$lib/components/reports/ReportActions.svelte', () =>
-	import('./stubs/ReportActionsStub.svelte')
-);
+vi.mock('$lib/components/reports/ReportActions.svelte', () => ({
+	default: ReportActionsStub
+}));
 
-vi.mock('$lib/components/reports/ReportTable.svelte', () =>
-	import('./stubs/ReportTableStub.svelte')
-);
+vi.mock('$lib/components/reports/ReportTable.svelte', () => ({
+	default: ReportTableStub
+}));
 
 vi.mock('$lib/api/client', async (importOriginal) => {
 	const actual = (await importOriginal()) as typeof import('$lib/api/client');

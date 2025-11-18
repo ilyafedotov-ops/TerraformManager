@@ -184,6 +184,13 @@ const severityEntries = () => {
 	return Object.entries(counts).map(([sev, count]) => [sev, Number(count ?? 0)] as [string, number]);
 };
 
+type StepStatus = 'completed' | 'current' | 'upcoming';
+type StepDefinition = {
+	title: string;
+	description: string;
+	status: StepStatus;
+};
+
 const getSteps = () => {
 	const hasResult = Boolean(result);
 	const hasReportId = Boolean(result?.id);
@@ -191,19 +198,19 @@ const getSteps = () => {
 		{
 			title: 'Upload',
 			description: 'Attach Terraform modules for scanning.',
-			status: (hasResult ? 'completed' : 'current') as const
+			status: (hasResult ? 'completed' : 'current') as StepStatus
 		},
 		{
 			title: 'Review',
 			description: 'Inspect findings and severity mix.',
-			status: (hasResult ? 'current' : 'upcoming') as const
+			status: (hasResult ? 'current' : 'upcoming') as StepStatus
 		},
 		{
 			title: 'Export',
 			description: 'Share JSON, CSV, or HTML artifacts.',
-			status: (hasReportId ? 'current' : 'upcoming') as const
+			status: (hasReportId ? 'current' : 'upcoming') as StepStatus
 		}
-	];
+	] satisfies StepDefinition[];
 };
 
 const buildRunSummary = (scanResult: Record<string, unknown> | null) => {
