@@ -9,6 +9,9 @@ from jinja2 import Template
 
 from .models import (
     AwsS3GeneratorPayload,
+    AwsVpcGeneratorPayload,
+    AwsEksGeneratorPayload,
+    AwsRdsGeneratorPayload,
     AzureApiManagementGeneratorPayload,
     AzureFunctionAppGeneratorPayload,
     AzureServiceBusGeneratorPayload,
@@ -417,4 +420,185 @@ def render_azure_api_management(payload: AzureApiManagementPayloadLike) -> Dict[
     )
 
     filename = f"azure_api_management_{apim_name}.tf"
+    return {"filename": filename, "content": content}
+
+
+AwsVpcPayloadLike = Union[AwsVpcGeneratorPayload, Dict[str, Any]]
+AwsEksPayloadLike = Union[AwsEksGeneratorPayload, Dict[str, Any]]
+AwsRdsPayloadLike = Union[AwsRdsGeneratorPayload, Dict[str, Any]]
+
+
+def _ensure_vpc_payload(payload: AwsVpcPayloadLike) -> AwsVpcGeneratorPayload:
+    if isinstance(payload, AwsVpcGeneratorPayload):
+        return payload
+    return AwsVpcGeneratorPayload.model_validate(payload)
+
+
+def _ensure_eks_payload(payload: AwsEksPayloadLike) -> AwsEksGeneratorPayload:
+    if isinstance(payload, AwsEksGeneratorPayload):
+        return payload
+    return AwsEksGeneratorPayload.model_validate(payload)
+
+
+def _ensure_rds_payload(payload: AwsRdsPayloadLike) -> AwsRdsGeneratorPayload:
+    if isinstance(payload, AwsRdsGeneratorPayload):
+        return payload
+    return AwsRdsGeneratorPayload.model_validate(payload)
+
+
+def render_aws_vpc_networking(payload: AwsVpcPayloadLike) -> Dict[str, str]:
+    typed = _ensure_vpc_payload(payload)
+
+    name_prefix = typed.name_prefix
+    region = typed.region
+    environment = typed.environment
+    owner_tag = typed.owner_tag
+    cost_center_tag = typed.cost_center_tag
+    vpc_cidr = typed.vpc_cidr
+    public_subnet_cidr = typed.public_subnet_cidr
+    public_subnet_az = typed.public_subnet_az
+    private_subnet_cidr = typed.private_subnet_cidr
+    private_subnet_az = typed.private_subnet_az
+    flow_logs_retention_days = typed.flow_logs_retention_days
+
+    vpc_name = _sanitize_identifier(name_prefix, "vpc")
+    private_subnet_name = _sanitize_identifier(f"{name_prefix}_subnet", "subnet")
+
+    backend_context: Optional[Dict[str, str]] = None
+    if typed.backend:
+        backend_context = typed.backend.model_dump()
+
+    template_path = BASE_DIR / "aws_vpc_networking.tf.j2"
+    template = Template(template_path.read_text())
+    content = template.render(
+        region=region,
+        environment=environment,
+        owner_tag=owner_tag,
+        cost_center_tag=cost_center_tag,
+        name_prefix=name_prefix,
+        vpc_name=vpc_name,
+        vpc_cidr=vpc_cidr,
+        private_subnet_name=private_subnet_name,
+        public_subnet_cidr=public_subnet_cidr,
+        public_subnet_az=public_subnet_az,
+        private_subnet_cidr=private_subnet_cidr,
+        private_subnet_az=private_subnet_az,
+        flow_logs_retention_days=flow_logs_retention_days,
+        backend=backend_context,
+    )
+
+    filename = f"aws_vpc_{vpc_name}.tf"
+    return {"filename": filename, "content": content}
+
+
+def render_aws_eks_cluster(payload: AwsEksPayloadLike) -> Dict[str, str]:
+    typed = _ensure_eks_payload(payload)
+
+    cluster_name = typed.cluster_name
+    region = typed.region
+    environment = typed.environment
+    owner_tag = typed.owner_tag
+    cost_center_tag = typed.cost_center_tag
+    vpc_id = typed.vpc_id
+    private_subnet_ids = typed.private_subnet_ids
+    kubernetes_version = typed.kubernetes_version
+    allow_public_api = typed.allow_public_api
+    public_access_cidrs = typed.public_access_cidrs
+    kms_key_arn = typed.kms_key_arn
+    node_instance_type = typed.node_instance_type
+    node_desired_size = typed.node_desired_size
+    node_min_size = typed.node_min_size
+    node_max_size = typed.node_max_size
+
+    private_subnet_ids_literal = "[" + ", ".join(f'"{subnet_id}"' for subnet_id in private_subnet_ids) + "]"
+    public_access_cidrs_literal = "[" + ", ".join(f'"{cidr}"' for cidr in public_access_cidrs) + "]"
+
+    backend_context: Optional[Dict[str, str]] = None
+    if typed.backend:
+        backend_context = typed.backend.model_dump()
+
+    template_path = BASE_DIR / "aws_eks_cluster.tf.j2"
+    template = Template(template_path.read_text())
+    content = template.render(
+        region=region,
+        environment=environment,
+        owner_tag=owner_tag,
+        cost_center_tag=cost_center_tag,
+        cluster_name=cluster_name,
+        vpc_id=vpc_id,
+        private_subnet_ids_literal=private_subnet_ids_literal,
+        kubernetes_version=kubernetes_version,
+        allow_public_api=allow_public_api,
+        public_access_cidrs_literal=public_access_cidrs_literal,
+        kms_key_arn=kms_key_arn,
+        node_instance_type=node_instance_type,
+        node_desired_size=node_desired_size,
+        node_min_size=node_min_size,
+        node_max_size=node_max_size,
+        backend=backend_context,
+    )
+
+    filename = f"aws_eks_{cluster_name}.tf"
+    return {"filename": filename, "content": content}
+
+
+def render_aws_rds_baseline(payload: AwsRdsPayloadLike) -> Dict[str, str]:
+    typed = _ensure_rds_payload(payload)
+
+    db_identifier = typed.db_identifier
+    region = typed.region
+    environment = typed.environment
+    owner_tag = typed.owner_tag
+    cost_center_tag = typed.cost_center_tag
+    subnet_ids = typed.subnet_ids
+    security_group_ids = typed.security_group_ids
+    engine = typed.engine
+    engine_version = typed.engine_version
+    instance_class = typed.instance_class
+    allocated_storage = typed.allocated_storage
+    max_allocated_storage = typed.max_allocated_storage
+    multi_az = typed.multi_az
+    backup_retention = typed.backup_retention
+    backup_window = typed.backup_window
+    preferred_maintenance_window = typed.preferred_maintenance_window
+    db_name = typed.db_name
+    kms_key_id = typed.kms_key_id
+    logs_exports = typed.logs_exports
+
+    subnet_group_name = _sanitize_identifier(f"{db_identifier}_subnet_group", "subnet_group")
+    subnet_ids_literal = "[" + ", ".join(f'"{subnet_id}"' for subnet_id in subnet_ids) + "]"
+    security_group_ids_literal = "[" + ", ".join(f'"{sg_id}"' for sg_id in security_group_ids) + "]"
+    logs_exports_literal = "[" + ", ".join(f'"{log}"' for log in logs_exports) + "]"
+
+    backend_context: Optional[Dict[str, str]] = None
+    if typed.backend:
+        backend_context = typed.backend.model_dump()
+
+    template_path = BASE_DIR / "aws_rds_baseline.tf.j2"
+    template = Template(template_path.read_text())
+    content = template.render(
+        region=region,
+        environment=environment,
+        owner_tag=owner_tag,
+        cost_center_tag=cost_center_tag,
+        db_identifier=db_identifier,
+        subnet_group_name=subnet_group_name,
+        subnet_ids_literal=subnet_ids_literal,
+        security_group_ids_literal=security_group_ids_literal,
+        engine=engine,
+        engine_version=engine_version,
+        instance_class=instance_class,
+        allocated_storage=allocated_storage,
+        max_allocated_storage=max_allocated_storage,
+        multi_az=multi_az,
+        backup_retention=backup_retention,
+        backup_window=backup_window,
+        preferred_maintenance_window=preferred_maintenance_window,
+        db_name=db_name,
+        kms_key_id=kms_key_id,
+        logs_exports_literal=logs_exports_literal,
+        backend=backend_context,
+    )
+
+    filename = f"aws_rds_{db_identifier}.tf"
     return {"filename": filename, "content": content}

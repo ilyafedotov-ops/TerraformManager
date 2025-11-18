@@ -68,6 +68,11 @@ def test_reports_review_workflow(reports_client: Tuple[TestClient, str, Path]) -
             description="test",
             session=session,
         )
+        other_project = storage.create_project(
+            name="Workspace B",
+            description="test",
+            session=session,
+        )
         storage.save_report(
             "r1",
             summary={
@@ -132,6 +137,30 @@ def test_reports_review_workflow(reports_client: Tuple[TestClient, str, Path]) -
     assert scoped_payload["total_count"] == 1
     assert scoped_payload["items"][0]["id"] == "r1"
 
+    slug_filtered = client.get(
+        "/reports",
+        params={"project_slug": project["slug"]},
+        headers=auth_headers(token),
+    )
+    assert slug_filtered.status_code == 200
+    slug_payload = slug_filtered.json()
+    assert slug_payload["total_count"] == 1
+    assert slug_payload["items"][0]["id"] == "r1"
+
+    mismatched = client.get(
+        "/reports",
+        params={"project_id": project["id"], "project_slug": other_project["slug"]},
+        headers=auth_headers(token),
+    )
+    assert mismatched.status_code == 400
+
+    missing_slug = client.get(
+        "/reports",
+        params={"project_slug": "missing-workspace"},
+        headers=auth_headers(token),
+    )
+    assert missing_slug.status_code == 400
+
     due_date = datetime(2025, 1, 15, 0, 0, tzinfo=timezone.utc).isoformat()
     patch_response = client.patch(
         "/reports/r1",
@@ -141,6 +170,7 @@ def test_reports_review_workflow(reports_client: Tuple[TestClient, str, Path]) -
             "review_due_at": due_date,
             "review_notes": "Need additional context",
         },
+        params={"project_id": project["id"]},
         headers=auth_headers(token),
     )
     assert patch_response.status_code == 200
@@ -158,6 +188,7 @@ def test_reports_review_workflow(reports_client: Tuple[TestClient, str, Path]) -
     create_comment = client.post(
         "/reports/r1/comments",
         json={"body": "Flagging follow-up.", "author": "carol@example.com"},
+        params={"project_id": project["id"]},
         headers=auth_headers(token),
     )
     assert create_comment.status_code == 201
@@ -165,18 +196,113 @@ def test_reports_review_workflow(reports_client: Tuple[TestClient, str, Path]) -
     comment_id = comment["id"]
     assert comment["body"] == "Flagging follow-up."
 
-    comments_list = client.get("/reports/r1/comments", headers=auth_headers(token))
+    comments_list = client.get(
+        "/reports/r1/comments",
+        params={"project_id": project["id"]},
+        headers=auth_headers(token),
+    )
     assert comments_list.status_code == 200
     comments_payload = comments_list.json()
     assert comments_payload["items"][0]["id"] == comment_id
 
     delete_comment = client.delete(
         f"/reports/r1/comments/{comment_id}",
+        params={"project_id": project["id"]},
         headers=auth_headers(token),
     )
     assert delete_comment.status_code == 200
     assert delete_comment.json()["status"] == "deleted"
 
-    post_delete_list = client.get("/reports/r1/comments", headers=auth_headers(token))
+    post_delete_list = client.get(
+        "/reports/r1/comments",
+        params={"project_id": project["id"]},
+        headers=auth_headers(token),
+    )
     assert post_delete_list.status_code == 200
     assert post_delete_list.json()["items"] == []
+
+
+def test_report_review_requires_project_context(reports_client: Tuple[TestClient, str, Path]) -> None:
+    client, token, db_path = reports_client
+    with session_scope(db_path) as session:
+        project = storage.create_project(name="Context Guard", session=session)
+        other_project = storage.create_project(name="Other Workspace", session=session)
+        storage.save_report(
+            "ctx-1",
+            summary={"issues_found": 1},
+            report={"summary": {"issues_found": 1}},
+            session=session,
+        )
+        storage.create_project_run(
+            project_id=project["id"],
+            label="Run",
+            kind="review",
+            report_id="ctx-1",
+            session=session,
+        )
+
+    missing = client.patch(
+        "/reports/ctx-1",
+        json={"review_status": "resolved"},
+        headers=auth_headers(token),
+    )
+    assert missing.status_code == 400
+
+    mismatch = client.patch(
+        "/reports/ctx-1",
+        params={"project_id": other_project["id"]},
+        json={"review_status": "resolved"},
+        headers=auth_headers(token),
+    )
+    assert mismatch.status_code == 404
+
+    slug_only = client.patch(
+        "/reports/ctx-1",
+        params={"project_slug": project["slug"]},
+        json={"review_status": "resolved"},
+        headers=auth_headers(token),
+    )
+    assert slug_only.status_code == 200
+    assert slug_only.json()["review_status"] == "resolved"
+
+
+def test_report_comment_requires_project_context(reports_client: Tuple[TestClient, str, Path]) -> None:
+    client, token, db_path = reports_client
+    with session_scope(db_path) as session:
+        project = storage.create_project(name="Comment Guard", session=session)
+        storage.save_report(
+            "ctx-2",
+            summary={"issues_found": 1},
+            report={"summary": {"issues_found": 1}},
+            session=session,
+        )
+        storage.create_project_run(
+            project_id=project["id"],
+            label="Run",
+            kind="review",
+            report_id="ctx-2",
+            session=session,
+        )
+
+    missing = client.post(
+        "/reports/ctx-2/comments",
+        json={"body": "hi"},
+        headers=auth_headers(token),
+    )
+    assert missing.status_code == 400
+
+    slug_comment = client.post(
+        "/reports/ctx-2/comments",
+        params={"project_slug": project["slug"]},
+        json={"body": "slug ok"},
+        headers=auth_headers(token),
+    )
+    assert slug_comment.status_code == 201
+    comment_id = slug_comment.json()["id"]
+
+    delete_with_id = client.delete(
+        f"/reports/ctx-2/comments/{comment_id}",
+        params={"project_id": project["id"]},
+        headers=auth_headers(token),
+    )
+    assert delete_with_id.status_code == 200

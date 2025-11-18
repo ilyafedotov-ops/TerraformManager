@@ -18,7 +18,8 @@ export const load: PageLoad = async ({ fetch, parent, params }) => {
 	try {
 		const reports = await listReports(fetch, token, {
 			limit: 50,
-			project_id: projectId ?? undefined
+			project_id: projectId ?? undefined,
+			project_slug: projectSlug ?? undefined
 		});
 		return { reports, token, projectId, projectSlug };
 	} catch (error) {

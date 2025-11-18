@@ -8,12 +8,22 @@
     const { data } = $props();
     let query = $state<string>(data.query ?? 'terraform security best practices');
     let topK = $state<number>(data.topK ?? 3);
+    let provider = $state<string>(data.provider ?? '');
     let results = $state<KnowledgeItem[]>(data.items ?? []);
     let error = $state<string | null>(data.error ?? null);
     let isSearching = $state(false);
     const token = data.token as string | null;
 
-    let syncSources = $state<string>('https://github.com/hashicorp/policy-library-azure-storage-terraform');
+    let syncSources = $state<string>(`https://github.com/hashicorp/policy-library-azure-storage-terraform
+https://github.com/terraform-aws-modules/terraform-aws-vpc
+https://github.com/terraform-aws-modules/terraform-aws-eks
+https://github.com/terraform-aws-modules/terraform-aws-rds
+https://github.com/terraform-aws-modules/terraform-aws-security-group
+https://github.com/Azure/terraform-azurerm-aks
+https://github.com/Azure/terraform-azurerm-network
+https://github.com/Azure/terraform-azurerm-storage
+https://github.com/kubernetes/examples
+https://github.com/argoproj/argo-cd`);
     let syncResults = $state<KnowledgeSyncResult[]>([]);
     let syncStatus = $state<string | null>(null);
     let isSyncing = $state(false);
@@ -23,9 +33,11 @@
         error = null;
         isSearching = true;
         try {
-            const response = await fetch(
-                `${API_BASE}/knowledge/search?q=${encodeURIComponent(query)}&top_k=${Math.min(Math.max(topK, 1), 10)}`
-            );
+            let searchUrl = `${API_BASE}/knowledge/search?q=${encodeURIComponent(query)}&top_k=${Math.min(Math.max(topK, 1), 10)}`;
+            if (provider) {
+                searchUrl += `&provider=${encodeURIComponent(provider)}`;
+            }
+            const response = await fetch(searchUrl);
             if (!response.ok) {
                 const detail = await response.text();
                 throw new Error(detail || `Request failed (${response.status})`);
@@ -35,6 +47,11 @@
             const url = new URL(window.location.href);
             url.searchParams.set('q', query);
             url.searchParams.set('top_k', String(topK));
+            if (provider) {
+                url.searchParams.set('provider', provider);
+            } else {
+                url.searchParams.delete('provider');
+            }
             await goto(`${url.pathname}${url.search}`, {
                 replaceState: true,
                 keepFocus: true,
@@ -94,7 +111,7 @@
     </header>
 
     <div class="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40">
-        <form class="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,220px)]" onsubmit={runSearch}>
+        <form class="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,180px)_minmax(0,120px)]" onsubmit={runSearch}>
             <label class="block space-y-2 text-sm font-medium text-slate-600">
                 <span class="uppercase tracking-[0.3em] text-slate-400">Search term</span>
                 <input
@@ -104,6 +121,19 @@
                     bind:value={query}
                     name="q"
                 />
+            </label>
+            <label class="block space-y-2 text-sm font-medium text-slate-600">
+                <span class="uppercase tracking-[0.3em] text-slate-400">Provider</span>
+                <select
+                    class="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-700 shadow-inner shadow-slate-200 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-200"
+                    bind:value={provider}
+                    name="provider"
+                >
+                    <option value="">All</option>
+                    <option value="aws">AWS</option>
+                    <option value="azure">Azure</option>
+                    <option value="kubernetes">Kubernetes</option>
+                </select>
             </label>
             <label class="block space-y-2 text-sm font-medium text-slate-600">
                 <span class="uppercase tracking-[0.3em] text-slate-400">Top results</span>
@@ -116,7 +146,7 @@
                     name="top_k"
                 />
             </label>
-            <div class="md:col-span-2 flex flex-wrap items-center justify-between gap-3">
+            <div class="md:col-span-3 flex flex-wrap items-center justify-between gap-3">
                 {#if error}
                     <div class="rounded-xl border border-rose-300 bg-rose-50 px-4 py-2 text-xs text-rose-700">
                         {error}

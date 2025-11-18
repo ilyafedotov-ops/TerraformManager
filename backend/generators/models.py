@@ -1003,9 +1003,307 @@ class BlueprintRequest(BaseModel):
         return cleaned
 
 
+class AwsVpcGeneratorPayload(BaseModel):
+    name_prefix: str = Field(
+        ...,
+        description="Prefix for all resource names (VPC, subnets, etc.).",
+        examples=["prod-vpc"],
+    )
+    region: str = Field(
+        "us-east-1",
+        description="AWS region where resources will be created.",
+        examples=["us-east-1", "us-west-2"],
+    )
+    environment: str = Field(
+        "prod",
+        description="Environment tag applied to all resources.",
+        examples=["prod", "stage", "dev"],
+    )
+    owner_tag: str = Field(
+        "platform-team",
+        description="Owner tag value for traceability.",
+        examples=["platform-team"],
+    )
+    cost_center_tag: str = Field(
+        "ENG-SRE",
+        description="Cost center tag value for chargeback or showback.",
+        examples=["ENG-SRE"],
+    )
+    vpc_cidr: str = Field(
+        "10.0.0.0/16",
+        description="CIDR block for the VPC.",
+        examples=["10.0.0.0/16", "172.16.0.0/16"],
+    )
+    public_subnet_cidr: str = Field(
+        "10.0.1.0/24",
+        description="CIDR block for the public subnet.",
+        examples=["10.0.1.0/24"],
+    )
+    public_subnet_az: str = Field(
+        "us-east-1a",
+        description="Availability zone for the public subnet.",
+        examples=["us-east-1a", "us-west-2a"],
+    )
+    private_subnet_cidr: str = Field(
+        "10.0.2.0/24",
+        description="CIDR block for the private subnet.",
+        examples=["10.0.2.0/24"],
+    )
+    private_subnet_az: str = Field(
+        "us-east-1b",
+        description="Availability zone for the private subnet.",
+        examples=["us-east-1b", "us-west-2b"],
+    )
+    flow_logs_retention_days: int = Field(
+        90,
+        ge=1,
+        le=365,
+        description="CloudWatch Logs retention period for VPC Flow Logs.",
+    )
+    backend: Optional[AwsS3BackendSettings] = Field(
+        None,
+        description="Optional remote state backend configuration for Terraform.",
+    )
+
+    @field_validator("name_prefix", "environment", "owner_tag", "cost_center_tag", "region")
+    @classmethod
+    def ensure_non_empty(cls, value: str, info: ValidationInfo) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError(f"{info.field_name} cannot be empty.")
+        return candidate
+
+
+class AwsEksGeneratorPayload(BaseModel):
+    cluster_name: str = Field(
+        ...,
+        description="Name for the EKS cluster.",
+        examples=["prod-eks"],
+    )
+    region: str = Field(
+        "us-east-1",
+        description="AWS region where resources will be created.",
+        examples=["us-east-1", "us-west-2"],
+    )
+    environment: str = Field(
+        "prod",
+        description="Environment tag applied to all resources.",
+        examples=["prod", "stage", "dev"],
+    )
+    owner_tag: str = Field(
+        "platform-team",
+        description="Owner tag value for traceability.",
+        examples=["platform-team"],
+    )
+    cost_center_tag: str = Field(
+        "ENG-SRE",
+        description="Cost center tag value for chargeback or showback.",
+        examples=["ENG-SRE"],
+    )
+    vpc_id: str = Field(
+        ...,
+        description="VPC ID where the EKS cluster will be deployed.",
+        examples=["vpc-abc123"],
+    )
+    private_subnet_ids: List[str] = Field(
+        ...,
+        description="List of private subnet IDs for the EKS cluster.",
+        examples=[["subnet-abc123", "subnet-def456"]],
+    )
+    kubernetes_version: str = Field(
+        "1.28",
+        description="Kubernetes version for the EKS cluster.",
+        examples=["1.28", "1.29"],
+    )
+    allow_public_api: bool = Field(
+        False,
+        description="Allow public access to the EKS API server endpoint.",
+    )
+    public_access_cidrs: List[str] = Field(
+        default_factory=lambda: ["0.0.0.0/0"],
+        description="CIDR blocks allowed to access the public API endpoint (if enabled).",
+        examples=[["203.0.113.0/24", "198.51.100.0/24"]],
+    )
+    kms_key_arn: Optional[str] = Field(
+        None,
+        description="Optional KMS Key ARN for envelope encryption of Kubernetes secrets.",
+        examples=["arn:aws:kms:us-east-1:123456789012:key/abcd-1234"],
+    )
+    node_instance_type: str = Field(
+        "t3.medium",
+        description="EC2 instance type for EKS managed node group.",
+        examples=["t3.medium", "m5.large"],
+    )
+    node_desired_size: int = Field(
+        2,
+        ge=1,
+        le=10,
+        description="Desired number of nodes in the managed node group.",
+    )
+    node_min_size: int = Field(
+        2,
+        ge=1,
+        le=10,
+        description="Minimum number of nodes in the managed node group.",
+    )
+    node_max_size: int = Field(
+        4,
+        ge=1,
+        le=20,
+        description="Maximum number of nodes in the managed node group.",
+    )
+    backend: Optional[AwsS3BackendSettings] = Field(
+        None,
+        description="Optional remote state backend configuration for Terraform.",
+    )
+
+    @field_validator("cluster_name", "environment", "owner_tag", "cost_center_tag", "region", "vpc_id")
+    @classmethod
+    def ensure_non_empty(cls, value: str, info: ValidationInfo) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError(f"{info.field_name} cannot be empty.")
+        return candidate
+
+    @field_validator("private_subnet_ids")
+    @classmethod
+    def ensure_subnet_ids(cls, values: List[str]) -> List[str]:
+        if not values:
+            raise ValueError("At least one private subnet ID is required.")
+        cleaned = [v.strip() for v in values if v.strip()]
+        if not cleaned:
+            raise ValueError("private_subnet_ids cannot be empty.")
+        return cleaned
+
+
+class AwsRdsGeneratorPayload(BaseModel):
+    db_identifier: str = Field(
+        ...,
+        description="Identifier for the RDS instance.",
+        examples=["prod-db"],
+    )
+    region: str = Field(
+        "us-east-1",
+        description="AWS region where resources will be created.",
+        examples=["us-east-1", "us-west-2"],
+    )
+    environment: str = Field(
+        "prod",
+        description="Environment tag applied to all resources.",
+        examples=["prod", "stage", "dev"],
+    )
+    owner_tag: str = Field(
+        "platform-team",
+        description="Owner tag value for traceability.",
+        examples=["platform-team"],
+    )
+    cost_center_tag: str = Field(
+        "ENG-SRE",
+        description="Cost center tag value for chargeback or showback.",
+        examples=["ENG-SRE"],
+    )
+    subnet_ids: List[str] = Field(
+        ...,
+        description="List of subnet IDs for the DB subnet group.",
+        examples=[["subnet-abc123", "subnet-def456"]],
+    )
+    security_group_ids: List[str] = Field(
+        ...,
+        description="List of security group IDs for the RDS instance.",
+        examples=[["sg-abc123"]],
+    )
+    engine: str = Field(
+        "postgres",
+        description="Database engine (postgres, mysql, mariadb, oracle-ee, sqlserver-ex).",
+        examples=["postgres", "mysql"],
+    )
+    engine_version: str = Field(
+        "15.4",
+        description="Database engine version.",
+        examples=["15.4", "8.0.35"],
+    )
+    instance_class: str = Field(
+        "db.t3.micro",
+        description="RDS instance class.",
+        examples=["db.t3.micro", "db.r6i.large"],
+    )
+    allocated_storage: int = Field(
+        20,
+        ge=20,
+        le=65536,
+        description="Initial allocated storage in GB.",
+    )
+    max_allocated_storage: int = Field(
+        100,
+        ge=20,
+        le=65536,
+        description="Maximum storage for autoscaling in GB.",
+    )
+    multi_az: bool = Field(
+        True,
+        description="Enable Multi-AZ deployment for high availability.",
+    )
+    backup_retention: int = Field(
+        7,
+        ge=1,
+        le=35,
+        description="Automated backup retention period in days.",
+    )
+    backup_window: str = Field(
+        "03:00-04:00",
+        description="Daily backup window (UTC).",
+        examples=["03:00-04:00"],
+    )
+    preferred_maintenance_window: str = Field(
+        "sun:04:00-sun:05:00",
+        description="Weekly maintenance window (UTC).",
+        examples=["sun:04:00-sun:05:00"],
+    )
+    db_name: str = Field(
+        "mydb",
+        description="Initial database name.",
+        examples=["mydb", "appdb"],
+    )
+    kms_key_id: Optional[str] = Field(
+        None,
+        description="Optional KMS Key ARN for RDS encryption.",
+        examples=["arn:aws:kms:us-east-1:123456789012:key/abcd-1234"],
+    )
+    logs_exports: List[str] = Field(
+        default_factory=lambda: ["postgresql"],
+        description="CloudWatch Logs exports (engine-specific).",
+        examples=[["postgresql"], ["error", "general", "slowquery"]],
+    )
+    backend: Optional[AwsS3BackendSettings] = Field(
+        None,
+        description="Optional remote state backend configuration for Terraform.",
+    )
+
+    @field_validator("db_identifier", "environment", "owner_tag", "cost_center_tag", "region", "engine", "db_name")
+    @classmethod
+    def ensure_non_empty(cls, value: str, info: ValidationInfo) -> str:
+        candidate = value.strip()
+        if not candidate:
+            raise ValueError(f"{info.field_name} cannot be empty.")
+        return candidate
+
+    @field_validator("subnet_ids", "security_group_ids")
+    @classmethod
+    def ensure_ids(cls, values: List[str], info: ValidationInfo) -> List[str]:
+        if not values:
+            raise ValueError(f"{info.field_name} must include at least one ID.")
+        cleaned = [v.strip() for v in values if v.strip()]
+        if not cleaned:
+            raise ValueError(f"{info.field_name} cannot be empty.")
+        return cleaned
+
+
 __all__ = [
     "AwsS3BackendSettings",
     "AwsS3GeneratorPayload",
+    "AwsVpcGeneratorPayload",
+    "AwsEksGeneratorPayload",
+    "AwsRdsGeneratorPayload",
     "AzureStorageBackendSettings",
     "AzureStorageGeneratorPayload",
     "AzureServiceBusQueueSettings",

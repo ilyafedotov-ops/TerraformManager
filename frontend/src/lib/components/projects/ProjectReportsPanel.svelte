@@ -41,6 +41,11 @@ const {
 }: Props = $props();
 
 const projectIdentifier = $derived(projectId ?? null);
+const slugIdentifier = $derived(projectSlug ?? null);
+const getProjectContext = () => ({
+	projectId: projectIdentifier ?? null,
+	projectSlug: slugIdentifier ?? null
+});
 const workspaceKey = $derived(projectSlug ?? projectIdentifier ?? null);
 const initialItems = initialReports?.items ?? [];
 
@@ -133,7 +138,8 @@ const buildListParams = (overrides: Partial<ListReportsParams> = {}): ListReport
 		created_after: overrides?.created_after,
 		created_before: overrides?.created_before,
 		order: overrides?.order ?? 'desc',
-		project_id: projectIdentifier ?? undefined
+		project_id: projectIdentifier ?? undefined,
+		project_slug: slugIdentifier ?? undefined
 	};
 	return params;
 };
@@ -157,8 +163,8 @@ const syncReviewForm = (record: ReportSummary | null) => {
 };
 
 const refreshReports = async (overrides: Partial<ListReportsParams> = {}) => {
-	const identifier = projectIdentifier;
-	if (!token || !identifier) {
+	const hasWorkspaceContext = Boolean(projectIdentifier ?? slugIdentifier);
+	if (!token || !hasWorkspaceContext) {
 		filterError = !token ? 'Missing API token' : 'Project context missing';
 		return;
 	}
@@ -261,7 +267,7 @@ const saveReviewMetadata = async () => {
 		review_notes: reviewForm.review_notes.trim() || null
 	};
 	try {
-		const response = await updateReportReviewMetadata(fetch, token, selectedReportId, payload);
+		const response = await updateReportReviewMetadata(fetch, token, selectedReportId, payload, getProjectContext());
 		reports = reports.map((item) =>
 			item.id === selectedReportId
 				? {
@@ -294,7 +300,7 @@ const loadComments = async (reportId: string) => {
 	commentsLoading = true;
 	commentError = null;
 	try {
-		comments = await listReportComments(fetch, token, reportId);
+		comments = await listReportComments(fetch, token, reportId, getProjectContext());
 	} catch (err) {
 		commentError = toErrorMessage(err);
 		comments = [];
@@ -313,7 +319,7 @@ const submitComment = async (event?: Event) => {
 	}
 	commentError = null;
 	try {
-		const comment = await createReportComment(fetch, token, selectedReportId, trimmed);
+		const comment = await createReportComment(fetch, token, selectedReportId, trimmed, undefined, getProjectContext());
 		comments = [...comments, comment];
 		commentDraft = '';
 		await refreshReports();
@@ -325,7 +331,7 @@ const submitComment = async (event?: Event) => {
 const removeComment = async (commentId: string) => {
 	if (!token || !selectedReportId) return;
 	try {
-		await deleteReportComment(fetch, token, selectedReportId, commentId);
+		await deleteReportComment(fetch, token, selectedReportId, commentId, getProjectContext());
 		comments = comments.filter((comment) => comment.id !== commentId);
 		await refreshReports();
 	} catch (err) {
