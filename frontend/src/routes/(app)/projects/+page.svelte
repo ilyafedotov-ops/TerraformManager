@@ -1,12 +1,14 @@
 <script lang="ts">
 import { browser } from '$app/environment';
 import { page } from '$app/stores';
+import { goto } from '$app/navigation';
 import { onMount } from 'svelte';
 import { get } from 'svelte/store';
 import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
 import ProjectReviewPanel from '$lib/components/projects/ProjectReviewPanel.svelte';
 import ProjectReportsPanel from '$lib/components/projects/ProjectReportsPanel.svelte';
 import ProjectGeneratePanel from '$lib/components/projects/ProjectGeneratePanel.svelte';
+import ReportDetailView from '$lib/components/reports/ReportDetailView.svelte';
 import {
 	type GeneratedAssetSummary,
 	type GeneratedAssetVersionSummary,
@@ -18,6 +20,7 @@ import {
 	type ProjectOverview,
 	type ProjectConfigRecord,
 	type ProjectArtifactRecord,
+	type ReportDetail,
 	downloadProjectLibraryAssetVersion,
 	diffProjectLibraryAssetVersions,
 	listProjectLibraryVersionFiles
@@ -29,12 +32,22 @@ const { data } = $props();
 const token = data.token as string | null;
 const initialProjects = (data.projects ?? []) as ProjectSummary[];
 const loadError = data.error as string | undefined;
+const initialReportDetail = (data.report ?? null) as ReportDetail | null;
+const initialReportError = data.reportError as string | undefined;
+let reportDetail = $state<ReportDetail | null>(initialReportDetail);
+let reportDetailError = $state<string | null>(initialReportError ?? null);
+$effect(() => {
+	reportDetail = (data.report ?? null) as ReportDetail | null;
+	reportDetailError = (data.reportError ?? null) as string | null;
+});
 
 const queryTab = $derived(($page.url.searchParams.get('tab') ?? '').toLowerCase());
 const queryProject = $derived($page.url.searchParams.get('project'));
 const queryAsset = $derived($page.url.searchParams.get('asset'));
 const queryVersion = $derived($page.url.searchParams.get('version'));
 const queryAction = $derived(($page.url.searchParams.get('action') ?? '').toLowerCase());
+const queryReport = $derived(($page.url.searchParams.get('report') ?? '').trim());
+const selectedReportId = $derived(queryReport || null);
 
 	if (initialProjects.length) {
 		const snapshot = get(projectState);
@@ -216,12 +229,59 @@ const formatGeneratorLabel = (value: string) => {
 	return value;
 };
 
+const buildProjectReportHref = (project: ProjectDetail | ProjectSummary | null, reportId: string) => {
+	const params = new URLSearchParams();
+	const identifier = project?.slug ?? project?.id ?? null;
+	if (identifier) {
+		params.set('project', identifier);
+	}
+	params.set('tab', 'reports');
+	params.set('report', reportId);
+	return `/projects?${params.toString()}`;
+};
+
 const setLibraryTypeFilterValue = (value: string) => {
 	libraryTypeFilter = value;
 };
 
 const toggleLibraryGeneratorFilter = (value: string) => {
 	libraryGeneratorFilter = libraryGeneratorFilter === value ? 'all' : value;
+};
+
+const buildNavigationTarget = (target: URL) => {
+	const search = target.searchParams.toString();
+	return search ? `${target.pathname}?${search}` : target.pathname;
+};
+
+const navigateWithReportParam = async (nextReportId: string | null) => {
+	const targetUrl = new URL($page.url);
+	const currentReportParam = (targetUrl.searchParams.get('report') ?? '').trim();
+	if (!nextReportId && !currentReportParam) {
+		return;
+	}
+	if (nextReportId) {
+		targetUrl.searchParams.set('report', nextReportId);
+		const currentTab = (targetUrl.searchParams.get('tab') ?? '').toLowerCase();
+		if (currentTab !== 'reports') {
+			targetUrl.searchParams.set('tab', 'reports');
+		}
+	} else {
+		targetUrl.searchParams.delete('report');
+	}
+	const href = buildNavigationTarget(targetUrl);
+	await goto(href, { replaceState: false, keepFocus: true, noScroll: true });
+};
+
+const handleReportSelect = async (event: CustomEvent<{ id: string | null }>) => {
+	const nextId = event.detail.id ?? null;
+	if (nextId === selectedReportId) {
+		return;
+	}
+	await navigateWithReportParam(nextId);
+};
+
+const closeReportDetail = async () => {
+	await navigateWithReportParam(null);
 };
 
 $effect(() => {
@@ -1808,12 +1868,12 @@ $effect(() => {
 												{/if}
 												{#if run.report_id && activeProjectValue}
 													<div class="mt-3">
-														<a
-															class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-sky-50 hover:text-sky-600"
-															href={`/projects/${activeProjectValue.id}/reports/${run.report_id}`}
-														>
-															View linked report
-														</a>
+												<a
+													class="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:bg-sky-50 hover:text-sky-600"
+													href={buildProjectReportHref(activeProjectValue, run.report_id)}
+												>
+													View linked report
+												</a>
 													</div>
 												{/if}
 											</li>
@@ -1863,14 +1923,31 @@ $effect(() => {
 								/>
 							{/if}
 						{:else if activeTab === 'reports'}
-							<ProjectReportsPanel
-								token={token}
-								projectId={activeProjectId}
-								projectSlug={activeProjectSlug ?? activeProjectId}
-								initialReports={null}
-								initialError={undefined}
-								showWorkspaceBanner={false}
-							/>
+							<div class="space-y-6">
+								{#if selectedReportId || reportDetailError}
+									<ReportDetailView
+										token={token}
+										projectId={activeProjectId}
+										projectSlug={activeProjectSlug ?? activeProjectId}
+										report={reportDetail}
+										reportId={selectedReportId}
+										error={reportDetailError}
+										showWorkspaceBanner={false}
+										backHref={null}
+										on:close={() => void closeReportDetail()}
+									/>
+								{/if}
+								<ProjectReportsPanel
+									token={token}
+									projectId={activeProjectId}
+									projectSlug={activeProjectSlug ?? activeProjectId}
+									initialReports={null}
+									initialError={undefined}
+									showWorkspaceBanner={false}
+									selectedReportId={selectedReportId}
+									on:reportSelect={handleReportSelect}
+								/>
+							</div>
 						{:else if activeTab === 'files'}
 							<RunArtifactsPanel
 								token={token}
