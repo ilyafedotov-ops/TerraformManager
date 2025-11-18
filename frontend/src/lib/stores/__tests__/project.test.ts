@@ -26,7 +26,8 @@ const mocks = vi.hoisted(() => ({
 	deleteProjectLibraryAsset: vi.fn(),
 	getProjectLibraryAsset: vi.fn(),
 	updateProjectLibraryAsset: vi.fn(),
-	getProjectOverview: vi.fn()
+	getProjectOverview: vi.fn(),
+	registerProjectIdentifierResolver: vi.fn()
 }));
 
 vi.mock('$lib/api/client', () => ({
@@ -46,7 +47,8 @@ vi.mock('$lib/api/client', () => ({
 	deleteProjectLibraryAsset: mocks.deleteProjectLibraryAsset,
 	getProjectLibraryAsset: mocks.getProjectLibraryAsset,
 	updateProjectLibraryAsset: mocks.updateProjectLibraryAsset,
-	getProjectOverview: mocks.getProjectOverview
+	getProjectOverview: mocks.getProjectOverview,
+	registerProjectIdentifierResolver: mocks.registerProjectIdentifierResolver
 }));
 
 const snapshot = (): ProjectState => {
