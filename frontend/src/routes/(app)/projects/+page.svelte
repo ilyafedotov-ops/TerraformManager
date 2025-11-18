@@ -4,6 +4,8 @@ import { page } from '$app/stores';
 import { onMount } from 'svelte';
 import { get } from 'svelte/store';
 import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
+import ProjectReviewPanel from '$lib/components/projects/ProjectReviewPanel.svelte';
+import ProjectReportsPanel from '$lib/components/projects/ProjectReportsPanel.svelte';
 import {
 	type GeneratedAssetSummary,
 	type GeneratedAssetVersionSummary,
@@ -59,6 +61,8 @@ type ArtifactIndexCacheEntry = ReturnType<typeof projectState.getCachedArtifactI
 
 const projects = $derived($projectState.projects as ProjectSummary[]);
 const activeProjectValue = $derived($activeProject as ProjectDetail | null);
+const activeProjectId = $derived(activeProjectValue?.id ?? null);
+const activeProjectSlug = $derived(activeProjectValue?.slug ?? null);
 const projectRuns = $derived($activeProjectRuns as ProjectRunSummary[]);
 const libraryCache = $derived<LibraryCacheEntry>(
 	(() => {
@@ -113,7 +117,17 @@ const projectConfigs = $derived(configCache?.items ?? []);
 const projectArtifacts = $derived(artifactIndexCache?.items ?? []);
 
 	let searchQuery = $state('');
-let activeTab = $state<'overview' | 'runs' | 'files' | 'configs' | 'artifacts' | 'library' | 'settings'>('overview');
+let activeTab = $state<
+	| 'overview'
+	| 'runs'
+	| 'review'
+	| 'reports'
+	| 'files'
+	| 'configs'
+	| 'artifacts'
+	| 'library'
+	| 'settings'
+>('overview');
 	let createModalOpen = $state(false);
 
 	let createName = $state('');
@@ -302,6 +316,8 @@ let versionFileState = $state<Record<string, VersionFileState>>({});
 const tabs: { id: typeof activeTab; label: string }[] = [
 	{ id: 'overview', label: 'Overview' },
 	{ id: 'runs', label: 'Runs' },
+	{ id: 'review', label: 'Review' },
+	{ id: 'reports', label: 'Reports' },
 	{ id: 'files', label: 'Run files' },
 	{ id: 'configs', label: 'Configs' },
 	{ id: 'artifacts', label: 'Artifacts' },
@@ -1793,6 +1809,22 @@ $effect(() => {
 									</div>
 								{/if}
 							</div>
+						{:else if activeTab === 'review'}
+							<ProjectReviewPanel
+								token={token}
+								projectId={activeProjectId}
+								projectSlug={activeProjectSlug ?? activeProjectId}
+								showWorkspaceBanner={false}
+							/>
+						{:else if activeTab === 'reports'}
+							<ProjectReportsPanel
+								token={token}
+								projectId={activeProjectId}
+								projectSlug={activeProjectSlug ?? activeProjectId}
+								initialReports={null}
+								initialError={undefined}
+								showWorkspaceBanner={false}
+							/>
 						{:else if activeTab === 'files'}
 							<RunArtifactsPanel
 								token={token}
