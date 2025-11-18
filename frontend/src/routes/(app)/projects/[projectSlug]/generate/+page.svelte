@@ -1,14 +1,24 @@
 <script lang="ts">
     import { browser } from '$app/environment';
+    import { goto } from '$app/navigation';
+    import { page } from '$app/stores';
     import {
         ApiError,
+        generateAwsS3,
+        generateAzureApiManagement,
+        generateAzureFunctionApp,
+        generateAzureServiceBus,
+        generateAzureStorageAccount,
         runProjectGenerator,
         type AwsS3GeneratorPayload,
         type AzureServiceBusGeneratorPayload,
         type AzureStorageGeneratorPayload,
         type AzureFunctionAppGeneratorPayload,
         type AzureApiManagementGeneratorPayload,
+        type GeneratedAssetSummary,
+        type GeneratedAssetVersionSummary,
         type GeneratorResult,
+        type ProjectRunSummary,
         type ProjectSummary
     } from '$lib/api/client';
     import { notifyError, notifySuccess } from '$lib/stores/notifications';
@@ -34,7 +44,7 @@
         | 'azure_function_app'
         | 'azure_api_management';
 
-type GeneratorMetadata = {
+    type GeneratorMetadata = {
         slug: string;
         example_payload?: Record<string, unknown>;
         presets?: Array<{ id?: string; label?: string; description?: string; payload?: Record<string, unknown> }>;
@@ -48,11 +58,19 @@ type GeneratorMetadata = {
         metadata?: Record<string, unknown> | null;
     };
 
+    type GeneratorRunContext = {
+        asset: GeneratedAssetSummary;
+        version: GeneratedAssetVersionSummary;
+        run: ProjectRunSummary;
+        projectId: string;
+        projectSlug: string | null;
+    };
+
     const metadataBySlug: Record<string, GeneratorMetadata> = Object.fromEntries(
         (data.metadata as GeneratorMetadata[]).map((item) => [item.slug, item])
     );
 
-    type WizardStepId = 'select' | 'configure' | 'review';
+    type WizardStepId = 'select' | 'configure' | 'destination' | 'review';
 
     const wizardSteps: Array<{ id: WizardStepId; label: string; description: string }> = [
         {
@@ -64,6 +82,11 @@ type GeneratorMetadata = {
             id: 'configure',
             label: 'Configure inputs',
             description: 'Provide environment specifics, policies, and networking details.'
+        },
+        {
+            id: 'destination',
+            label: 'Destination',
+            description: 'Choose the workspace, naming, and auto-save preferences for the generated bundle.'
         },
         {
             id: 'review',
@@ -130,6 +153,32 @@ type GeneratorMetadata = {
         }
         return result;
     };
+
+    const parseTagsInput = (value: string): string[] =>
+        value
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+
+    const projectSlugParam = $derived($page.params.projectSlug ?? null);
+
+    let autoSaveEnabled = $state(true);
+    let destinationAssetName = $state('');
+    let destinationAssetDescription = $state('');
+    let destinationAssetTags = $state('');
+    let destinationSaving = $state(false);
+    let destinationError = $state<string | null>(null);
+
+    const emptyGeneratorContexts: Record<GeneratorId, GeneratorRunContext | null> = {
+        aws_s3: null,
+        azure_storage: null,
+        azure_servicebus: null,
+        azure_function_app: null,
+        azure_api_management: null
+    };
+    let generatorContexts = $state<Record<GeneratorId, GeneratorRunContext | null>>({
+        ...emptyGeneratorContexts
+    });
 
     const s3Example =
         (metadataBySlug['aws/s3-secure-bucket']?.example_payload ?? {}) as Partial<AwsS3GeneratorPayload>;
@@ -226,8 +275,10 @@ type GeneratorMetadata = {
     let activeProjectValue = $state<ProjectSummary | null>(null);
     let authTokenValue = $state<string | null>(null);
     let missingProjectWarningShown = $state(false);
+    let projectOptions = $state<ProjectSummary[]>([]);
     let unsubscribeProject: (() => void) | null = null;
     let unsubscribeToken: (() => void) | null = null;
+    let unsubscribeProjectState: (() => void) | null = null;
 
     if (browser) {
         unsubscribeProject = activeProject.subscribe((value) => {
@@ -239,11 +290,15 @@ type GeneratorMetadata = {
         unsubscribeToken = authTokenStore.subscribe((value) => {
             authTokenValue = value;
         });
+        unsubscribeProjectState = projectState.subscribe((state) => {
+            projectOptions = state.projects;
+        });
     }
 
     onDestroy(() => {
         unsubscribeProject?.();
         unsubscribeToken?.();
+        unsubscribeProjectState?.();
     });
 
     const setActiveGenerator = (id: GeneratorId) => {
@@ -256,12 +311,20 @@ type GeneratorMetadata = {
         activeStep = 'configure';
     };
 
+    const moveToDestination = () => {
+        activeStep = 'destination';
+    };
+
     const moveToReview = () => {
         activeStep = 'review';
     };
 
     const resetToSelection = () => {
         activeStep = 'select';
+    };
+
+    const updateActiveProject = (projectId: string) => {
+        projectState.setActiveProject(projectId || null);
     };
 
     const stepState = (stepId: WizardStepId): 'complete' | 'current' | 'upcoming' => {
@@ -308,6 +371,40 @@ type GeneratorMetadata = {
             default:
                 return () => undefined;
         }
+    };
+
+    const recordGeneratorContext = (
+        generatorId: GeneratorId,
+        payload: { asset: GeneratedAssetSummary; version: GeneratedAssetVersionSummary; run: ProjectRunSummary; project: ProjectSummary }
+    ) => {
+        generatorContexts = {
+            ...generatorContexts,
+            [generatorId]: {
+                asset: payload.asset,
+                version: payload.version,
+                run: payload.run,
+                projectId: payload.project.id,
+                projectSlug: payload.project.slug ?? null
+            }
+        };
+    };
+
+    const clearGeneratorContext = (generatorId: GeneratorId) => {
+        generatorContexts = {
+            ...generatorContexts,
+            [generatorId]: null
+        };
+    };
+
+    const resolveGeneratorOptions = (runLabel: string, forceSave: boolean) => {
+        const tags = parseTagsInput(destinationAssetTags);
+        return {
+            run_label: runLabel,
+            force_save: forceSave,
+            asset_name: destinationAssetName.trim() || undefined,
+            description: destinationAssetDescription.trim() || undefined,
+            tags
+        };
     };
 
     const formatBoolean = (value: boolean, trueLabel = 'Enabled', falseLabel = 'Disabled') =>
@@ -393,6 +490,25 @@ let awsResult = $state<GeneratorResult | null>(null);
 let awsStatus = $state<string | null>(null);
 let awsBusy = $state(false);
 let generatorOverride = $state<GeneratorOverrideState | null>(null);
+let destinationContextKey: string | null = null;
+
+    $effect(() => {
+        const context = generatorContexts[activeGenerator];
+        const key = context ? `${activeGenerator}:${context.version.id}` : `${activeGenerator}:none`;
+        if (destinationContextKey === key) {
+            return;
+        }
+        destinationContextKey = key;
+        if (context) {
+            destinationAssetName = context.asset.name ?? '';
+            destinationAssetDescription = context.asset.description ?? '';
+            destinationAssetTags = (context.asset.tags ?? []).join(', ');
+        } else {
+            destinationAssetName = '';
+            destinationAssetDescription = '';
+            destinationAssetTags = '';
+        }
+    });
 
     // Azure storage state
     let azureRgName = $state(storageExample.resource_group_name ?? 'rg-app');
@@ -734,6 +850,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
         }
         awsBusy = true;
         const forceSave = opts?.force ?? false;
+        const shouldAutoSave = autoSaveEnabled || forceSave;
         try {
             const payload = buildAwsPayload();
             const context = requireProjectContext();
@@ -741,15 +858,28 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 awsBusy = false;
                 return;
             }
+            if (!shouldAutoSave) {
+                const response = await generateAwsS3(fetch, payload);
+                generatorOverride = null;
+                awsResult = response;
+                awsStatus = 'Terraform module generated (auto-save disabled).';
+                notifySuccess(awsStatus);
+                clearGeneratorContext('aws_s3');
+                moveToReview();
+                return;
+            }
             const response = await runProjectGenerator(fetch, context.token, context.project.id, 'aws/s3-secure-bucket', {
                 payload: payload as unknown as Record<string, unknown>,
-                options: {
-                    run_label: `${generatorLabels.aws_s3} • ${new Date().toLocaleString()}`,
-                    force_save: forceSave
-                }
+                options: resolveGeneratorOptions(`${generatorLabels.aws_s3} • ${new Date().toLocaleString()}`, forceSave)
             });
             generatorOverride = null;
             awsResult = response.output;
+            recordGeneratorContext('aws_s3', {
+                asset: response.asset,
+                version: response.version,
+                run: response.run,
+                project: context.project
+            });
             const validationStatus = validationStatusLabel(response.version.validation_summary ?? null);
             if (validationStatus === 'failed') {
                 const details = validationMessage(response.version.validation_summary ?? null);
@@ -772,7 +902,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                     ? 'Terraform module generated with warnings. Review validation output.'
                     : `Terraform module generated (validation ${validationStatus}).`;
             notifySuccess(awsStatus);
-            moveToReview();
+            moveToDestination();
             projectState.upsertRun(context.project.id, response.run);
         } catch (error) {
             if (handleGeneratorValidationError('aws_s3', error)) {
@@ -816,6 +946,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
         }
         azureBusy = true;
         const forceSave = opts?.force ?? false;
+        const shouldAutoSave = autoSaveEnabled || forceSave;
         try {
             const payload = buildAzureStoragePayload();
             const context = requireProjectContext();
@@ -823,15 +954,28 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 azureBusy = false;
                 return;
             }
+            if (!shouldAutoSave) {
+                const response = await generateAzureStorageAccount(fetch, payload);
+                generatorOverride = null;
+                azureResult = response;
+                azureStatus = 'Terraform module generated (auto-save disabled).';
+                notifySuccess(azureStatus);
+                clearGeneratorContext('azure_storage');
+                moveToReview();
+                return;
+            }
             const response = await runProjectGenerator(fetch, context.token, context.project.id, 'azure/storage-secure-account', {
                 payload: payload as unknown as Record<string, unknown>,
-                options: {
-                    run_label: `${generatorLabels.azure_storage} • ${new Date().toLocaleString()}`,
-                    force_save: forceSave
-                }
+                options: resolveGeneratorOptions(`${generatorLabels.azure_storage} • ${new Date().toLocaleString()}`, forceSave)
             });
             generatorOverride = null;
             azureResult = response.output;
+            recordGeneratorContext('azure_storage', {
+                asset: response.asset,
+                version: response.version,
+                run: response.run,
+                project: context.project
+            });
             const validationStatus = validationStatusLabel(response.version.validation_summary ?? null);
             if (validationStatus === 'failed') {
                 const details = validationMessage(response.version.validation_summary ?? null);
@@ -854,7 +998,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                     ? 'Terraform module generated with warnings. Review validation output.'
                     : `Terraform module generated (validation ${validationStatus}).`;
             notifySuccess(azureStatus);
-            moveToReview();
+            moveToDestination();
             projectState.upsertRun(context.project.id, response.run);
         } catch (error) {
             if (handleGeneratorValidationError('azure_storage', error)) {
@@ -908,6 +1052,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
         }
         sbBusy = true;
         const forceSave = opts?.force ?? false;
+        const shouldAutoSave = autoSaveEnabled || forceSave;
         try {
             const payload = buildServiceBusPayload();
             const context = requireProjectContext();
@@ -915,15 +1060,28 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 sbBusy = false;
                 return;
             }
+            if (!shouldAutoSave) {
+                const response = await generateAzureServiceBus(fetch, payload);
+                generatorOverride = null;
+                sbResult = response;
+                sbStatus = 'Terraform module generated (auto-save disabled).';
+                notifySuccess(sbStatus);
+                clearGeneratorContext('azure_servicebus');
+                moveToReview();
+                return;
+            }
             const response = await runProjectGenerator(fetch, context.token, context.project.id, 'azure/servicebus-namespace', {
                 payload: payload as unknown as Record<string, unknown>,
-                options: {
-                    run_label: `${generatorLabels.azure_servicebus} • ${new Date().toLocaleString()}`,
-                    force_save: forceSave
-                }
+                options: resolveGeneratorOptions(`${generatorLabels.azure_servicebus} • ${new Date().toLocaleString()}`, forceSave)
             });
             generatorOverride = null;
             sbResult = response.output;
+            recordGeneratorContext('azure_servicebus', {
+                asset: response.asset,
+                version: response.version,
+                run: response.run,
+                project: context.project
+            });
             const validationStatus = validationStatusLabel(response.version.validation_summary ?? null);
             if (validationStatus === 'failed') {
                 const details = validationMessage(response.version.validation_summary ?? null);
@@ -946,7 +1104,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                     ? 'Terraform module generated with warnings. Review validation output.'
                     : `Terraform module generated (validation ${validationStatus}).`;
             notifySuccess(sbStatus);
-            moveToReview();
+            moveToDestination();
             projectState.upsertRun(context.project.id, response.run);
         } catch (error) {
             if (handleGeneratorValidationError('azure_servicebus', error)) {
@@ -982,6 +1140,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
         }
         funcBusy = true;
         const forceSave = opts?.force ?? false;
+        const shouldAutoSave = autoSaveEnabled || forceSave;
         try {
             const payload = buildFunctionPayload();
             const context = requireProjectContext();
@@ -989,15 +1148,28 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 funcBusy = false;
                 return;
             }
+            if (!shouldAutoSave) {
+                const response = await generateAzureFunctionApp(fetch, payload);
+                generatorOverride = null;
+                funcResult = response;
+                funcStatus = 'Terraform module generated (auto-save disabled).';
+                notifySuccess(funcStatus);
+                clearGeneratorContext('azure_function_app');
+                moveToReview();
+                return;
+            }
             const response = await runProjectGenerator(fetch, context.token, context.project.id, 'azure/function-app', {
                 payload: payload as unknown as Record<string, unknown>,
-                options: {
-                    run_label: `${generatorLabels.azure_function_app} • ${new Date().toLocaleString()}`,
-                    force_save: forceSave
-                }
+                options: resolveGeneratorOptions(`${generatorLabels.azure_function_app} • ${new Date().toLocaleString()}`, forceSave)
             });
             generatorOverride = null;
             funcResult = response.output;
+            recordGeneratorContext('azure_function_app', {
+                asset: response.asset,
+                version: response.version,
+                run: response.run,
+                project: context.project
+            });
             const validationStatus = validationStatusLabel(response.version.validation_summary ?? null);
             if (validationStatus === 'failed') {
                 const details = validationMessage(response.version.validation_summary ?? null);
@@ -1020,7 +1192,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                     ? 'Terraform module generated with warnings. Review validation output.'
                     : `Terraform module generated (validation ${validationStatus}).`;
             notifySuccess(funcStatus);
-            moveToReview();
+            moveToDestination();
             projectState.upsertRun(context.project.id, response.run);
         } catch (error) {
             if (handleGeneratorValidationError('azure_function_app', error)) {
@@ -1061,6 +1233,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
         }
         apimBusy = true;
         const forceSave = opts?.force ?? false;
+        const shouldAutoSave = autoSaveEnabled || forceSave;
         try {
             const payload = buildApiManagementPayload();
             const context = requireProjectContext();
@@ -1068,15 +1241,28 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 apimBusy = false;
                 return;
             }
+            if (!shouldAutoSave) {
+                const response = await generateAzureApiManagement(fetch, payload);
+                generatorOverride = null;
+                apimResult = response;
+                apimStatus = 'Terraform module generated (auto-save disabled).';
+                notifySuccess(apimStatus);
+                clearGeneratorContext('azure_api_management');
+                moveToReview();
+                return;
+            }
             const response = await runProjectGenerator(fetch, context.token, context.project.id, 'azure/api-management', {
                 payload: payload as unknown as Record<string, unknown>,
-                options: {
-                    run_label: `${generatorLabels.azure_api_management} • ${new Date().toLocaleString()}`,
-                    force_save: forceSave
-                }
+                options: resolveGeneratorOptions(`${generatorLabels.azure_api_management} • ${new Date().toLocaleString()}`, forceSave)
             });
             generatorOverride = null;
             apimResult = response.output;
+            recordGeneratorContext('azure_api_management', {
+                asset: response.asset,
+                version: response.version,
+                run: response.run,
+                project: context.project
+            });
             const validationStatus = validationStatusLabel(response.version.validation_summary ?? null);
             if (validationStatus === 'failed') {
                 const details = validationMessage(response.version.validation_summary ?? null);
@@ -1099,7 +1285,7 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                     ? 'Terraform module generated with warnings. Review validation output.'
                     : `Terraform module generated (validation ${validationStatus}).`;
             notifySuccess(apimStatus);
-            moveToReview();
+            moveToDestination();
             projectState.upsertRun(context.project.id, response.run);
         } catch (error) {
             if (handleGeneratorValidationError('azure_api_management', error)) {
@@ -1188,6 +1374,19 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
         return null;
     };
 
+    const validationStatusBadgeClass = (status: ValidationStatus): string => {
+        switch (status) {
+            case 'passed':
+                return 'border-emerald-200 bg-emerald-50 text-emerald-600';
+            case 'warn':
+                return 'border-amber-200 bg-amber-50 text-amber-600';
+            case 'failed':
+                return 'border-rose-200 bg-rose-50 text-rose-600';
+            default:
+                return 'border-slate-200 bg-white text-slate-500';
+        }
+    };
+
     const parseValidationSummary = (error: unknown): Record<string, unknown> | null => {
         if (error instanceof ApiError && error.detail && typeof error.detail === 'object') {
             const detail = error.detail as Record<string, unknown>;
@@ -1238,6 +1437,61 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 void handleApimSubmit(undefined, { force: true });
                 break;
         }
+    };
+
+    const handleSaveDestination = async () => {
+        const context = generatorContexts[activeGenerator];
+        if (!context) {
+            destinationError = 'Generate and save a module before editing the destination.';
+            return;
+        }
+        if (!authTokenValue) {
+            destinationError = 'Authentication required.';
+            notifyError('Authentication required to update the library asset.');
+            return;
+        }
+        destinationSaving = true;
+        destinationError = null;
+        try {
+            await projectState.updateLibraryAsset(fetch, authTokenValue, context.projectId, context.asset.id, {
+                name: destinationAssetName.trim() || undefined,
+                description: destinationAssetDescription.trim() || undefined,
+                tags: parseTagsInput(destinationAssetTags)
+            });
+            notifySuccess('Destination details updated.');
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to update destination metadata.';
+            destinationError = message;
+            notifyError(message);
+        } finally {
+            destinationSaving = false;
+        }
+    };
+
+    const openLibraryForContext = (context: GeneratorRunContext | null) => {
+        if (!context) return;
+        projectState.setActiveProject(context.projectId);
+        const slugOrId = context.projectSlug ?? projectSlugParam ?? context.projectId;
+        const params = new URLSearchParams({
+            tab: 'library',
+            project: slugOrId,
+            asset: context.asset.id
+        });
+        void goto(`/projects?${params.toString()}`);
+    };
+
+    const openDiffForContext = (context: GeneratorRunContext | null) => {
+        if (!context) return;
+        projectState.setActiveProject(context.projectId);
+        const slugOrId = context.projectSlug ?? projectSlugParam ?? context.projectId;
+        const params = new URLSearchParams({
+            tab: 'library',
+            project: slugOrId,
+            asset: context.asset.id,
+            version: context.version.id,
+            action: 'diff'
+        });
+        void goto(`/projects?${params.toString()}`);
     };
 
 </script>
@@ -1482,31 +1736,166 @@ let generatorOverride = $state<GeneratorOverrideState | null>(null);
                 onDownload={() => downloadResult(apimResult)}
             />
         {/if}
-{:else}
-    {@const activeResult = getResultForGenerator(activeGenerator)}
-    <section class="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40">
-        <header class="space-y-2">
-            <p class="text-xs font-semibold uppercase tracking-[0.35em] text-sky-500">Review</p>
-            <h3 class="text-xl font-semibold text-slate-700">Verify and export Terraform</h3>
+    {:else if activeStep === 'destination'}
+        {@const activeContext = generatorContexts[activeGenerator]}
+        <section class="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40">
+            <header class="space-y-2">
+                <p class="text-xs font-semibold uppercase tracking-[0.35em] text-sky-500">Destination</p>
+                <h3 class="text-xl font-semibold text-slate-700">Choose where the module is stored</h3>
+                <p class="text-sm text-slate-500">
+                    Confirm the workspace, naming, and metadata before heading to the review step. Toggle auto-save off if you only
+                    need a one-off download.
+                </p>
+            </header>
+
+            <div class="grid gap-4 md:grid-cols-2">
+                <label class="space-y-1 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    <span>Workspace project</span>
+                    <select
+                        class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700"
+                        value={activeProjectValue?.id ?? ''}
+                        onchange={(event) => updateActiveProject((event.currentTarget as HTMLSelectElement).value)}
+                    >
+                        {#if !projectOptions.length}
+                            <option value="" disabled>Loading projects…</option>
+                        {:else}
+                            {#each projectOptions as projectOption}
+                                <option value={projectOption.id}>{projectOption.name}</option>
+                            {/each}
+                        {/if}
+                    </select>
+                </label>
+                <label class="space-y-1 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    <span>Auto-save to project library</span>
+                    <button
+                        type="button"
+                        class={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                            autoSaveEnabled
+                                ? 'border-emerald-300 bg-emerald-50 text-emerald-600'
+                                : 'border-slate-200 bg-white text-slate-500'
+                        }`}
+                        onclick={() => (autoSaveEnabled = !autoSaveEnabled)}
+                    >
+                        <span>{autoSaveEnabled ? 'Enabled — runs are saved with validation summaries.' : 'Disabled — runs only render Terraform.'}</span>
+                        <span class={`h-3 w-3 rounded-full ${autoSaveEnabled ? 'bg-emerald-500' : 'bg-slate-300'}`}></span>
+                    </button>
+                </label>
+            </div>
+
+            {#if autoSaveEnabled}
+                {#if activeContext}
+                    <div class="grid gap-4 md:grid-cols-2">
+                        <label class="space-y-1 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                            <span>Asset name</span>
+                            <input class={inputClass} type="text" bind:value={destinationAssetName} placeholder={activeContext.asset.name} />
+                        </label>
+                        <label class="space-y-1 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                            <span>Tags (comma separated)</span>
+                            <input class={inputClass} type="text" bind:value={destinationAssetTags} placeholder="prod,baseline" />
+                        </label>
+                        <label class="md:col-span-2 space-y-1 text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
+                            <span>Description</span>
+                            <textarea class={textareaClass} rows={3} bind:value={destinationAssetDescription}></textarea>
+                        </label>
+                    </div>
+                    {#if destinationError}
+                        <p class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-600">{destinationError}</p>
+                    {/if}
+                    <div class="flex flex-wrap items-center gap-3">
+                        <button
+                            type="button"
+                            class={actionClass}
+                            onclick={handleSaveDestination}
+                            disabled={destinationSaving}
+                        >
+                            {destinationSaving ? 'Saving…' : 'Save destination updates'}
+                        </button>
+                        <button class={secondaryButtonClass} type="button" onclick={moveToReview}>
+                            Continue to review
+                        </button>
+                        <button class={secondaryButtonClass} type="button" onclick={moveToConfigure}>
+                            Back to inputs
+                        </button>
+                    </div>
+                {:else}
+                    <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                        Generate the module with auto-save enabled to edit destination metadata and quick links.
+                    </div>
+                    <div class="flex flex-wrap gap-3">
+                        <button class={secondaryButtonClass} type="button" onclick={moveToConfigure}>
+                            Back to inputs
+                        </button>
+                    </div>
+                {/if}
+            {:else}
+                <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                    Auto-save is disabled. The generator will render Terraform for download/copy without creating project runs or
+                    library assets.
+                </div>
+                <div class="flex flex-wrap gap-3">
+                    <button class={secondaryButtonClass} type="button" onclick={moveToConfigure}>
+                        Back to inputs
+                    </button>
+                    <button class={secondaryButtonClass} type="button" onclick={moveToReview}>
+                        Continue to review
+                    </button>
+                </div>
+            {/if}
+        </section>
+    {:else}
+        {@const activeResult = getResultForGenerator(activeGenerator)}
+        {@const reviewContext = generatorContexts[activeGenerator]}
+        {@const reviewValidationStatus = validationStatusLabel(reviewContext?.version.validation_summary ?? null)}
+        {@const reviewValidationMessage = reviewContext ? validationMessage(reviewContext.version.validation_summary ?? null) : null}
+        <section class="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/40">
+            <header class="space-y-2">
+                <p class="text-xs font-semibold uppercase tracking-[0.35em] text-sky-500">Review</p>
+                <h3 class="text-xl font-semibold text-slate-700">Verify and export Terraform</h3>
             <p class="text-sm text-slate-500">
                 Confirm the generated Terraform before copying or downloading. Jump back to the previous step to adjust inputs or
                 pick a different blueprint.
             </p>
         </header>
 
-        <div class="flex flex-wrap items-center gap-2">
-            <button class={secondaryButtonClass} type="button" onclick={moveToConfigure}>
-                Back to inputs
-            </button>
-            <button class={secondaryButtonClass} type="button" onclick={resetToSelection}>
-                Choose another blueprint
-            </button>
-        </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <button class={secondaryButtonClass} type="button" onclick={moveToConfigure}>
+                    Back to inputs
+                </button>
+                <button class={secondaryButtonClass} type="button" onclick={resetToSelection}>
+                    Choose another blueprint
+                </button>
+            </div>
 
-        {#if generatorOverride && generatorOverride.generatorId === activeGenerator}
-            <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 space-y-2">
-                <p class="font-semibold">Validation failed</p>
-                <p class="mt-1 text-xs">
+            {#if reviewContext}
+                <div class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <span
+                            class={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] ${
+                                validationStatusBadgeClass(reviewValidationStatus)
+                            }`}
+                        >
+                            Validation {reviewValidationStatus}
+                        </span>
+                        <div class="ml-auto flex flex-wrap gap-2">
+                            <button type="button" class={resultButtonClass} onclick={() => openLibraryForContext(reviewContext)}>
+                                Open in library
+                            </button>
+                            <button type="button" class={resultButtonClass} onclick={() => openDiffForContext(reviewContext)}>
+                                Diff vs previous
+                            </button>
+                        </div>
+                    </div>
+                    {#if reviewValidationMessage}
+                        <pre class="overflow-auto rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600">
+{reviewValidationMessage}</pre>
+                    {/if}
+                </div>
+            {/if}
+
+            {#if generatorOverride && generatorOverride.generatorId === activeGenerator}
+                <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 space-y-2">
+                    <p class="font-semibold">Validation failed</p>
+                    <p class="mt-1 text-xs">
                     Fix the reported issues and regenerate, or continue and override validation in your workspace. Use the project
                     generator log to inspect the saved run and library asset.
                 </p>

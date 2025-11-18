@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
-	import { onMount } from 'svelte';
-	import { get } from 'svelte/store';
+import { browser } from '$app/environment';
+import { page } from '$app/stores';
+import { onMount } from 'svelte';
+import { get } from 'svelte/store';
 import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
 import {
 	type GeneratedAssetSummary,
@@ -21,10 +22,16 @@ import {
 import { projectState, activeProject, activeProjectRuns, activeProjectOverview } from '$lib/stores/project';
 	import { notifyError, notifySuccess } from '$lib/stores/notifications';
 
-	const { data } = $props();
-	const token = data.token as string | null;
-	const initialProjects = (data.projects ?? []) as ProjectSummary[];
-	const loadError = data.error as string | undefined;
+const { data } = $props();
+const token = data.token as string | null;
+const initialProjects = (data.projects ?? []) as ProjectSummary[];
+const loadError = data.error as string | undefined;
+
+const queryTab = $derived(($page.url.searchParams.get('tab') ?? '').toLowerCase());
+const queryProject = $derived($page.url.searchParams.get('project'));
+const queryAsset = $derived($page.url.searchParams.get('asset'));
+const queryVersion = $derived($page.url.searchParams.get('version'));
+const queryAction = $derived(($page.url.searchParams.get('action') ?? '').toLowerCase());
 
 	if (initialProjects.length) {
 		const snapshot = get(projectState);
@@ -86,9 +93,21 @@ const libraryGeneratorTags = $derived<string[]>(
 );
 const overview = $derived($activeProjectOverview as ProjectOverview | null);
 
+$effect(() => {
+	const requested = queryProject?.trim();
+	if (!requested) {
+		return;
+	}
+	const match = projects.find((project) => project.id === requested || project.slug === requested);
+	if (match && activeProjectValue?.id !== match.id) {
+		projectState.setActiveProject(match.id);
+	}
+});
+
 let runCache = $state<RunsCacheEntry>(null);
 let configCache = $state<ConfigCacheEntry>(null);
 let artifactIndexCache = $state<ArtifactIndexCacheEntry>(null);
+let autoLibraryActionKey: string | null = null;
 
 const projectConfigs = $derived(configCache?.items ?? []);
 const projectArtifacts = $derived(artifactIndexCache?.items ?? []);
@@ -195,6 +214,50 @@ $effect(() => {
 	}
 });
 
+$effect(() => {
+	if (queryTab !== 'library') {
+		autoLibraryActionKey = null;
+		return;
+	}
+	const assetId = (queryAsset ?? '').trim();
+	if (!assetId) {
+		autoLibraryActionKey = null;
+		return;
+	}
+	const asset = libraryAssets.find((entry) => entry.id === assetId);
+	if (!asset) {
+		return;
+	}
+	const versions = asset.versions ?? [];
+	const requestedVersionId = (queryVersion ?? '').trim() || versions[0]?.id || null;
+	const action = queryAction || 'open';
+	const key = `${assetId}:${requestedVersionId ?? 'latest'}:${action}`;
+	if (autoLibraryActionKey === key) {
+		return;
+	}
+	autoLibraryActionKey = key;
+	if (action === 'diff') {
+		const baseVersion = requestedVersionId
+			? versions.find((entry) => entry.id === requestedVersionId) ?? versions[0] ?? null
+			: versions[0] ?? null;
+		if (!baseVersion) {
+			notifyError('Version not found for diff request.');
+			return;
+		}
+		const index = versions.findIndex((entry) => entry.id === baseVersion.id);
+		const previousVersion = index >= 0 ? versions[index + 1] ?? null : null;
+		if (!previousVersion) {
+			notifyError('No previous version available to diff.');
+			return;
+		}
+		void handleDiffVersion(asset, baseVersion, previousVersion.id, {
+			ignoreWhitespace: diffState?.ignoreWhitespace ?? false
+		});
+	} else {
+		editAssetTarget = asset;
+	}
+});
+
 type DiffState = {
 	assetId: string;
 	versionId: string;
@@ -236,15 +299,26 @@ let versionFileState = $state<Record<string, VersionFileState>>({});
 	const pendingConfigLoads = new Set<string>();
 	const pendingArtifactIndexLoads = new Set<string>();
 
-	const tabs: { id: typeof activeTab; label: string }[] = [
-		{ id: 'overview', label: 'Overview' },
-		{ id: 'runs', label: 'Runs' },
-		{ id: 'files', label: 'Run files' },
-		{ id: 'configs', label: 'Configs' },
-		{ id: 'artifacts', label: 'Artifacts' },
-		{ id: 'library', label: 'Library' },
-		{ id: 'settings', label: 'Settings' }
-	];
+const tabs: { id: typeof activeTab; label: string }[] = [
+	{ id: 'overview', label: 'Overview' },
+	{ id: 'runs', label: 'Runs' },
+	{ id: 'files', label: 'Run files' },
+	{ id: 'configs', label: 'Configs' },
+	{ id: 'artifacts', label: 'Artifacts' },
+	{ id: 'library', label: 'Library' },
+	{ id: 'settings', label: 'Settings' }
+];
+
+$effect(() => {
+	const requestedTab = queryTab;
+	if (!requestedTab) {
+		return;
+	}
+	const target = tabs.find((tab) => tab.id === requestedTab);
+	if (target && activeTab !== target.id) {
+		activeTab = target.id;
+	}
+});
 
 	const parseMetadata = (value: string) => {
 		const trimmed = value.trim();
