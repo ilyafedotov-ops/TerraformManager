@@ -6,6 +6,7 @@ import { get } from 'svelte/store';
 import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
 import ProjectReviewPanel from '$lib/components/projects/ProjectReviewPanel.svelte';
 import ProjectReportsPanel from '$lib/components/projects/ProjectReportsPanel.svelte';
+import ProjectGeneratePanel from '$lib/components/projects/ProjectGeneratePanel.svelte';
 import {
 	type GeneratedAssetSummary,
 	type GeneratedAssetVersionSummary,
@@ -120,6 +121,7 @@ const projectArtifacts = $derived(artifactIndexCache?.items ?? []);
 let activeTab = $state<
 	| 'overview'
 	| 'runs'
+	| 'generate'
 	| 'review'
 	| 'reports'
 	| 'files'
@@ -196,6 +198,9 @@ let artifactRunFilter = $state('');
 let artifactEditBusy = $state(false);
 let artifactEditError = $state<string | null>(null);
 let artifactSyncBusy = $state(false);
+let generatorMetadata = $state<Array<{ slug: string; example_payload?: Record<string, unknown>; presets?: Array<{ id?: string; label?: string; description?: string; payload?: Record<string, unknown> }> }>>([]);
+let generatorMetadataLoading = $state(false);
+let generatorMetadataError = $state<string | null>(null);
 
 const formatAssetTypeLabel = (value: string) => {
 	if (value === 'all') return 'All types';
@@ -316,6 +321,7 @@ let versionFileState = $state<Record<string, VersionFileState>>({});
 const tabs: { id: typeof activeTab; label: string }[] = [
 	{ id: 'overview', label: 'Overview' },
 	{ id: 'runs', label: 'Runs' },
+	{ id: 'generate', label: 'Generate' },
 	{ id: 'review', label: 'Review' },
 	{ id: 'reports', label: 'Reports' },
 	{ id: 'files', label: 'Run files' },
@@ -424,6 +430,29 @@ $effect(() => {
 				.finally(() => {
 					overviewLoading = false;
 					pendingOverviewLoads.delete(project.id);
+				});
+		}
+	});
+
+	$effect(() => {
+		if (activeTab === 'generate' && generatorMetadata.length === 0 && !generatorMetadataLoading) {
+			generatorMetadataLoading = true;
+			generatorMetadataError = null;
+			fetch(`${import.meta.env.VITE_API_BASE || 'http://localhost:8890'}/generators/metadata`)
+				.then(async (response) => {
+					if (!response.ok) {
+						throw new Error(`Failed to load generator metadata (status ${response.status})`);
+					}
+					const data = await response.json();
+					generatorMetadata = data;
+				})
+				.catch((error) => {
+					const message = error instanceof Error ? error.message : 'Unable to load generator metadata.';
+					generatorMetadataError = message;
+					console.error('Failed to load generator metadata', error);
+				})
+				.finally(() => {
+					generatorMetadataLoading = false;
 				});
 		}
 	});
@@ -1816,6 +1845,23 @@ $effect(() => {
 								projectSlug={activeProjectSlug ?? activeProjectId}
 								showWorkspaceBanner={false}
 							/>
+						{:else if activeTab === 'generate'}
+							{#if generatorMetadataLoading}
+								<div class="rounded-3xl border border-slate-200 bg-slate-50 px-6 py-6 text-sm text-slate-500">
+									Loading generator templates...
+								</div>
+							{:else if generatorMetadataError}
+								<div class="rounded-3xl border border-rose-300 bg-rose-50 px-6 py-4 text-sm text-rose-700">
+									<strong class="font-semibold">Unable to load generator metadata.</strong>
+									<span class="ml-2 text-rose-600">{generatorMetadataError}</span>
+								</div>
+							{:else}
+								<ProjectGeneratePanel
+									metadata={generatorMetadata}
+									projectId={activeProjectId}
+									projectSlug={activeProjectSlug}
+								/>
+							{/if}
 						{:else if activeTab === 'reports'}
 							<ProjectReportsPanel
 								token={token}

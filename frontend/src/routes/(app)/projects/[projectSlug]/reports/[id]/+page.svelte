@@ -12,7 +12,7 @@ import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBan
 	const loadError = data.error as string | undefined;
 	const token = data.token as string | null;
 	const projectSlug = params.projectSlug ?? null;
-	const projectReportsHref = projectSlug ? `/projects/${projectSlug}/reports` : '/projects';
+	const projectReportsHref = projectSlug ? `/projects?project=${projectSlug}&tab=reports` : '/projects';
 	let deleting = $state(false);
 	let deleteError = $state<string | null>(null);
 

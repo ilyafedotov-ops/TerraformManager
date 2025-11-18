@@ -284,9 +284,9 @@ const projectQuickActions = $derived<QuickAction[]>(
 			return [];
 		}
 		return [
-			{ id: 'run-scan', label: 'Start scan', href: `/projects/${slug}/review` },
-			{ id: 'generate', label: 'Generate config', href: `/projects/${slug}/generate` },
-			{ id: 'view-reports', label: 'View reports', href: `/projects/${slug}/reports` }
+			{ id: 'run-scan', label: 'Start scan', href: `/projects?project=${slug}&tab=review` },
+			{ id: 'generate', label: 'Generate config', href: `/projects?project=${slug}&tab=generate` },
+			{ id: 'view-reports', label: 'View reports', href: `/projects?project=${slug}&tab=reports` }
 		];
 	})()
 );
@@ -351,7 +351,7 @@ const handleProjectChange = async (event: Event) => {
 			handleProjectStoreError(err, 'Failed to refresh runs');
 		});
 		const slug = projectState.getProjectSlug(projectId);
-		await goto(slug ? `/projects/${slug}/dashboard` : '/projects', { replaceState: false });
+		await goto(slug ? `/projects?project=${slug}&tab=overview` : '/projects', { replaceState: false });
 	}
 };
 

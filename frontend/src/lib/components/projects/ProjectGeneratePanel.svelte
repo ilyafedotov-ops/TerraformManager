@@ -32,11 +32,15 @@
     import type { ServiceBusPreset } from '$lib/components/generate/models';
     import { token as authTokenStore } from '$lib/stores/auth';
     import { activeProject, projectState } from '$lib/stores/project';
-import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBanner.svelte';
 import DestinationStep from '$lib/components/generate/DestinationStep.svelte';
-    import type { PageData } from './$types';
 
-    const { data } = $props<{ data: PageData }>();
+    type Props = {
+        metadata: GeneratorMetadata[];
+        projectId?: string | null;
+        projectSlug?: string | null;
+    };
+
+    const { metadata, projectId: projectIdProp = null, projectSlug: projectSlugProp = null }: Props = $props();
 
     type GeneratorId =
         | 'aws_s3'
@@ -68,7 +72,7 @@ import DestinationStep from '$lib/components/generate/DestinationStep.svelte';
     };
 
     const metadataBySlug: Record<string, GeneratorMetadata> = Object.fromEntries(
-        (data.metadata as GeneratorMetadata[]).map((item) => [item.slug, item])
+        metadata.map((item) => [item.slug, item])
     );
 
     type WizardStepId = 'select' | 'configure' | 'destination' | 'review';
@@ -161,7 +165,8 @@ import DestinationStep from '$lib/components/generate/DestinationStep.svelte';
             .map((entry) => entry.trim())
             .filter(Boolean);
 
-    const projectSlugParam = $derived($page.params.projectSlug ?? null);
+    const currentProject = $derived($activeProject);
+    const projectSlugParam = $derived(projectSlugProp ?? currentProject?.slug ?? null);
 
     let autoSaveEnabled = $state(true);
     let destinationAssetName = $state('');
@@ -1505,8 +1510,6 @@ let destinationContextKey: string | null = null;
             codebase or downloaded as a `.tf` file.
         </p>
     </header>
-
-    <ProjectWorkspaceBanner context="Generator runs and artifacts from this page are recorded under your active workspace." />
 
     <ol class="grid gap-3 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-300/20" aria-label="Terraform generation steps">
         {#each wizardSteps as step, index}
