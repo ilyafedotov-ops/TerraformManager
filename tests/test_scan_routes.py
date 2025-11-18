@@ -250,6 +250,64 @@ def test_scan_save_persists_report_asset(
     assert version["metadata"].get("report_id") == saved_report_id
 
 
+def test_scan_save_respects_custom_asset_fields(
+    projects_client: ProjectsClientFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, token, _, _ = projects_client
+    project = _create_project(client, token, "Scan Custom Fields")
+    project_root = Path(project["root_path"])
+    target_dir = project_root / "apps" / "api"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "main.tf").write_text('resource "null_resource" "example" {}', encoding="utf-8")
+
+    base_report = {
+        "summary": {
+            "issues_found": 1,
+            "files_scanned": 1,
+            "severity_counts": {"medium": 1},
+        },
+        "findings": [
+            {"id": "TFM010", "severity": "medium", "resource": "azurerm_storage_account.demo"},
+        ],
+    }
+
+    monkeypatch.setattr("api.main.scan_paths", lambda *args, **kwargs: copy.deepcopy(base_report))
+
+    payload = {
+        "paths": ["apps/api"],
+        "project_id": project["id"],
+        "save": True,
+        "asset_name": "Weekly Storage Review",
+        "asset_description": "Focus on Azure storage baselines",
+        "asset_tags": ["weekly", "storage"],
+        "asset_metadata": {"ticket": "INC-1234"},
+    }
+    response = client.post("/scan", json=payload, headers=auth_headers(token))
+    assert response.status_code == 200
+    report = response.json()
+    summary_block = report.get("summary") or {}
+    assert summary_block.get("asset_name") == "Weekly Storage Review"
+
+    library_response = client.get(
+        f"/projects/{project['id']}/library",
+        headers=auth_headers(token),
+        params={"include_versions": "true"},
+    )
+    assert library_response.status_code == 200
+    assets = library_response.json()["items"]
+    assert assets, "Expected library asset to be created"
+    asset = assets[0]
+    assert asset["name"] == "Weekly Storage Review"
+    assert asset["description"] == "Focus on Azure storage baselines"
+    assert set(asset.get("tags", [])) >= {"weekly", "storage", "scan", "report"}
+    metadata = asset.get("metadata") or {}
+    assert metadata.get("ticket") == "INC-1234"
+    assert metadata.get("summary", {}).get("issues_found") == 1
+    version = (asset.get("versions") or [])[0]
+    assert version["metadata"].get("report_id") == report.get("id")
+
+
 def test_scan_upload_save_persists_report_asset(
     projects_client: ProjectsClientFixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -331,3 +389,59 @@ def test_scan_upload_save_persists_report_asset(
     versions = asset.get("versions") or []
     assert versions
     assert versions[0]["metadata"].get("source") == "api.scan_upload"
+
+
+def test_scan_upload_custom_asset_metadata(
+    projects_client: ProjectsClientFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, token, _, _ = projects_client
+    project = _create_project(client, token, "Upload Custom Fields")
+
+    base_report = {
+        "summary": {
+            "issues_found": 3,
+            "files_scanned": 1,
+            "severity_counts": {"low": 3},
+        },
+        "findings": [
+            {"id": "TFM102", "severity": "low", "resource": "kubernetes_namespace.dev"},
+        ],
+    }
+
+    monkeypatch.setattr("api.main.scan_paths", lambda *args, **kwargs: copy.deepcopy(base_report))
+
+    files = {
+        "files": ("scan.tf", b'resource "null_resource" "example" {}', "text/plain"),
+    }
+    data = {
+        "project_id": project["id"],
+        "terraform_validate": "false",
+        "save": "true",
+        "asset_name": "Upload Baseline",
+        "asset_description": "Kubernetes namespace scan",
+        "asset_tags": "upload,k8s",
+        "asset_metadata": "{\"reference\": \"KB-42\"}",
+    }
+    response = client.post("/scan/upload", data=data, files=files, headers=auth_headers(token))
+    assert response.status_code == 200
+    report = response.json()
+    summary_block = report.get("summary") or {}
+    assert summary_block.get("asset_name") == "Upload Baseline"
+
+    library_response = client.get(
+        f"/projects/{project['id']}/library",
+        headers=auth_headers(token),
+        params={"include_versions": "true"},
+    )
+    assert library_response.status_code == 200
+    items = library_response.json()["items"]
+    assert items
+    asset = items[0]
+    assert asset["name"] == "Upload Baseline"
+    assert asset["description"] == "Kubernetes namespace scan"
+    assert set(asset.get("tags", [])) >= {"upload", "k8s", "scan"}
+    metadata = asset.get("metadata") or {}
+    assert metadata.get("reference") == "KB-42"
+    version = (asset.get("versions") or [])[0]
+    assert version["metadata"].get("report_id") == report.get("id")
