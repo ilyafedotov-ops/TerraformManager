@@ -33,7 +33,7 @@ describe('ReportActions', () => {
 			props: { id: reportId, apiBase }
 		});
 
-		expect(getByText('View')).toHaveAttribute('href', `/reports/${reportId}`);
+		expect(getByText('View')).toHaveAttribute('href', `/projects?tab=reports&report=${reportId}`);
 		expect(getByText('JSON')).toHaveAttribute('href', `${apiBase}/reports/${reportId}`);
 		expect(getByText('CSV')).toHaveAttribute('href', `${apiBase}/reports/${reportId}/csv`);
 		expect(getByText('HTML')).toHaveAttribute('href', `${apiBase}/reports/${reportId}/html`);
@@ -44,7 +44,10 @@ describe('ReportActions', () => {
 			props: { id: reportId, apiBase, projectId: 'proj-42' }
 		});
 
-		expect(getByText('View')).toHaveAttribute('href', `/projects/proj-42/reports/${reportId}`);
+		expect(getByText('View')).toHaveAttribute(
+			'href',
+			`/projects?project=proj-42&tab=reports&report=${reportId}`
+		);
 	});
 
 	it('emits a delete event when delete is clicked', async () => {

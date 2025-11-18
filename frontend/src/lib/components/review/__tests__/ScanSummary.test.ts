@@ -63,7 +63,7 @@ describe('ScanSummary', () => {
         expect(getByText('Plan drift')).toBeInTheDocument();
 
 		const viewLink = getByText('View');
-		expect(viewLink.getAttribute('href')).toBe('/projects/proj-1/reports/rpt-123');
+		expect(viewLink.getAttribute('href')).toBe('/projects?project=proj-1&tab=reports&report=rpt-123');
 		expect(getByText('JSON')).toHaveAttribute('href', 'https://api.example.dev/reports/rpt-123');
 		expect(getByText('Open in library')).toHaveAttribute(
 			'href',

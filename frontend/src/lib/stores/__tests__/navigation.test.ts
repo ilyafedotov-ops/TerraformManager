@@ -54,8 +54,8 @@ describe('navigationState store', () => {
 	});
 
 	it('tracks the active path', () => {
-		navigationState.setActivePath('/projects/test-project/reports');
-		expect(readState().activePath).toBe('/projects/test-project/reports');
+		navigationState.setActivePath('/projects?project=test-project&tab=reports');
+		expect(readState().activePath).toBe('/projects?project=test-project&tab=reports');
 	});
 
 	it('manages expanded navigation groups', () => {
@@ -79,7 +79,7 @@ describe('commandResults derived store', () => {
 						title: 'Dashboard',
 						icon: 'grid',
 						projectScoped: true,
-						projectPath: '/projects/{projectSlug}/dashboard'
+						projectPath: '/projects?project={projectSlug}&tab=overview'
 					},
 					{ title: 'Knowledge', href: '/knowledge', icon: 'book' }
 				]
@@ -89,7 +89,7 @@ describe('commandResults derived store', () => {
 		navigationState.setCommandQuery('');
 
 		expect(get(commandResults).map((item) => item.href)).toEqual([
-			'/projects/workspace/dashboard',
+			'/projects?project=workspace&tab=overview',
 			'/knowledge'
 		]);
 	});
@@ -103,13 +103,13 @@ describe('commandResults derived store', () => {
 						title: 'Dashboard',
 						icon: 'grid',
 						projectScoped: true,
-						projectPath: '/projects/{projectSlug}/dashboard'
+						projectPath: '/projects?project={projectSlug}&tab=overview'
 					},
 					{
 						title: 'Terraform Reports',
 						icon: 'file',
 						projectScoped: true,
-						projectPath: '/projects/{projectSlug}/reports'
+						projectPath: '/projects?project={projectSlug}&tab=reports'
 					}
 				]
 			}
@@ -119,7 +119,7 @@ describe('commandResults derived store', () => {
 		navigationState.setCommandQuery('reports');
 		expect(get(commandResults).map((item) => item.title)).toEqual(['Terraform Reports']);
 
-		navigationState.setCommandQuery('/projects/workspace/dash');
+		navigationState.setCommandQuery('/projects?project=workspace&tab=over');
 		expect(get(commandResults).map((item) => item.title)).toEqual(['Dashboard']);
 	});
 
@@ -132,7 +132,7 @@ describe('commandResults derived store', () => {
 						title: 'Dashboard',
 						icon: 'grid',
 						projectScoped: true,
-						projectPath: '/projects/{projectSlug}/dashboard'
+						projectPath: '/projects?project={projectSlug}&tab=overview'
 					}
 				]
 			}

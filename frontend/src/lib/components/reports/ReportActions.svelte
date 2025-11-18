@@ -33,8 +33,11 @@ const {
 	projectId = null
 } = props;
 
-const viewHref =
-	props.viewHref ?? (projectId ? `/projects/${projectId}/reports/${id}` : `/reports/${id}`);
+const projectQueryValue = projectId ? encodeURIComponent(projectId) : null;
+const defaultViewHref = projectQueryValue
+	? `/projects?project=${projectQueryValue}&tab=reports&report=${encodeURIComponent(id)}`
+	: `/projects?tab=reports&report=${encodeURIComponent(id)}`;
+const viewHref = props.viewHref ?? defaultViewHref;
 
 	const dispatcher = createEventDispatcher<{ delete: void }>();
 

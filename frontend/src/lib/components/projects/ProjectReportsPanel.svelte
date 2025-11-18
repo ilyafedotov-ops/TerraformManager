@@ -23,7 +23,7 @@ import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte
 import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBanner.svelte';
 import { activeProject, projectState } from '$lib/stores/project';
 import { notifyError, notifySuccess } from '$lib/stores/notifications';
-import { onDestroy } from 'svelte';
+import { onDestroy, createEventDispatcher } from 'svelte';
 
 interface Props {
 	token?: string | null;
@@ -34,6 +34,7 @@ interface Props {
 	showWorkspaceBanner?: boolean;
 	heading?: string;
 	description?: string;
+	selectedReportId?: string | null;
 }
 
 const {
@@ -44,8 +45,11 @@ const {
 	initialError = undefined,
 	showWorkspaceBanner = true,
 	heading = 'Saved reviewer results',
-	description = 'Track reviewer assignments, resolve findings, and export artifacts from saved scans. Use the filters to focus on a review queue or severity band.'
+	description = 'Track reviewer assignments, resolve findings, and export artifacts from saved scans. Use the filters to focus on a review queue or severity band.',
+	selectedReportId: selectedReportIdProp = null
 }: Props = $props();
+
+const dispatch = createEventDispatcher<{ reportSelect: { id: string | null } }>();
 
 const projectIdentifier = $derived(projectId ?? null);
 const slugIdentifier = $derived(projectSlug ?? null);
@@ -272,7 +276,7 @@ const submitSearch = async (event?: Event) => {
 	await refreshReports({ offset: 0 });
 };
 
-const selectReport = async (id: string | null) => {
+const selectReport = async (id: string | null, options?: { silent?: boolean }) => {
 	selectedReportId = id;
 	const record = reports.find((item) => item.id === id);
 	selectedReport = record ?? null;
@@ -281,6 +285,9 @@ const selectReport = async (id: string | null) => {
 	reviewError = null;
 	commentDraft = '';
 	commentError = null;
+	if (!options?.silent) {
+		dispatch('reportSelect', { id });
+	}
 	if (record && token) {
 		await loadComments(id!);
 	} else {
@@ -683,8 +690,25 @@ $effect(() => {
 		review_status: 'pending',
 		review_assignee: '',
 		review_due_at: '',
-		review_notes: ''
+	review_notes: ''
 	};
+	lastRequestedReportId = null;
+});
+
+let lastRequestedReportId: string | null = null;
+$effect(() => {
+	const requested = selectedReportIdProp ? selectedReportIdProp.trim() : null;
+	if (requested === lastRequestedReportId) {
+		return;
+	}
+	lastRequestedReportId = requested;
+	if (!requested && selectedReportId) {
+		void selectReport(null, { silent: true });
+		return;
+	}
+	if (requested && requested !== selectedReportId) {
+		void selectReport(requested, { silent: true });
+	}
 });
 </script>
 

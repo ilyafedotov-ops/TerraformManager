@@ -17,42 +17,6 @@ const sectionMeta: SectionDefinition[] = [
 		breadcrumbs: [{ href: '/projects', label: 'Projects' }]
 	},
 	{
-		match: /^\/projects\/[^/]+\/dashboard/,
-		title: 'Control plane overview',
-		subtitle: 'Track reviewer activity and severity trends.',
-		breadcrumbs: (pathname) => [
-			{ href: '/projects', label: 'Projects' },
-			{ href: pathname, label: 'Dashboard' }
-		]
-	},
-	{
-		match: /^\/projects\/[^/]+\/generate/,
-		title: 'Terraform generator',
-		subtitle: 'Render hardened infrastructure blueprints.',
-		breadcrumbs: (pathname) => [
-			{ href: '/projects', label: 'Projects' },
-			{ href: pathname, label: 'Generate' }
-		]
-	},
-	{
-		match: /^\/projects\/[^/]+\/review/,
-		title: 'Scan uploads',
-		subtitle: 'Submit Terraform for static analysis and remediation hints.',
-		breadcrumbs: (pathname) => [
-			{ href: '/projects', label: 'Projects' },
-			{ href: pathname, label: 'Review' }
-		]
-	},
-	{
-		match: /^\/projects\/[^/]+\/reports/,
-		title: 'Historical reports',
-		subtitle: 'Reference past reviewer runs and export findings.',
-		breadcrumbs: (pathname) => [
-			{ href: '/projects', label: 'Projects' },
-			{ href: pathname, label: 'Reports' }
-		]
-	},
-	{
 		match: /^\/knowledge/,
 		title: 'Knowledge base',
 		subtitle: 'Search RAG snippets and sync documentation sources.',

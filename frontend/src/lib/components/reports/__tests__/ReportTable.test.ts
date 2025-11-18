@@ -59,6 +59,9 @@ describe('ReportTable', () => {
 			props: { reports, apiBase, token: 'token-123', deletingId: null, projectId: 'proj-123' }
 		});
 
-		expect(getByText('View')).toHaveAttribute('href', '/projects/proj-123/reports/rpt-1');
+		expect(getByText('View')).toHaveAttribute(
+			'href',
+			'/projects?project=proj-123&tab=reports&report=rpt-1'
+		);
 	});
 });

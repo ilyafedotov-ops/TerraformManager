@@ -251,7 +251,7 @@ python -m backend.cli project upload \
 
 > Tip: The Projects UI in the SvelteKit dashboard now covers workspace creation, editing, deletion, artifact browsing, and uploading new files. Reach for the CLI when you want automation, CI integration, or scripted workloads.
 
-All project-aware CLI commands accept either `--project-id` or `--project-slug`, aligning with the new `/projects/:slug/*` URLs in the dashboard.
+All project-aware CLI commands accept either `--project-id` or `--project-slug`, aligning with the workspace query pattern (`/projects?project=<slug>&tab=<view>`) in the dashboard.
 
 ### CLI commands at a glance
 - `scan` — run the reviewer with optional `terraform fmt`, `terraform validate`, Infracost cost data, drift summary (`--plan-json`), and HTML/patch artifacts.

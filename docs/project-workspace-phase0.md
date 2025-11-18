@@ -65,7 +65,7 @@
 1. **Projects List (`/projects`)**
    - Cards summarizing latest run status, drift/cost deltas, outstanding tasks, and quick actions (open, run review, upload artifact).
    - Supports search/filter by owner, tags, or severity to scale beyond small deployments.
-2. **Project Workspace (`/projects/:slug`)**
+2. **Project Workspace (`/projects?project=<slug>&tab=overview`)**
    - Persistent sidebar with project switcher and shortcuts to Create Config, Run Review, Generate Blueprint, Upload Artifact.
    - Tabs (or nested routes) within the project host all workflow-specific UIs:
      - **Overview** – KPIs, last scan summary, drift/cost callouts, “next recommended actions”, and shortcuts into other tabs.

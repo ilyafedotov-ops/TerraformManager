@@ -173,6 +173,53 @@ describe('ProjectReportsPanel', () => {
 		);
 	});
 
+	it('emits a reportSelect event when a report is picked', async () => {
+		const handler = vi.fn();
+		const { getByRole } = render(ProjectReportsPanel, {
+			props: {
+				token: 'token',
+				projectId: 'proj-1',
+				projectSlug: 'proj-1',
+				initialReports: baseResponse,
+				showWorkspaceBanner: false
+			},
+			events: {
+				reportSelect: (event: CustomEvent<{ id: string | null }>) => handler(event.detail.id)
+			}
+		});
+
+		await fireEvent.click(getByRole('button', { name: 'rpt-1' }));
+
+		await waitFor(() => expect(handler).toHaveBeenCalledWith('rpt-1'));
+	});
+
+	it('syncs selection from props without firing events', async () => {
+		const handler = vi.fn();
+		render(ProjectReportsPanel, {
+			props: {
+				token: 'token',
+				projectId: 'proj-1',
+				projectSlug: 'proj-1',
+				initialReports: baseResponse,
+				showWorkspaceBanner: false,
+				selectedReportId: 'rpt-1'
+			},
+			events: {
+				reportSelect: (event: CustomEvent<{ id: string | null }>) => handler(event.detail.id)
+			}
+		});
+
+		await waitFor(() =>
+			expect(mockListReportComments).toHaveBeenCalledWith(
+				expect.any(Function),
+				'token',
+				'rpt-1',
+				expect.objectContaining({ projectId: 'proj-1', projectSlug: 'proj-1' })
+			)
+		);
+		expect(handler).not.toHaveBeenCalled();
+	});
+
 	it('saves review metadata for a selected report', async () => {
 		mockListReports.mockResolvedValue(baseResponse);
 		mockUpdateReportReviewMetadata.mockResolvedValue({
