@@ -296,8 +296,7 @@ const handleProjectChange = async (event: Event) => {
 		await projectState.refreshRuns(fetch, currentToken, projectId, 10).catch((err) => {
 			console.error('Failed to refresh runs', err);
 		});
-		const targetProject = projectState.getProjectById(projectId);
-		const slug = targetProject?.slug ?? null;
+		const slug = projectState.getProjectSlug(projectId);
 		await goto(slug ? `/projects/${slug}/dashboard` : '/projects', { replaceState: false });
 	}
 };

@@ -37,6 +37,7 @@ import {
 	listProjects as apiListProjects,
 	listRunArtifacts as apiListRunArtifacts,
 	registerProjectLibraryAsset as apiRegisterProjectLibraryAsset,
+	registerProjectIdentifierResolver,
 	syncProjectRunArtifacts as apiSyncProjectRunArtifacts,
 	updateProject as apiUpdateProject,
 	updateProjectArtifact as apiUpdateProjectArtifact,
@@ -151,11 +152,33 @@ function createProjectStore() {
 	});
 	const { subscribe, update, set } = store;
 
+	registerProjectIdentifierResolver(() => {
+		const activeId = currentState.activeProjectId;
+		if (!activeId) {
+			return null;
+		}
+		const project = currentState.projects.find((entry) => entry.id === activeId);
+		if (!project) {
+			return null;
+		}
+		return project.slug ?? project.id;
+	});
+
 	return {
 		subscribe,
 		reset() {
 			set({ ...initialState });
 		},
+	getProjectById(projectId: string | null) {
+		if (!projectId) {
+			return null;
+		}
+		return currentState.projects.find((project) => project.id === projectId) ?? null;
+	},
+	getProjectSlug(projectId: string | null) {
+		const project = this.getProjectById(projectId);
+		return project?.slug ?? null;
+	},
 		setActiveProject(projectId: string | null) {
 			update((state) => {
 				if (!projectId || !state.projects.some((project) => project.id === projectId)) {
