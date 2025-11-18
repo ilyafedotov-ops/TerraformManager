@@ -9,6 +9,12 @@ import { onDestroy } from 'svelte';
 import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBanner.svelte';
 import type { PageData, PageProps } from './$types';
 
+type ScanUploadResponse = {
+	id?: string | null;
+	summary?: Record<string, unknown> | null;
+	report?: Record<string, unknown> | null;
+};
+
 	const { data, params } = $props<{ data: PageData; params: PageProps['params'] }>();
 	const token = data.token as string | null;
 	const project = data.project as ProjectSummary | null;
@@ -23,7 +29,7 @@ import type { PageData, PageProps } from './$types';
     let planFiles = $state<FileList | null>(null);
     let isSubmitting = $state(false);
     let error = $state<string | null>(null);
-    let result = $state<{ id?: string | null; summary?: Record<string, unknown>; report?: Record<string, unknown> } | null>(null);
+    let result = $state<ScanUploadResponse | null>(null);
     let activeProjectValue = $state<ProjectSummary | null>(null);
     let missingProjectWarningShown = $state(false);
     let unsubscribeProject: (() => void) | null = null;
@@ -47,6 +53,31 @@ import type { PageData, PageProps } from './$types';
         const dt = new DataTransfer();
         dt.items.add(file);
         return dt.files;
+    };
+
+    const extractSummary = (input: ScanUploadResponse | null): Record<string, unknown> | null => {
+	const summary = input?.summary ?? null;
+	if (!summary || typeof summary !== 'object') {
+		return null;
+	}
+	return summary as Record<string, unknown>;
+    };
+
+    const getSummaryString = (input: ScanUploadResponse | null, key: string): string | null => {
+	const summary = extractSummary(input);
+	if (!summary) return null;
+	const value = summary[key];
+	return typeof value === 'string' ? value : null;
+    };
+
+    const announceSavedAsset = (payload: ScanUploadResponse | null) => {
+	const assetId = getSummaryString(payload, 'asset_id');
+	if (!assetId) return;
+	const versionId = getSummaryString(payload, 'version_id');
+	const message = versionId
+		? `Report saved to library asset ${assetId} (version ${versionId}).`
+		: `Report saved to library asset ${assetId}.`;
+	notifySuccess(message, { duration: 6000 });
     };
 
     const submitScan = async (event?: Event, payload?: ScanFormData) => {
@@ -116,6 +147,7 @@ import type { PageData, PageProps } from './$types';
             }
             const payload = await response.json();
             result = payload;
+            announceSavedAsset(payload);
             void recordReviewRun(
                 {
                     terraform_validate: shouldValidate,

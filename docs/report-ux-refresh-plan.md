@@ -75,8 +75,9 @@ This document outlines the detailed tasks required to elevate the TerraformManag
   - Apply `use:enhance` on the client for progressive enhancement, preserving current validation.
 
 - [ ] **3.2 UI/UX polish**
-  - Add inline step indicators, drag-and-drop upload affordances, and contextual tooltips for Terraform validate/cost options.
-  - Implement skeleton loaders while a scan is processing and success/failure toast notifications from action results.
+  - [x] Inline step indicators and contextual tooltips guide reviewers through upload → review → export, and saved scans now surface inline asset/version metadata with copy helpers.
+  - [x] Success toasts announce the library asset id/version created by `/scan/upload`; validation failures still raise error toasts with actionable text.
+  - [ ] Drag-and-drop upload affordances plus skeleton loaders keep the experience responsive while scans run.
 
 - [ ] **3.3 Project run logging helper**
   - Extract run logging into `$lib/stores/projectRuns.ts` shared by review/report pages; handle missing token/project gracefully.
