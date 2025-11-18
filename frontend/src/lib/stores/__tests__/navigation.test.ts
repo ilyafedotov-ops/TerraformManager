@@ -79,7 +79,7 @@ describe('commandResults derived store', () => {
 						title: 'Dashboard',
 						icon: 'grid',
 						projectScoped: true,
-						projectPath: '/projects/{projectId}/dashboard'
+						projectPath: '/projects/{projectSlug}/dashboard'
 					},
 					{ title: 'Knowledge', href: '/knowledge', icon: 'book' }
 				]
@@ -89,7 +89,7 @@ describe('commandResults derived store', () => {
 		navigationState.setCommandQuery('');
 
 		expect(get(commandResults).map((item) => item.href)).toEqual([
-			'/projects/proj-123/dashboard',
+			'/projects/workspace/dashboard',
 			'/knowledge'
 		]);
 	});
@@ -103,13 +103,13 @@ describe('commandResults derived store', () => {
 						title: 'Dashboard',
 						icon: 'grid',
 						projectScoped: true,
-						projectPath: '/projects/{projectId}/dashboard'
+						projectPath: '/projects/{projectSlug}/dashboard'
 					},
 					{
 						title: 'Terraform Reports',
 						icon: 'file',
 						projectScoped: true,
-						projectPath: '/projects/{projectId}/reports'
+						projectPath: '/projects/{projectSlug}/reports'
 					}
 				]
 			}
@@ -119,7 +119,7 @@ describe('commandResults derived store', () => {
 		navigationState.setCommandQuery('reports');
 		expect(get(commandResults).map((item) => item.title)).toEqual(['Terraform Reports']);
 
-		navigationState.setCommandQuery('/projects/proj-123/dash');
+		navigationState.setCommandQuery('/projects/workspace/dash');
 		expect(get(commandResults).map((item) => item.title)).toEqual(['Dashboard']);
 	});
 
@@ -132,7 +132,7 @@ describe('commandResults derived store', () => {
 						title: 'Dashboard',
 						icon: 'grid',
 						projectScoped: true,
-						projectPath: '/projects/{projectId}/dashboard'
+						projectPath: '/projects/{projectSlug}/dashboard'
 					}
 				]
 			}

@@ -84,34 +84,34 @@ export const navigationState = createNavigationStore();
 
 export const navigationSectionsStore = writable(navigationSections);
 
-const resolveNavigationItem = (item: NavigationItem, projectId: string | null): NavigationItem => {
+const resolveNavigationItem = (item: NavigationItem, projectSlug: string | null): NavigationItem => {
 	const resolved: NavigationItem = { ...item };
 	if (item.projectScoped) {
-		if (projectId) {
-			resolved.href = item.projectPath?.replace('{projectId}', projectId) ?? `/projects/${projectId}`;
+		if (projectSlug) {
+			resolved.href = item.projectPath?.replace('{projectSlug}', projectSlug) ?? `/projects/${projectSlug}`;
 		} else {
 			resolved.href = '/projects';
 		}
 	}
 	if (item.items?.length) {
-		resolved.items = item.items.map((child) => resolveNavigationItem(child, projectId));
+		resolved.items = item.items.map((child) => resolveNavigationItem(child, projectSlug));
 	}
 	return resolved;
 };
 
 export const materialiseNavigationSections = (
 	sections: NavigationSection[],
-	projectId: string | null
+	projectSlug: string | null
 ): NavigationSection[] =>
 	sections.map((section) => ({
 		title: section.title,
-		items: section.items.map((item) => resolveNavigationItem(item, projectId))
+		items: section.items.map((item) => resolveNavigationItem(item, projectSlug))
 	}));
 
 export const commandResults = derived(
 	[navigationSectionsStore, navigationState, activeProject],
 	([$sections, $state, $activeProject]) => {
-		const resolvedSections = materialiseNavigationSections($sections, $activeProject?.id ?? null);
+		const resolvedSections = materialiseNavigationSections($sections, $activeProject?.slug ?? null);
 		const allItems = flattenItems(resolvedSections);
 		const query = $state.commandQuery.trim().toLowerCase();
 		if (!query) {
