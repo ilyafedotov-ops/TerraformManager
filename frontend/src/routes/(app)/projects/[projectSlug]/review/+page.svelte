@@ -284,6 +284,22 @@ type ScanUploadResponse = {
         on:submit={(event) => submitScan(undefined, event.detail)}
     />
 
+	{#if isSubmitting}
+		<section class="space-y-4 rounded-3xl border border-slate-100 bg-white p-6 shadow-xl shadow-slate-300/30">
+			<div class="h-4 w-32 animate-pulse rounded-full bg-slate-200"></div>
+			<div class="grid gap-3 md:grid-cols-3">
+				<div class="h-24 animate-pulse rounded-2xl bg-slate-100"></div>
+				<div class="h-24 animate-pulse rounded-2xl bg-slate-100"></div>
+				<div class="h-24 animate-pulse rounded-2xl bg-slate-100"></div>
+			</div>
+			<div class="space-y-2">
+				<div class="h-3 w-full animate-pulse rounded-full bg-slate-100"></div>
+				<div class="h-3 w-5/6 animate-pulse rounded-full bg-slate-100"></div>
+				<div class="h-3 w-2/3 animate-pulse rounded-full bg-slate-100"></div>
+			</div>
+		</section>
+	{/if}
+
     {#if result}
 		<ScanSummary
 			reportId={result.id ?? null}
