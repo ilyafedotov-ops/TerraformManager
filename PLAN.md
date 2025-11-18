@@ -203,7 +203,7 @@ Goal: simplify the entire product around a single “Project” hub so users can
 - **Azure Generators**: `azure_storage_account`, `azure_vnet_baseline`, `azure_key_vault`, `azure_diagnostics_baseline`.
 - **Kubernetes Generators**: `k8s_namespace_baseline`, `k8s_hpa_pdb`, `k8s_pod_security_baseline`.
 - **Policy Engine**: Expanded AWS/Azure/K8s rule coverage with metadata + knowledge references.
-- **CI/Test Enhancements**: Generator render tests with optional `terraform validate`, README updates.
+- **CI/Test Enhancements**: Generator render tests with optional `terraform validate`, README updates, and workflow split across backend unit/integration suites, frontend PNPM checks, and reviewer scan artifacts.
 
 ## Active / Upcoming Work
 - **Azure Diagnostics Sprint**: integration + CLI smoke tests now cover auto-target coverage via `tests/test_cli_integration.py`.
@@ -223,7 +223,7 @@ Goal: simplify the entire product around a single “Project” hub so users can
 # References
 - **Knowledge Base**: `knowledge/` contains curated best practices referenced in findings.
 - **Sample Fixtures**: `sample/` holds insecure snippets for regression testing.
-- **CI Workflow**: `.github/workflows/terraform-review.yml` runs generator tests with `TFM_RUN_TERRAFORM_VALIDATE=1` and executes the reviewer CLI.
+- **CI Workflow**: `.github/workflows/terraform-review.yml` now installs `requirements-dev.txt` (to pull in pytest), caches pip/terraform artifacts, runs backend unit + integration jobs before the Terraform reviewer scan (scoped to `sample/`), and adds a parallel frontend PNPM lint/check/test job.
 
 ## Completed (as of now)
 - **AWS Generators**
