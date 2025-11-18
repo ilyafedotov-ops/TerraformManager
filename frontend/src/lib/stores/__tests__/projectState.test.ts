@@ -92,6 +92,18 @@ describe('projectState store', () => {
         } as any);
         projectState.setActiveProject('project-1');
         expect(resolver()).toBe('demo-project');
+
+        projectState.upsertProject({
+            id: 'project-2',
+            name: 'Legacy',
+            slug: null,
+            root_path: '/tmp/legacy',
+        } as any);
+        projectState.setActiveProject('project-2');
+        expect(resolver()).toBe('project-2');
+
+        projectState.setActiveProject(null);
+        expect(resolver()).toBeNull();
     });
 
     it('caches library responses with versions when loading assets', async () => {
