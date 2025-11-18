@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ReportActions from '$lib/components/reports/ReportActions.svelte';
 	import { API_BASE } from '$lib/api/client';
+	import { notifyError, notifySuccess } from '$lib/stores/notifications';
 
 	/**
 	 * Render the outcome of a reviewer scan with severity distribution and export links.
@@ -11,6 +12,63 @@ export let report: Record<string, unknown> | null = null;
 export let severityEntries: Array<[string, number]> = [];
 export let apiBase: string = API_BASE;
 export let projectId: string | null = null;
+
+	const summaryValue = (key: string): unknown => {
+		if (!summary || typeof summary !== 'object') return null;
+		return (summary as Record<string, unknown>)[key];
+	};
+
+	let assetId: string | null = null;
+	$: assetId = (() => {
+		const value = summaryValue('asset_id');
+		return typeof value === 'string' ? value : null;
+	})();
+
+	let versionId: string | null = null;
+	$: versionId = (() => {
+		const value = summaryValue('version_id');
+		return typeof value === 'string' ? value : null;
+	})();
+
+	let assetName: string | null = null;
+	$: assetName = (() => {
+		const value = summaryValue('asset_name');
+		return typeof value === 'string' ? value : null;
+	})();
+
+	let assetType: string | null = null;
+	$: assetType = (() => {
+		const value = summaryValue('asset_type');
+		return typeof value === 'string' ? value : null;
+	})();
+
+	let artifactPaths: string[] = [];
+	$: artifactPaths = (() => {
+		const value = summaryValue('artifacts');
+		if (!value) return [];
+		if (Array.isArray(value)) {
+			return value.filter((entry): entry is string => typeof entry === 'string');
+		}
+		return [];
+	})();
+
+	let hasLibraryMetadata = false;
+	$: hasLibraryMetadata = Boolean(assetId || versionId || artifactPaths.length);
+
+	const copyValue = async (value: string, label: string) => {
+		if (!value) return;
+		if (typeof navigator === 'undefined' || !navigator.clipboard) {
+			notifyError('Clipboard unavailable in this environment.');
+			return;
+		}
+		try {
+			await navigator.clipboard.writeText(value);
+			notifySuccess(`${label} copied to clipboard.`, { duration: 2500 });
+		} catch (error) {
+			console.warn('Failed to copy value', error);
+			notifyError(`Unable to copy ${label.toLowerCase()}.`);
+		}
+	};
 
 const issuesFound = (summary as { issues_found?: number } | null)?.issues_found ?? 0;
 const waivedCount = (report as { waived_findings?: unknown[] } | null)?.waived_findings?.length ?? 0;
@@ -80,6 +138,59 @@ const driftHasChanges = Boolean((driftSummary as { has_changes?: boolean } | nul
 			/>
 		{/if}
 	</header>
+
+	{#if hasLibraryMetadata}
+		<section class="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+			<div class="flex flex-wrap items-center justify-between gap-4">
+				<div class="space-y-1">
+					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-emerald-500">Library asset</p>
+					<p class="text-lg font-semibold text-emerald-900">{assetName ?? assetId ?? '—'}</p>
+					<p class="text-xs text-emerald-700">
+						{assetType ?? 'scan_report'} · version {versionId ?? 'latest'}
+					</p>
+				</div>
+				<div class="flex flex-wrap gap-2 text-xs font-semibold">
+					{#if assetId}
+						<button
+							type="button"
+							class="rounded-xl border border-emerald-300 bg-white/70 px-3 py-1 text-emerald-700 transition hover:bg-white"
+							on:click={() => copyValue(assetId ?? '', 'Asset ID')}
+						>
+							Copy asset id
+						</button>
+					{/if}
+					{#if versionId}
+						<button
+							type="button"
+							class="rounded-xl border border-emerald-300 bg-white/70 px-3 py-1 text-emerald-700 transition hover:bg-white"
+							on:click={() => copyValue(versionId ?? '', 'Version ID')}
+						>
+							Copy version id
+						</button>
+					{/if}
+				</div>
+			</div>
+			{#if artifactPaths.length}
+				<div class="rounded-2xl border border-emerald-200/70 bg-white/80 px-4 py-3 text-xs text-emerald-800">
+					<p class="text-[0.7rem] font-semibold uppercase tracking-[0.3em] text-emerald-500">Artifacts saved</p>
+					<ul class="mt-2 space-y-1">
+						{#each artifactPaths as artifact}
+							<li class="flex items-center justify-between gap-3">
+								<span class="truncate text-emerald-900">{artifact}</span>
+								<button
+									type="button"
+									class="rounded-lg border border-emerald-200 px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-emerald-600"
+									on:click={() => copyValue(artifact, 'Artifact path')}
+								>
+									Copy
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</div>
+			{/if}
+		</section>
+	{/if}
 
 	<div class="grid gap-4 md:grid-cols-3">
 		<div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">

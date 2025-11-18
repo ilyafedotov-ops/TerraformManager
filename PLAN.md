@@ -192,13 +192,13 @@ Goal: simplify the entire product around a single “Project” hub so users can
   - Filter chips for `asset_type` (Terraform configs vs scan reports) and generator slug tags.
   - Manifest viewer & download buttons that call new `/files` endpoints; show validation badges.
   - Diff drawer capable of showing per-file diffs for bundles, reusing upgraded diff API.
-- [ ] **Notification hooks**: use the global notification store to surface validation failures, forced saves, and diff generation errors.
+- [x] **Notification hooks**: use the global notification store to surface validation failures, forced saves, and diff generation errors. Review uploads now announce saved asset/version metadata so users know exactly which library entry was created.
 
 ### Epic E – Testing, Docs, and Rollout
 - [x] **Backend tests**: add pytest coverage for generator persistence, diff manifests, validation success/failure, and scan auto-save flows. Include fixtures in `tests/backend/`.
 - [ ] **Frontend tests**: extend Vitest coverage for project store actions + generator page, plus Playwright smoke test (generate config → verify library entry).
 - [x] **Documentation & migration**: update `README.md`, `docs/`, and `knowledge/` explaining the new workflow, project directory layout, and validation behavior; provide migration steps for existing assets.
-- [ ] **Telemetry/Observability**: emit structured logs (`backend/utils/logging.py`) noting generator slugs, project ids, validation status, and asset ids for easier monitoring post-rollout.
+- [x] **Telemetry/Observability**: emit structured logs (`backend/utils/logging.py`) noting generator slugs, project ids, validation status, and asset ids for easier monitoring post-rollout.
 - **AWS Generators**: `aws_vpc_networking`, `aws_observability_baseline`, `aws_rds_baseline`, `aws_alb_waf`, `aws_rds_multi_region`, `aws_ecs_fargate_service`, `aws_eks_irsa_service`.
 - **Azure Generators**: `azure_storage_account`, `azure_vnet_baseline`, `azure_key_vault`, `azure_diagnostics_baseline`.
 - **Kubernetes Generators**: `k8s_namespace_baseline`, `k8s_hpa_pdb`, `k8s_pod_security_baseline`.

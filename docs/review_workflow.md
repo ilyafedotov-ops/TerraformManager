@@ -142,6 +142,7 @@ Example response:
 * **Filter Bar** – status chips, assignee filter, free-text search, and page-size selector drive `limit`, `offset`, and query parameters in the load function.
 * **Review Inspector** – when a row is selected, the panel displays metadata, allows editing via the PATCH endpoint, and embeds the comment thread.
 * **Table Actions** – row selection is decoupled from destructive actions; exporting and deleting continue to use the existing artifact endpoints.
+* **Project Review Uploads** – the `/projects/[slug]/review` route refuses to submit without an active project, raises toast guidance when validation fails, and on success surfaces the saved `asset_id`, `version_id`, and artifact paths inline so reviewers can copy jump targets into the project library without opening another tab.
 
 ## Migration Notes
 

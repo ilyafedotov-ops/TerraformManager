@@ -26,9 +26,9 @@
 - Active project selection is stored globally, but no router-level guard enforces that other routes read it.
 
 #### Review / Scan
-- Review page handles file uploads, toggles (terraform validate, cost, save), and hits `/scan/upload` (`frontend/src/routes/(app)/review/+page.svelte`).
-- After a scan completes, `projectState.createRun` logs a run and `updateProjectRun` stores summaries, but this only happens when an active project is set; otherwise the user only sees a toast warning.
-- Findings visualization (steps, severity breakdown) is isolated; artifacts panel is separate from project artifacts tree, so users bounce between this page and Projects tab.
+- Review page handles file uploads, toggles (terraform validate, cost, save), and hits `/scan/upload` (`frontend/src/routes/(app)/review/+page.svelte`). It now blocks submission until a project id/slug is present, preventing anonymous scans from drifting outside the workspace.
+- After a scan completes, `projectState.createRun` logs a run and `updateProjectRun` stores summaries. Saved runs now echo the generated `asset_id`/`version_id` and artifact paths straight into the UI with copy-to-clipboard helpers plus toasts referencing the library entry so reviewers can pivot directly into the project library.
+- Findings visualization (steps, severity breakdown) is isolated; artifacts panel is separate from project artifacts tree, so users still bounce between this page and the Projects tab for historical context.
 
 #### Reports
 - Reports page lists saved runs from `/reports` with filtering, review metadata editing, and comment threads (`frontend/src/routes/(app)/reports/+page.svelte`).
@@ -54,7 +54,7 @@
 - Breadcrumb metadata in `(app)/+layout.server.ts` operates on absolute routes and does not reflect project context.
 
 ### Pain Points Summarised
-1. **Project context leakage** – only the Projects tab is project-aware; Review/Generate/Reports show a banner but allow actions without enforcing selection, creating inconsistent logging and storage.
+1. **Project context leakage** – only the Projects tab is fully project-aware; Review now enforces project selection before uploads, but other feature routes still merely display a banner, so actions outside Projects can still miss context.
 2. **Artifact duplication** – generator outputs and scan artifacts require manual promotion or uploading, leading to scattered assets and difficulty tracing lineage.
 3. **Global settings without overrides** – configs, knowledge sync, dashboards, and LLM settings lack project scoping, so teams cannot tailor thresholds or docs per project.
 4. **Navigation fragmentation** – breadcrumbs and route structure are feature-centric instead of project-centric, so users constantly pivot between tabs and lose context.

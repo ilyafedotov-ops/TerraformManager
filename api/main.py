@@ -81,6 +81,7 @@ DEFAULT_ALLOWED_ORIGINS = [
     "http://localhost:4173",
     "http://127.0.0.1:4173",
 ]
+DEFAULT_ALLOWED_ORIGIN_REGEX = r"^https?://[^\s/$.?#].[^\s]*$"
 
 
 def _parse_env_list(var_name: str) -> List[str]:
@@ -103,6 +104,15 @@ def _allowed_origins() -> List[str]:
     return list(DEFAULT_ALLOWED_ORIGINS)
 
 
+def _allowed_origin_regex(explicit_origins_defined: bool) -> Optional[str]:
+    override = os.getenv("TFM_ALLOWED_ORIGIN_REGEX")
+    if override:
+        return override
+    if explicit_origins_defined:
+        return None
+    return DEFAULT_ALLOWED_ORIGIN_REGEX
+
+
 def _trusted_hosts() -> List[str]:
     return _parse_env_list("TFM_TRUSTED_HOSTS")
 
@@ -120,9 +130,12 @@ def create_app() -> FastAPI:
     application.include_router(project_routes.router)
     application.include_router(api_router)
     application.mount("/docs", StaticFiles(directory="docs"), name="docs")
+    allowed_origins = _allowed_origins()
+    origin_regex = _allowed_origin_regex(bool(_parse_env_list("TFM_ALLOWED_ORIGINS")))
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=_allowed_origins(),
+        allow_origins=allowed_origins,
+        allow_origin_regex=origin_regex,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -272,6 +285,13 @@ def _persist_scan_outputs(
         version_metadata={"report_id": report_id, "source": source},
         session=session,
     )
+
+    summary["asset_id"] = asset_result["asset"]["id"]
+    summary["version_id"] = asset_result["version"]["id"]
+    summary["asset_name"] = asset_result["asset"].get("name")
+    summary["asset_type"] = asset_result["asset"].get("asset_type")
+    summary["artifacts"] = [json_artifact_path, html_artifact_path]
+    report["summary"] = summary
 
     return {
         "report_id": report_id,
