@@ -14,6 +14,8 @@ import httpx
 import yaml
 
 from backend.llm_service import DEFAULT_OPENAI_MODEL
+from backend.db.session import DEFAULT_DB_PATH
+from backend.db.migrations import ensure_user_profile_columns
 from backend.scanner import scan_paths
 from backend.report_html import render_html_report
 from backend.utils.env import load_env_file
@@ -524,6 +526,15 @@ def main() -> None:
 
     sub.add_parser("reindex", help="Build the TF-IDF knowledge index (optional)")
 
+    db_cmd = sub.add_parser("db", help="Database utilities")
+    db_sub = db_cmd.add_subparsers(dest="db_cmd", required=True)
+    db_migrate = db_sub.add_parser("migrate-profile", help="Add missing profile fields to the users table")
+    db_migrate.add_argument(
+        "--db-path",
+        default=str(DEFAULT_DB_PATH),
+        help=f"Path to SQLite database (default: {DEFAULT_DB_PATH})",
+    )
+
     project = sub.add_parser("project", help="Manage Terraform Manager projects and runs")
     project_sub = project.add_subparsers(dest="project_cmd", required=True)
 
@@ -855,6 +866,11 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(2)
+    elif args.cmd == "db":
+        if args.db_cmd == "migrate-profile":
+            target = Path(args.db_path).expanduser()
+            ensure_user_profile_columns(target)
+            print(f"Ensured user profile columns exist in {target}")
     elif args.cmd == "baseline":
         project_record: Dict[str, Any] | None = None
         project_workspace: Path | None = None

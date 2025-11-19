@@ -26,6 +26,15 @@ const sectionMeta: SectionDefinition[] = [
 		]
 	},
 	{
+		match: /^\/settings\/profile/,
+		title: 'User profile',
+		subtitle: 'Update your account details and password.',
+		breadcrumbs: [
+			{ href: '/projects', label: 'Projects' },
+			{ href: '/settings/profile', label: 'Settings · Profile' }
+		]
+	},
+	{
 		match: /^\/settings\/sessions/,
 		title: 'Session security',
 		subtitle: 'Review active device sessions and revoke refresh tokens.',

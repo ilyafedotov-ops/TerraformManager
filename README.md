@@ -157,6 +157,11 @@ The manager automatically loads `.env`, writes PID metadata under `logs/service-
 
 Read `docs/authentication.md` for a full walkthrough of the password + refresh-token flow and environment controls.
 
+### Database migrations
+
+- The current auth schema adds profile metadata to the `users` table (full name, job title, timezone, avatar URL, JSON preferences). Run `python -m backend.cli db migrate-profile` after upgrading to ensure existing SQLite databases pick up the new columns.
+- The command defaults to `data/app.db`; pass `--db-path` if your environment stores the database elsewhere.
+
 To require a token for all endpoints, set `TFM_API_TOKEN=...` and pass either header `X-API-Token: ...` or `Authorization: Bearer ...`. The value seeds an always-active service user (`TFM_SERVICE_USER_EMAIL`, default `service@local`). Set a custom port with `TFM_PORT` or `PORT`.
 
 ## Web Frontend (SvelteKit)
@@ -174,6 +179,7 @@ pnpm dev -- --open
 - Library diffs support unified or side-by-side layouts, an “ignore whitespace” toggle, per-file status filters, and copy/download helpers so reviewers can zero in on the exact Terraform files that changed.
 - The library view now includes asset-type filters (e.g., Terraform configs vs scan reports) plus version validation badges and manifest browsers. Every generated file is tracked with checksums, sizes, and media types so you can diff, download, or audit bundles without leaving the UI.
 - Server-side generator runs (UI/CLI/API) record validation summaries and block promotion when `terraform fmt -check` fails unless you explicitly use the new force-save override for exceptional situations.
+- The Settings hub now includes a **User Profile** page where you can edit your display information, toggle notification preferences, and rotate your password. Password updates automatically revoke other device sessions and link directly to the sessions view for follow-up.
 
 ## Linting & Formatting
 
@@ -220,6 +226,9 @@ python -m backend.cli precommit --out .pre-commit-config.yaml
 
 # Generate template documentation (mirrors into docs/ and knowledge/). Use --project-id for workspace-scoped docs.
 python -m backend.cli docs --project-id <uuid>
+
+# Ensure the SQLite database includes the latest user-profile columns (defaults to data/app.db)
+python -m backend.cli db migrate-profile
 
 # Authenticate against running API (stores access/refresh data in tm_auth.json)
 python -m backend.cli auth login --email you@example.com --base-url http://localhost:8890
@@ -332,7 +341,7 @@ To run template smoke tests with `terraform validate`, export `TFM_RUN_TERRAFORM
 - Generators: GET `/generators/metadata`, POST `/generators/blueprints`, POST `/generators/aws/s3`, POST `/generators/azure/storage-account`, POST `/generators/azure/servicebus`, POST `/generators/azure/function-app`, POST `/generators/azure/api-management`.
 - Projects & runs: GET `/projects`, POST `/projects`, GET/PATCH `/projects/{id}`, DELETE `/projects/{id}`, GET `/projects/{id}/runs`, POST `/projects/{id}/runs`, PATCH `/projects/{id}/runs/{run_id}`, artifact list/upload/download/delete under `/projects/{id}/runs/{run_id}/artifacts`.
 - LLM settings: GET `/settings/llm`, POST `/settings/llm`, POST `/settings/llm/test`.
-- Auth: `/auth/token`, `/auth/refresh`, `/auth/logout`, `/auth/me`, `/auth/sessions`, `/auth/sessions/{id}`, `/auth/events`, `/auth/register`, `/auth/recover` (see `api/routes/auth.py` for scope handling).
+- Auth: `/auth/token`, `/auth/refresh`, `/auth/logout`, `/auth/me` (GET for profile, PUT for updates), `/auth/me/password`, `/auth/sessions`, `/auth/sessions/{id}`, `/auth/events`, `/auth/register`, `/auth/recover` (see `api/routes/auth.py` for scope handling).
 - Root & docs: GET `/` (API metadata), static docs served under `/docs`.
 
 ## Docker

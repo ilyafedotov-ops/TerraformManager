@@ -1,5 +1,5 @@
 import type { Handle } from '@sveltejs/kit';
-import { apiFetch, ApiError, refreshSession } from '$lib/api/client';
+import { ApiError, refreshSession, getUserProfile, type UserProfileResponse } from '$lib/api/client';
 import { dev } from '$app/environment';
 
 const ACCESS_COOKIE = 'tm_api_token';
@@ -77,17 +77,25 @@ export const handle: Handle = async ({ event, resolve }) => {
 		}
 	};
 
+	const mapProfile = (profile: UserProfileResponse) => ({
+		id: profile.id,
+		email: profile.email,
+		scopes: profile.scopes ?? [],
+		expiresIn: profile.expires_in,
+		fullName: profile.full_name ?? null,
+		jobTitle: profile.job_title ?? null,
+		timezone: profile.timezone ?? null,
+		avatarUrl: profile.avatar_url ?? null,
+		preferences: profile.preferences ?? {},
+		createdAt: profile.created_at ?? null,
+		updatedAt: profile.updated_at ?? null,
+		lastLoginAt: profile.last_login_at ?? null
+	});
+
 	const loadProfile = async () => {
 		if (!accessToken) return;
-		const profile = await apiFetch<{ email: string; scopes: string[]; expires_in: number }>(event.fetch, '/auth/me', {
-			token: accessToken,
-			headers: { cookie: cookieHeader }
-		});
-		event.locals.user = {
-			email: profile.email,
-			scopes: profile.scopes,
-			expiresIn: profile.expires_in
-		};
+		const profile = await getUserProfile(event.fetch, accessToken);
+		event.locals.user = mapProfile(profile);
 	};
 
 	event.locals.token = accessToken;

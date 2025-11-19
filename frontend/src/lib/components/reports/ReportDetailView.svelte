@@ -351,9 +351,11 @@ const handleDelete = async () => {
 									{#each driftOutputChanges as change, index}
 										<li class="rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2">
 											<p class="font-semibold text-slate-700">
-												{change.address ?? `Output ${index + 1}`}
+												{change.name ?? `Output ${index + 1}`}
 											</p>
-											<p class="text-xs text-slate-500">Action: {change.action ?? '—'}</p>
+											<p class="text-xs text-slate-500">
+												Action: {change.actions?.length ? change.actions.join(', ') : '—'}
+											</p>
 										</li>
 									{/each}
 								</ul>

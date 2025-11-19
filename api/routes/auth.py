@@ -16,7 +16,7 @@ from fastapi import (
     status,
 )
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm, SecurityScopes
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from backend.auth import auth_settings
 from backend.auth.tokens import (
@@ -67,9 +67,18 @@ class TokenResponse(BaseModel):
 
 
 class UserProfile(BaseModel):
+    id: str
     email: str
     scopes: List[str]
     expires_in: int
+    full_name: str | None = None
+    job_title: str | None = None
+    timezone: str | None = None
+    avatar_url: str | None = None
+    preferences: dict[str, Any] = Field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None
+    last_login_at: str | None = None
 
 
 class SessionInfo(BaseModel):
@@ -120,6 +129,20 @@ class RegisterPayload(BaseModel):
 
 class RecoverPayload(BaseModel):
     email: EmailStr
+
+
+class ProfileUpdatePayload(BaseModel):
+    full_name: str | None = Field(None, max_length=160)
+    job_title: str | None = Field(None, max_length=160)
+    timezone: str | None = Field(None, max_length=64)
+    avatar_url: str | None = Field(None, max_length=512)
+    preferences: dict[str, Any] | None = None
+
+
+class PasswordChangePayload(BaseModel):
+    current_password: str = Field(..., min_length=8, max_length=256)
+    new_password: str = Field(..., min_length=8, max_length=256)
+    confirm_new_password: str = Field(..., min_length=8, max_length=256)
 
 
 def _expected_api_token() -> Optional[str]:
@@ -198,6 +221,35 @@ def _record_login_failure(
         details={"reason": reason},
         ip_address=ip_address,
         user_agent=user_agent,
+    )
+
+
+def _format_timestamp(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _build_profile(
+    user: User,
+    expires_in: int,
+    *,
+    last_login_at: datetime | None = None,
+    scopes: Sequence[str] | None = None,
+) -> UserProfile:
+    return UserProfile(
+        id=user.id,
+        email=user.email,
+        scopes=list(scopes or user.scopes or []),
+        expires_in=expires_in,
+        full_name=user.full_name,
+        job_title=user.job_title,
+        timezone=user.timezone,
+        avatar_url=user.avatar_url,
+        preferences=dict(user.profile_preferences or {}),
+        created_at=_format_timestamp(user.created_at),
+        updated_at=_format_timestamp(user.updated_at),
+        last_login_at=_format_timestamp(last_login_at),
     )
 
 
@@ -426,11 +478,99 @@ async def logout(
 
 
 @router.get("/me", response_model=UserProfile)
-async def get_profile(current_user: CurrentUser = Security(get_current_user, scopes=["console:read"])) -> UserProfile:
+async def get_profile(
+    current_user: CurrentUser = Security(get_current_user, scopes=["console:read"]),
+    session: Session = Depends(get_session_dependency),
+) -> UserProfile:
     now = _now()
     expires_in = max(int((current_user.token.expires_at() - now).total_seconds()), 0)
     scopes = current_user.user.scopes or current_user.token.scopes or list(DEFAULT_SCOPES)
-    return UserProfile(email=current_user.user.email, scopes=list(scopes), expires_in=expires_in)
+    last_login = auth_repo.get_last_login_at(session, current_user.user.id)
+    return _build_profile(current_user.user, expires_in, last_login_at=last_login, scopes=scopes)
+
+
+@router.put("/me", response_model=UserProfile)
+async def update_profile(
+    payload: ProfileUpdatePayload,
+    current_user: CurrentUser = Security(get_current_user, scopes=["console:read"]),
+    session: Session = Depends(get_session_dependency),
+) -> UserProfile:
+    user = auth_repo.get_user_by_id(session, current_user.user.id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    try:
+        updated_user = auth_repo.update_user_profile(
+            session,
+            user,
+            full_name=payload.full_name,
+            job_title=payload.job_title,
+            timezone_value=payload.timezone,
+            avatar_url=payload.avatar_url,
+            preferences=payload.preferences,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    changed_fields = [
+        key
+        for key, value in payload.model_dump().items()
+        if value is not None
+    ]
+    auth_repo.record_auth_event(
+        session,
+        event="profile_updated",
+        user_id=updated_user.id,
+        subject=updated_user.email,
+        session_id=current_user.token.session_id,
+        scopes=list(current_user.token.scopes or []),
+        details={"fields": changed_fields},
+    )
+    now = _now()
+    expires_in = max(int((current_user.token.expires_at() - now).total_seconds()), 0)
+    last_login = auth_repo.get_last_login_at(session, updated_user.id)
+    scopes = updated_user.scopes or current_user.token.scopes or list(DEFAULT_SCOPES)
+    return _build_profile(updated_user, expires_in, last_login_at=last_login, scopes=scopes)
+
+
+@router.post("/me/password")
+async def change_password(
+    payload: PasswordChangePayload,
+    current_user: CurrentUser = Security(get_current_user, scopes=["console:write"]),
+    session: Session = Depends(get_session_dependency),
+) -> dict:
+    user = auth_repo.get_user_by_id(session, current_user.user.id)
+    if not user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+    if payload.new_password != payload.confirm_new_password:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="New passwords do not match")
+    if not token_service.verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Incorrect current password")
+
+    new_hash = token_service.hash_password(payload.new_password)
+    auth_repo.change_user_password(session, user, new_hash=new_hash)
+
+    revoked_count = 0
+    session_id = current_user.token.session_id
+    active_sessions = auth_repo.list_active_refresh_sessions(session, current_user.user.id)
+    for entry in active_sessions:
+        if session_id and entry.id == session_id:
+            continue
+        token_service.revoke_session(
+            session,
+            entry,
+            reason="password_changed",
+        )
+        revoked_count += 1
+    auth_repo.record_auth_event(
+        session,
+        event="password_changed",
+        user_id=current_user.user.id,
+        subject=current_user.user.email,
+        session_id=session_id,
+        scopes=list(current_user.token.scopes or []),
+        details={"revoked_sessions": revoked_count},
+    )
+    return {"status": "password_changed", "revoked_sessions": revoked_count}
 
 
 @router.get("/sessions", response_model=SessionListResponse)

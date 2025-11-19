@@ -47,6 +47,8 @@ Task 4 – API Route Enhancements
 5. Provide optional endpoints:
    - ✅ `/auth/sessions` to list active refresh sessions per user.
    - ✅ `/auth/sessions/{id}` to revoke a specific session (helps with “logout other devices”).
+   - ✅ `/auth/me` (`PUT`) to let users update their profile metadata (name, title, timezone, avatar, preferences) backed by the DB.
+   - ✅ `/auth/me/password` to rotate credentials and revoke other refresh sessions when a user changes their password.
 
 Task 5 – Authorization Dependency & API Token Backwards Compatibility
 ----------------------------------------------------------------------

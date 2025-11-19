@@ -30,10 +30,12 @@
 - Keep Jinja templates terraform-native (e.g., `aws_s3_bucket.default`) and document new inputs in the generator metadata.
 - Use environment variables for credentials or model keys; never hard-code secrets or commit local secrets files.
 - Prefer `rg`/`pytest -q`/`pnpm test` in this repo; avoid destructive git commands unless a maintainer asks explicitly.
+- When running Python tooling/tests, activate the local venv first (`source .venv/bin/activate` or `. .venv/bin/activate` on macOS/Linux; `.venv\Scripts\activate` on Windows) so dependencies resolve consistently.
 - When exposing new generator components, register them in `backend/generators/registry.py` and extend docs via `python -m backend.cli docs`.
 
 ## Validation Flow
 - Run `python -m backend.cli scan sample --out tmp/report.json` before merge; optionally add `--terraform-validate` when Terraform is installed.
+- Backend unit tests and CLI checks should be executed from an activated venv, e.g. `source .venv/bin/activate && python -m pytest`.
 - HTML/CSV artifacts can be produced with `--html-out report.html` and `--patch-out autofix.patch`; attach sanitized outputs to PRs when relevant.
 - FastAPI smoke test: `python -m api` then hit `/health`; for auth flows, supply `TFM_API_TOKEN` or JWT tokens described in `api/security.py`.
 - Frontend CI parity: `cd frontend && pnpm lint && pnpm check && pnpm test` (Vitest). Align any new endpoints with `frontend/src/lib/api/client.ts`.
