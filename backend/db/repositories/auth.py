@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 from uuid import uuid4
+
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
@@ -18,6 +20,24 @@ def _ensure_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+def _clean_optional_string(value: str | None) -> str | None:
+    if value is None:
+        return None
+    trimmed = value.strip()
+    return trimmed or None
+
+
+def _normalize_timezone(value: str | None) -> str | None:
+    cleaned = _clean_optional_string(value)
+    if cleaned is None:
+        return None
+    try:
+        ZoneInfo(cleaned)
+    except ZoneInfoNotFoundError as exc:  # noqa: WPS440
+        raise ValueError(f"Unknown timezone: {cleaned}") from exc
+    return cleaned
 
 
 def create_user(
@@ -201,3 +221,43 @@ def list_recent_auth_events(
         stmt = stmt.where(AuthAudit.session_id == session_id)
     stmt = stmt.limit(limit)
     return list(session.scalars(stmt).all())
+
+
+def update_user_profile(
+    session: Session,
+    user: User,
+    *,
+    full_name: str | None = None,
+    job_title: str | None = None,
+    timezone_value: str | None = None,
+    avatar_url: str | None = None,
+    preferences: Mapping[str, Any] | None = None,
+) -> User:
+    """Mutate and persist basic profile attributes."""
+    user.full_name = _clean_optional_string(full_name) if full_name is not None else user.full_name
+    user.job_title = _clean_optional_string(job_title) if job_title is not None else user.job_title
+    if timezone_value is not None:
+        user.timezone = _normalize_timezone(timezone_value)
+    user.avatar_url = _clean_optional_string(avatar_url) if avatar_url is not None else user.avatar_url
+    if preferences is not None:
+        user.profile_preferences = dict(preferences)
+    session.add(user)
+    session.flush()
+    return user
+
+
+def change_user_password(session: Session, user: User, *, new_hash: str) -> User:
+    user.password_hash = new_hash
+    session.add(user)
+    session.flush()
+    return user
+
+
+def get_last_login_at(session: Session, user_id: str) -> datetime | None:
+    stmt: Select[datetime] = (
+        select(AuthAudit.created_at)
+        .where(AuthAudit.user_id == user_id, AuthAudit.event == "login_success")
+        .order_by(AuthAudit.created_at.desc())
+        .limit(1)
+    )
+    return session.scalar(stmt)

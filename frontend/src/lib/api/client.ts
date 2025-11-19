@@ -583,6 +583,36 @@ export async function revokeAuthSession(
 	});
 }
 
+export async function getUserProfile(fetchFn: typeof fetch, token: string): Promise<UserProfileResponse> {
+	return apiFetch<UserProfileResponse>(fetchFn, '/auth/me', {
+		token
+	});
+}
+
+export async function updateUserProfile(
+	fetchFn: typeof fetch,
+	token: string,
+	payload: ProfileUpdatePayload
+): Promise<UserProfileResponse> {
+	return apiFetch<UserProfileResponse>(fetchFn, '/auth/me', {
+		method: 'PUT',
+		token,
+		body: payload
+	});
+}
+
+export async function changePassword(
+	fetchFn: typeof fetch,
+	token: string,
+	payload: PasswordChangePayload
+): Promise<{ status: string; revoked_sessions?: number }> {
+	return apiFetch(fetchFn, '/auth/me/password', {
+		method: 'POST',
+		token,
+		body: payload
+	});
+}
+
 export interface AuthEvent {
 	id: string;
 	event: string;
@@ -597,6 +627,46 @@ export interface AuthEvent {
 
 export interface AuthEventListResponse {
 	events: AuthEvent[];
+}
+
+export interface NotificationPreferences {
+	email?: boolean;
+	browser?: boolean;
+	[key: string]: unknown;
+}
+
+export interface UserPreferences {
+	notifications?: NotificationPreferences;
+	[key: string]: unknown;
+}
+
+export interface UserProfileResponse {
+	id: string;
+	email: string;
+	scopes: string[];
+	expires_in: number;
+	full_name?: string | null;
+	job_title?: string | null;
+	timezone?: string | null;
+	avatar_url?: string | null;
+	preferences?: UserPreferences | null;
+	created_at?: string | null;
+	updated_at?: string | null;
+	last_login_at?: string | null;
+}
+
+export interface ProfileUpdatePayload {
+	full_name?: string | null;
+	job_title?: string | null;
+	timezone?: string | null;
+	avatar_url?: string | null;
+	preferences?: UserPreferences | null;
+}
+
+export interface PasswordChangePayload {
+	current_password: string;
+	new_password: string;
+	confirm_new_password: string;
 }
 
 export async function listAuthEvents(
@@ -921,14 +991,19 @@ export interface KnowledgeDocument {
 }
 
 export async function searchKnowledge(
-    fetchFn: typeof fetch,
-    query: string,
-    topK = 3
+	fetchFn: typeof fetch,
+	query: string,
+	topK = 3,
+	provider?: string
 ): Promise<KnowledgeItem[]> {
-    const response = await apiFetch<{ items: KnowledgeItem[] }>(fetchFn, '/knowledge/search', {
-        searchParams: { q: query, top_k: topK }
-    });
-    return response.items;
+	const searchParams: Record<string, string | number> = { q: query, top_k: topK };
+	if (provider && provider.trim().length > 0) {
+		searchParams.provider = provider;
+	}
+	const response = await apiFetch<{ items: KnowledgeItem[] }>(fetchFn, '/knowledge/search', {
+		searchParams
+	});
+	return response.items;
 }
 
 export async function getKnowledgeDocument(fetchFn: typeof fetch, token: string, path: string): Promise<KnowledgeDocument> {

@@ -3,22 +3,29 @@
 // for information about these interfaces
 declare global {
 	namespace App {
+		interface UserIdentity {
+			id: string;
+			email: string;
+			scopes: string[];
+			expiresIn: number;
+			fullName: string | null;
+			jobTitle: string | null;
+			timezone: string | null;
+			avatarUrl: string | null;
+			preferences: Record<string, unknown>;
+			createdAt: string | null;
+			updatedAt: string | null;
+			lastLoginAt: string | null;
+		}
+
 		interface Locals {
 			token: string | null;
-			user: {
-				email: string;
-				scopes: string[];
-				expiresIn: number;
-			} | null;
+			user: UserIdentity | null;
 		}
 
 			interface PageData {
 				token?: string | null;
-				user?: {
-					email: string;
-					scopes: string[];
-					expiresIn: number;
-				} | null;
+				user?: UserIdentity | null;
 				section?: {
 					title: string;
 					subtitle?: string | null;

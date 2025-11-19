@@ -8,7 +8,9 @@ import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte
 import ProjectReviewPanel from '$lib/components/projects/ProjectReviewPanel.svelte';
 import ProjectReportsPanel from '$lib/components/projects/ProjectReportsPanel.svelte';
 import ProjectGeneratePanel from '$lib/components/projects/ProjectGeneratePanel.svelte';
-import ReportDetailView from '$lib/components/reports/ReportDetailView.svelte';
+import ReportDetailModal from '$lib/components/reports/ReportDetailModal.svelte';
+import CompareReportsModal from '$lib/components/reports/CompareReportsModal.svelte';
+import RunComparison from '$lib/components/projects/RunComparison.svelte';
 import {
 	type GeneratedAssetSummary,
 	type GeneratedAssetVersionSummary,
@@ -136,10 +138,6 @@ let activeTab = $state<
 	| 'runs'
 	| 'generate'
 	| 'review'
-	| 'reports'
-	| 'files'
-	| 'configs'
-	| 'artifacts'
 	| 'library'
 	| 'settings'
 >('overview');
@@ -200,6 +198,13 @@ const filteredLibraryAssets = $derived<GeneratedAssetSummary[]>(
 	let configPayloadInput = $state('');
 	let configTagsInput = $state('');
 	let configMetadataInput = $state('{\n\n}');
+
+let compareModalOpen = $state(false);
+let reportDetailModalOpen = $state(false);
+
+let runCompareMode = $state(false);
+let compareBaseRunId = $state<string | null>(null);
+let compareTargetRunId = $state<string | null>(null);
 	let configIsDefault = $state(false);
 let artifactRunFilter = $state('');
 	let artifactTableLoading = $state(false);
@@ -383,10 +388,6 @@ const tabs: { id: typeof activeTab; label: string }[] = [
 	{ id: 'runs', label: 'Runs' },
 	{ id: 'generate', label: 'Generate' },
 	{ id: 'review', label: 'Review' },
-	{ id: 'reports', label: 'Reports' },
-	{ id: 'files', label: 'Run files' },
-	{ id: 'configs', label: 'Configs' },
-	{ id: 'artifacts', label: 'Artifacts' },
 	{ id: 'library', label: 'Library' },
 	{ id: 'settings', label: 'Settings' }
 ];
@@ -1438,7 +1439,7 @@ $effect(() => {
 		}
 		const projectId = project.id;
 		if (
-			activeTab === 'configs' &&
+			activeTab === 'review' &&
 			!projectState.getCachedConfigs(projectId) &&
 			!pendingConfigLoads.has(projectId)
 		) {
@@ -1467,7 +1468,7 @@ $effect(() => {
 		const projectId = project.id;
 		const artifactKey = `${projectId}::${artifactRunFilter || 'all'}`;
 		if (
-			activeTab === 'artifacts' &&
+			activeTab === 'library' &&
 			!projectState.getCachedArtifactIndex(projectId, artifactRunFilter || null) &&
 			!pendingArtifactIndexLoads.has(artifactKey)
 		) {
@@ -1659,48 +1660,106 @@ $effect(() => {
 							{:else if overviewError}
 								<p class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{overviewError}</p>
 							{:else if overview}
-								<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-									<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-										<p class="text-xs uppercase tracking-[0.3em] text-slate-400">Total runs</p>
-										<p class="mt-2 text-2xl font-semibold text-slate-700">{overview.run_count}</p>
-										<p class="mt-1 text-xs text-slate-400">Includes generator and review executions.</p>
-									</div>
-									<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-										<p class="text-xs uppercase tracking-[0.3em] text-slate-400">Library assets</p>
-										<p class="mt-2 text-2xl font-semibold text-slate-700">{overview.library_asset_count}</p>
-										<p class="mt-1 text-xs text-slate-400">Versioned artifacts promoted from runs.</p>
-									</div>
-									<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-										<p class="text-xs uppercase tracking-[0.3em] text-slate-400">Last activity</p>
-										<p class="mt-2 text-lg font-semibold text-slate-700">{overview.last_activity_at ?? '—'}</p>
-										<p class="mt-1 text-xs text-slate-400">Most recent run, asset update, or edit.</p>
-									</div>
-									<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-										<p class="text-xs uppercase tracking-[0.3em] text-slate-400">Latest status</p>
-										<p class="mt-2 text-lg font-semibold text-slate-700">
-											{overview.latest_run ? overview.latest_run.status : 'No runs yet'}
-										</p>
-										<p class="mt-1 text-xs text-slate-400">
-											{overview.latest_run ? overview.latest_run.created_at : 'Run the generator to populate summary data.'}
-										</p>
-									</div>
-									<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-										<p class="text-xs uppercase tracking-[0.3em] text-slate-400">Project configs</p>
-										<p class="mt-2 text-2xl font-semibold text-slate-700">{overview.config_count}</p>
-										<p class="mt-1 text-xs text-slate-400">
-											Default: {overview.default_config ? overview.default_config.name : 'Unset'}
-										</p>
-									</div>
-									<div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-										<p class="text-xs uppercase tracking-[0.3em] text-slate-400">Tracked artifacts</p>
-										<p class="mt-2 text-2xl font-semibold text-slate-700">{overview.artifact_count}</p>
-										<p class="mt-1 text-xs text-slate-400">Artifacts promoted from run outputs.</p>
+								<div class="space-y-6">
+									<!-- Quick Actions -->
+									<section class="rounded-2xl border border-sky-200 bg-gradient-to-r from-sky-50 to-blue-50 px-6 py-4">
+										<h3 class="mb-3 text-sm font-semibold uppercase tracking-[0.3em] text-sky-600">Quick Actions</h3>
+										<div class="flex flex-wrap gap-3">
+											<button
+												type="button"
+												class="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-sky-600 shadow-sm transition hover:bg-sky-50 hover:shadow"
+												onclick={() => (activeTab = 'review')}
+											>
+												<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+												</svg>
+												New Review
+											</button>
+											<button
+												type="button"
+												class="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-sky-600 shadow-sm transition hover:bg-sky-50 hover:shadow"
+												onclick={() => (activeTab = 'generate')}
+											>
+												<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+												</svg>
+												Generate Code
+											</button>
+											<button
+												type="button"
+												class="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-sky-600 shadow-sm transition hover:bg-sky-50 hover:shadow"
+												onclick={() => (activeTab = 'library')}
+											>
+												<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+												</svg>
+												Browse Library
+											</button>
+											<button
+												type="button"
+												class="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-sky-600 shadow-sm transition hover:bg-sky-50 hover:shadow"
+												onclick={() => (activeTab = 'runs')}
+											>
+												<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+												</svg>
+												View History
+											</button>
+										</div>
+									</section>
+
+									<!-- Key Stats -->
+									<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+										<button
+											type="button"
+											class="group rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left transition hover:border-sky-300 hover:shadow-sm"
+											onclick={() => (activeTab = 'runs')}
+										>
+											<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 group-hover:text-sky-500">Total Runs</p>
+											<p class="mt-2 text-3xl font-bold text-slate-700 group-hover:text-sky-600">{overview.run_count}</p>
+											<p class="mt-1 text-xs text-slate-400">Click to view history →</p>
+										</button>
+										<button
+											type="button"
+											class="group rounded-2xl border border-slate-200 bg-white px-4 py-4 text-left transition hover:border-sky-300 hover:shadow-sm"
+											onclick={() => (activeTab = 'library')}
+										>
+											<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400 group-hover:text-sky-500">Library Assets</p>
+											<p class="mt-2 text-3xl font-bold text-slate-700 group-hover:text-sky-600">{overview.library_asset_count}</p>
+											<p class="mt-1 text-xs text-slate-400">Click to browse →</p>
+										</button>
+										<div class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+											<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Latest Activity</p>
+											<p class="mt-2 text-lg font-semibold text-slate-700">{overview.last_activity_at ?? 'No activity'}</p>
+											<p class="mt-1 text-xs text-slate-500">
+												{overview.latest_run ? overview.latest_run.status : 'No runs yet'}
+											</p>
+										</div>
+										<div class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+											<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Review Policies</p>
+											<p class="mt-2 text-3xl font-bold text-slate-700">{overview.config_count}</p>
+											<p class="mt-1 text-xs text-slate-500">
+												Default: {overview.default_config ? overview.default_config.name : 'None'}
+											</p>
+										</div>
 									</div>
 								</div>
 
+								<!-- Activity Section -->
 								<div class="grid gap-4 lg:grid-cols-2">
 									<section class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-										<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Latest run</h3>
+										<div class="flex items-center justify-between">
+											<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Latest Run</h3>
+											{#if overview.latest_run}
+												<button
+													type="button"
+													class="text-xs font-semibold text-sky-500 transition hover:text-sky-600"
+													onclick={() => (activeTab = 'runs')}
+												>
+													View all →
+												</button>
+											{/if}
+										</div>
 										{#if overview.latest_run}
 											<div class="mt-3 space-y-2 text-sm text-slate-600">
 												<p class="text-base font-semibold text-slate-700">{overview.latest_run.label}</p>
@@ -1729,101 +1788,54 @@ $effect(() => {
 											</p>
 										{/if}
 									</section>
-								</div>
 
-								<div class="grid gap-4 lg:grid-cols-2">
 									<section class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-										<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Default config</h3>
-										{#if overview.default_config}
-											<div class="mt-3 space-y-2 text-sm text-slate-600">
-												<div class="flex items-center justify-between text-xs text-slate-400">
-													<span class="font-semibold text-slate-700">{overview.default_config.name}</span>
-													<span class="rounded-full border border-slate-200 px-2 py-[2px] text-[0.65rem]">
-														{overview.default_config.kind}
-													</span>
-												</div>
-												{#if overview.default_config.description}
-													<p class="text-xs text-slate-500">{overview.default_config.description}</p>
-												{/if}
-												<p class="text-xs text-slate-400">
-													{overview.default_config.config_name
-														? `References saved config "${overview.default_config.config_name}".`
-														: 'Inline payload stored with this project.'}
-												</p>
-												{#if overview.default_config.tags.length}
-													<div class="flex flex-wrap gap-1 text-[0.65rem] text-slate-500">
-														{#each overview.default_config.tags as tag}
-															<span class="rounded-full border border-slate-200 px-2 py-[2px]">{tag}</span>
-														{/each}
-													</div>
-												{/if}
-											</div>
-										{:else}
-											<p class="mt-3 text-sm text-slate-500">
-												No project config assigned. Use the Configs tab to create one.
-											</p>
-										{/if}
-									</section>
-									<section class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-										<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Recent artifacts</h3>
+										<div class="flex items-center justify-between">
+											<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Recent Artifacts</h3>
+											{#if overview.recent_artifacts?.length}
+												<button
+													type="button"
+													class="text-xs font-semibold text-sky-500 transition hover:text-sky-600"
+													onclick={() => (activeTab = 'library')}
+												>
+													View all →
+												</button>
+											{/if}
+										</div>
 										{#if overview.recent_artifacts?.length}
-											<ul class="mt-3 space-y-2 text-sm text-slate-600">
-												{#each overview.recent_artifacts as artifact (artifact.id)}
-													<li class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-														<div class="flex items-center justify-between">
-															<div>
-																<p class="font-semibold text-slate-700">{artifact.name}</p>
-																<p class="text-xs text-slate-400">
-																	Run: {artifact.run_id ?? 'manual'} · {artifact.relative_path}
-																</p>
-															</div>
-															<div class="flex flex-wrap gap-1 text-[0.65rem] text-slate-500">
-																{#if artifact.tags.length}
-																	{#each artifact.tags.slice(0, 3) as tag}
-																		<span class="rounded-full border border-slate-200 px-2 py-[2px]">{tag}</span>
-																	{/each}
-																	{#if artifact.tags.length > 3}
-																		<span class="rounded-full border border-slate-200 px-2 py-[2px]">
-																			+{artifact.tags.length - 3}
-																		</span>
-																	{/if}
-																{:else}
-																	<span class="rounded-full border border-slate-200 px-2 py-[2px]">untagged</span>
-																{/if}
-															</div>
-														</div>
+											<ul class="mt-3 space-y-2">
+												{#each overview.recent_artifacts.slice(0, 3) as artifact (artifact.id)}
+													<li class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+														<p class="text-sm font-semibold text-slate-700">{artifact.name}</p>
+														<p class="text-xs text-slate-400">{artifact.relative_path}</p>
 													</li>
 												{/each}
 											</ul>
 										{:else}
-											<p class="mt-3 text-sm text-slate-500">
-												No artifacts promoted yet. Upload run outputs or promote library assets to populate this list.
-											</p>
+											<p class="mt-3 text-sm text-slate-500">No artifacts yet.</p>
 										{/if}
 									</section>
 								</div>
 
-								{#if overview.metrics}
-									<section class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-										<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Key metrics</h3>
-										<div class="mt-3 grid gap-4 md:grid-cols-3">
-											<div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500">
-												<p class="font-semibold uppercase tracking-[0.25em] text-slate-400">Cost</p>
-												<pre class="mt-2 overflow-auto font-mono text-[0.7rem]">
-{JSON.stringify(overview.metrics.cost ?? {}, null, 2)}</pre>
-											</div>
-											<div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500">
-												<p class="font-semibold uppercase tracking-[0.25em] text-slate-400">Drift</p>
-												<pre class="mt-2 overflow-auto font-mono text-[0.7rem]">
-{JSON.stringify(overview.metrics.drift ?? {}, null, 2)}</pre>
-											</div>
-											<div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500">
-												<p class="font-semibold uppercase tracking-[0.25em] text-slate-400">Policy</p>
-												<pre class="mt-2 overflow-auto font-mono text-[0.7rem]">
-{JSON.stringify(overview.metrics.policy ?? {}, null, 2)}</pre>
-											</div>
+								{#if overview.default_config}
+								<section class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+									<div class="flex items-center gap-3">
+										<div class="flex-1">
+											<h3 class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Default Review Policy</h3>
+											<p class="mt-1 text-sm font-semibold text-slate-700">{overview.default_config.name}</p>
+											{#if overview.default_config.description}
+												<p class="mt-1 text-xs text-slate-500">{overview.default_config.description}</p>
+											{/if}
 										</div>
-									</section>
+										<button
+											type="button"
+											class="text-xs font-semibold text-sky-500 transition hover:text-sky-600"
+											onclick={() => (activeTab = 'review')}
+										>
+											Manage →
+										</button>
+									</div>
+								</section>
 								{/if}
 							{:else}
 								<p class="text-sm text-slate-500">
@@ -1897,14 +1909,338 @@ $effect(() => {
 										{/if}
 									</div>
 								{/if}
+
+								<div class="mt-8 space-y-4">
+									<div class="flex items-center justify-between">
+										<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Compare Runs</h3>
+										<button
+											type="button"
+											class="rounded-lg px-3 py-1.5 text-xs font-medium transition {runCompareMode
+												? 'bg-sky-100 text-sky-700 hover:bg-sky-200'
+												: 'bg-slate-100 text-slate-600 hover:bg-slate-200'}"
+											onclick={() => {
+												runCompareMode = !runCompareMode;
+												if (!runCompareMode) {
+													compareBaseRunId = null;
+													compareTargetRunId = null;
+												}
+											}}
+										>
+											{runCompareMode ? 'Exit Compare Mode' : 'Enter Compare Mode'}
+										</button>
+									</div>
+
+									{#if runCompareMode}
+										<div class="space-y-4">
+											<div class="rounded-2xl border border-sky-200 bg-sky-50 p-4">
+												<p class="text-sm text-sky-700">
+													<strong>Compare Mode:</strong> Select two runs from the list above to compare their results.
+												</p>
+											</div>
+
+											<div class="grid gap-4 sm:grid-cols-2">
+												<div>
+													<label class="mb-1 block text-xs font-medium text-slate-600" for="base-run">
+														Base Run
+													</label>
+													<select
+														id="base-run"
+														class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+														bind:value={compareBaseRunId}
+													>
+														<option value={null}>Select a run...</option>
+														{#each projectRuns as run (run.id)}
+															<option value={run.id}>{run.label} ({run.kind})</option>
+														{/each}
+													</select>
+												</div>
+
+												<div>
+													<label class="mb-1 block text-xs font-medium text-slate-600" for="compare-run">
+														Compare Run
+													</label>
+													<select
+														id="compare-run"
+														class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
+														bind:value={compareTargetRunId}
+													>
+														<option value={null}>Select a run...</option>
+														{#each projectRuns as run (run.id)}
+															<option value={run.id}>{run.label} ({run.kind})</option>
+														{/each}
+													</select>
+												</div>
+											</div>
+
+											{#if compareBaseRunId && compareTargetRunId}
+												{@const baseRun = projectRuns.find((r) => r.id === compareBaseRunId)}
+												{@const compareRun = projectRuns.find((r) => r.id === compareTargetRunId)}
+												{#if baseRun && compareRun}
+													<RunComparison
+														baseRun={baseRun}
+														compareRun={compareRun}
+														onClose={() => {
+															runCompareMode = false;
+															compareBaseRunId = null;
+															compareTargetRunId = null;
+														}}
+													/>
+												{:else}
+													<div class="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-center">
+														<p class="text-sm text-slate-600">Selected runs not found</p>
+													</div>
+												{/if}
+											{:else if compareBaseRunId || compareTargetRunId}
+												<div class="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-center">
+													<p class="text-sm text-slate-600">
+														{#if !compareBaseRunId}
+															Select a base run to continue
+														{:else}
+															Select a compare run to continue
+														{/if}
+													</p>
+												</div>
+											{/if}
+										</div>
+									{:else}
+										<div class="rounded-2xl border border-slate-200 bg-white p-6 text-center">
+											<p class="text-sm text-slate-500">
+												Click "Enter Compare Mode" to compare two project runs and see changes in results.
+											</p>
+										</div>
+									{/if}
+								</div>
 							</div>
 						{:else if activeTab === 'review'}
-							<ProjectReviewPanel
-								token={token}
-								projectId={activeProjectId}
-								projectSlug={activeProjectSlug ?? activeProjectId}
-								showWorkspaceBanner={false}
-							/>
+							<div class="space-y-8">
+								<section>
+									<div class="mb-4 flex items-center justify-between">
+										<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Upload & Scan</h3>
+										<button
+											type="button"
+											class="inline-flex items-center gap-2 rounded-2xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-600"
+											onclick={() => compareModalOpen = true}
+										>
+											<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+											</svg>
+											Compare Reports
+										</button>
+									</div>
+									<ProjectReviewPanel
+										token={token}
+										projectId={activeProjectId}
+										projectSlug={activeProjectSlug ?? activeProjectId}
+										showWorkspaceBanner={false}
+									/>
+								</section>
+
+								<section>
+									<h3 class="mb-4 text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Scan Reports</h3>
+									<ProjectReportsPanel
+										token={token}
+										projectId={activeProjectId}
+										projectSlug={activeProjectSlug ?? activeProjectId}
+										initialReports={null}
+										initialError={undefined}
+										showWorkspaceBanner={false}
+										selectedReportId={selectedReportId}
+										on:reportSelect={handleReportSelect}
+									/>
+								</section>
+
+								<details class="group rounded-2xl border border-slate-200 bg-slate-50">
+									<summary class="cursor-pointer px-4 py-3 text-sm font-semibold uppercase tracking-[0.3em] text-slate-400 transition hover:text-slate-600">
+										Review Policies
+										<span class="ml-2 text-xs normal-case tracking-normal">({projectConfigs.length} config(s))</span>
+									</summary>
+									<div class="border-t border-slate-200 p-4">
+										<div class="mb-4 flex items-center justify-end gap-2 text-xs text-slate-400">
+											<button
+												type="button"
+												class="rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50"
+												onclick={handleReloadConfigs}
+												disabled={configsLoading}
+											>
+												{configsLoading ? 'Reloading…' : 'Reload'}
+											</button>
+											<button
+												type="button"
+												class="rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50"
+												onclick={resetConfigForm}
+											>
+												New config
+											</button>
+										</div>
+										{#if configsError}
+											<p class="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">{configsError}</p>
+										{/if}
+										<div class="grid gap-6 lg:grid-cols-[minmax(0,0.55fr)_minmax(0,1fr)]">
+											<section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
+												{#if configsLoading && !projectConfigs.length}
+													<p class="text-sm text-slate-500">Loading configs…</p>
+												{:else if !projectConfigs.length}
+													<p class="text-sm text-slate-500">No configs yet. Use the form to create one.</p>
+												{:else}
+													<ul class="space-y-3 text-sm text-slate-600">
+														{#each projectConfigs as config (config.id)}
+															<li class="rounded-2xl border border-slate-200 px-4 py-3">
+																<div class="flex items-start justify-between gap-3">
+																	<div>
+																		<p class="text-base font-semibold text-slate-700">{config.name}</p>
+																		<p class="text-xs text-slate-400">
+																			{config.kind} ·
+																			{config.config_name ? `references ${config.config_name}` : 'inline payload'}
+																		</p>
+																		{#if config.description}
+																			<p class="mt-1 text-xs text-slate-500">{config.description}</p>
+																		{/if}
+																		{#if config.tags.length}
+																			<div class="mt-2 flex flex-wrap gap-1 text-[0.65rem] text-slate-500">
+																				{#each config.tags as tag}
+																					<span class="rounded-full border border-slate-200 px-2 py-[2px]">{tag}</span>
+																				{/each}
+																			</div>
+																		{/if}
+																	</div>
+																	<div class="flex flex-col items-end gap-1 text-xs text-slate-400">
+																		{#if config.is_default}
+																			<span class="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-[2px] text-emerald-600">
+																				Default
+																			</span>
+																		{/if}
+																		{#if config.updated_at}<span>{config.updated_at}</span>{/if}
+																	</div>
+																</div>
+																<div class="mt-3 flex flex-wrap gap-2 text-xs">
+																	<button
+																		type="button"
+																		class="rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50"
+																		onclick={() => handleEditConfig(config)}
+																	>
+																		Edit
+																	</button>
+																	<button
+																		type="button"
+																		class="rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50 disabled:opacity-50"
+																		onclick={() => handleSetDefaultConfig(config.id)}
+																		disabled={config.is_default}
+																	>
+																		Set default
+																	</button>
+																	<button
+																		type="button"
+																		class="rounded-xl border border-rose-200 px-3 py-1 font-semibold text-rose-600 transition hover:bg-rose-50"
+																		onclick={() => handleDeleteConfig(config.id)}
+																	>
+																		Delete
+																	</button>
+																</div>
+															</li>
+														{/each}
+													</ul>
+												{/if}
+											</section>
+											<section class="rounded-2xl border border-slate-200 bg-white p-4">
+												<h4 class="text-base font-semibold text-slate-700">
+													{editingConfigId ? 'Edit config' : 'Create config'}
+												</h4>
+												<form class="mt-4 space-y-3 text-sm text-slate-600" onsubmit={handleConfigSubmit}>
+													<label class="block space-y-1">
+														<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Name</span>
+														<input
+															class="w-full rounded-2xl border border-slate-200 px-3 py-2"
+															type="text"
+															bind:value={configNameInput}
+															placeholder="production-baseline"
+														/>
+													</label>
+													<label class="block space-y-1">
+														<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Description</span>
+														<textarea
+															class="w-full rounded-2xl border border-slate-200 px-3 py-2"
+															rows={2}
+															bind:value={configDescriptionInput}
+														></textarea>
+													</label>
+													<label class="block space-y-1">
+														<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Kind</span>
+														<input
+															class="w-full rounded-2xl border border-slate-200 px-3 py-2"
+															type="text"
+															bind:value={configKindInput}
+															placeholder="tfreview"
+														/>
+													</label>
+													<label class="block space-y-1">
+														<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Reference config</span>
+														<input
+															class="w-full rounded-2xl border border-slate-200 px-3 py-2"
+															type="text"
+															bind:value={configRefInput}
+															placeholder="baseline"
+														/>
+													</label>
+													<label class="block space-y-1">
+														<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Inline payload</span>
+														<textarea
+															class="w-full rounded-2xl border border-slate-200 px-3 py-2 font-mono text-xs"
+															rows={6}
+															bind:value={configPayloadInput}
+															placeholder="# thresholds:\n#   high: fail"
+														></textarea>
+													</label>
+													<label class="block space-y-1">
+														<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Tags</span>
+														<input
+															class="w-full rounded-2xl border border-slate-200 px-3 py-2"
+															type="text"
+															bind:value={configTagsInput}
+															placeholder="prod, baseline"
+														/>
+													</label>
+													<label class="block space-y-1">
+														<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Metadata (JSON)</span>
+														<textarea
+															class="w-full rounded-2xl border border-slate-200 px-3 py-2 font-mono text-xs"
+															rows={4}
+															bind:value={configMetadataInput}
+														></textarea>
+													</label>
+													<label class="flex items-center gap-2 text-xs text-slate-500">
+														<input type="checkbox" bind:checked={configIsDefault} />
+														Set as default config
+													</label>
+													{#if configFormError}
+														<p class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-600">
+															{configFormError}
+														</p>
+													{/if}
+													<div class="flex items-center gap-2">
+														<button
+															type="submit"
+															class="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-sky-200 transition hover:bg-sky-600 disabled:opacity-60"
+															disabled={configFormBusy}
+														>
+															{configFormBusy ? 'Saving…' : editingConfigId ? 'Update config' : 'Create config'}
+														</button>
+														{#if editingConfigId}
+															<button
+																type="button"
+																class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-50"
+																onclick={resetConfigForm}
+																disabled={configFormBusy}
+															>
+																Cancel
+															</button>
+														{/if}
+													</div>
+												</form>
+											</section>
+										</div>
+									</div>
+								</details>
+							</div>
 						{:else if activeTab === 'generate'}
 							{#if generatorMetadataLoading}
 								<div class="rounded-3xl border border-slate-200 bg-slate-50 px-6 py-6 text-sm text-slate-500">
@@ -1922,230 +2258,8 @@ $effect(() => {
 									projectSlug={activeProjectSlug}
 								/>
 							{/if}
-						{:else if activeTab === 'reports'}
-							<div class="space-y-6">
-								{#if selectedReportId || reportDetailError}
-									<ReportDetailView
-										token={token}
-										projectId={activeProjectId}
-										projectSlug={activeProjectSlug ?? activeProjectId}
-										report={reportDetail}
-										reportId={selectedReportId}
-										error={reportDetailError}
-										showWorkspaceBanner={false}
-										backHref={null}
-										on:close={() => void closeReportDetail()}
-									/>
-								{/if}
-								<ProjectReportsPanel
-									token={token}
-									projectId={activeProjectId}
-									projectSlug={activeProjectSlug ?? activeProjectId}
-									initialReports={null}
-									initialError={undefined}
-									showWorkspaceBanner={false}
-									selectedReportId={selectedReportId}
-									on:reportSelect={handleReportSelect}
-								/>
-							</div>
-						{:else if activeTab === 'files'}
-							<RunArtifactsPanel
-								token={token}
-								title="Run artifacts"
-								emptyMessage="Generate a run to browse its output artifacts."
-							/>
-						{:else if activeTab === 'configs'}
-							<section class="space-y-4">
-								<div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-									<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Project configs</h3>
-									<div class="flex items-center gap-2 text-xs text-slate-400">
-										<span>{projectConfigs.length} config(s)</span>
-										<button
-											type="button"
-											class="rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50"
-											onclick={handleReloadConfigs}
-											disabled={configsLoading}
-										>
-											{configsLoading ? 'Reloading…' : 'Reload'}
-										</button>
-										<button
-											type="button"
-											class="rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50"
-											onclick={resetConfigForm}
-										>
-											New config
-										</button>
-									</div>
-								</div>
-								{#if configsError}
-									<p class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">{configsError}</p>
-								{/if}
-								<div class="grid gap-6 lg:grid-cols-[minmax(0,0.55fr)_minmax(0,1fr)]">
-									<section class="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
-										{#if configsLoading && !projectConfigs.length}
-											<p class="text-sm text-slate-500">Loading configs…</p>
-										{:else if !projectConfigs.length}
-											<p class="text-sm text-slate-500">No configs yet. Use the form to create one.</p>
-										{:else}
-											<ul class="space-y-3 text-sm text-slate-600">
-												{#each projectConfigs as config (config.id)}
-													<li class="rounded-2xl border border-slate-200 px-4 py-3">
-														<div class="flex items-start justify-between gap-3">
-															<div>
-																<p class="text-base font-semibold text-slate-700">{config.name}</p>
-																<p class="text-xs text-slate-400">
-																	{config.kind} ·
-																	{config.config_name ? `references ${config.config_name}` : 'inline payload'}
-																</p>
-																{#if config.description}
-																	<p class="mt-1 text-xs text-slate-500">{config.description}</p>
-																{/if}
-																{#if config.tags.length}
-																	<div class="mt-2 flex flex-wrap gap-1 text-[0.65rem] text-slate-500">
-																		{#each config.tags as tag}
-																			<span class="rounded-full border border-slate-200 px-2 py-[2px]">{tag}</span>
-																		{/each}
-																	</div>
-																{/if}
-															</div>
-															<div class="flex flex-col items-end gap-1 text-xs text-slate-400">
-																{#if config.is_default}
-																	<span class="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-[2px] text-emerald-600">
-																		Default
-																	</span>
-																{/if}
-																{#if config.updated_at}<span>{config.updated_at}</span>{/if}
-															</div>
-														</div>
-														<div class="mt-3 flex flex-wrap gap-2 text-xs">
-															<button
-																type="button"
-																class="rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50"
-																onclick={() => handleEditConfig(config)}
-															>
-																Edit
-															</button>
-															<button
-																type="button"
-																class="rounded-xl border border-slate-200 px-3 py-1 font-semibold text-slate-500 transition hover:bg-slate-50 disabled:opacity-50"
-																onclick={() => handleSetDefaultConfig(config.id)}
-																disabled={config.is_default}
-															>
-																Set default
-															</button>
-															<button
-																type="button"
-																class="rounded-xl border border-rose-200 px-3 py-1 font-semibold text-rose-600 transition hover:bg-rose-50"
-																onclick={() => handleDeleteConfig(config.id)}
-															>
-																Delete
-															</button>
-														</div>
-													</li>
-												{/each}
-											</ul>
-										{/if}
-									</section>
-									<section class="rounded-2xl border border-slate-200 bg-white p-4">
-										<h4 class="text-base font-semibold text-slate-700">
-											{editingConfigId ? 'Edit config' : 'Create config'}
-										</h4>
-										<form class="mt-4 space-y-3 text-sm text-slate-600" onsubmit={handleConfigSubmit}>
-											<label class="block space-y-1">
-												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Name</span>
-												<input
-													class="w-full rounded-2xl border border-slate-200 px-3 py-2"
-													type="text"
-													bind:value={configNameInput}
-													placeholder="production-baseline"
-												/>
-											</label>
-											<label class="block space-y-1">
-												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Description</span>
-												<textarea
-													class="w-full rounded-2xl border border-slate-200 px-3 py-2"
-													rows={2}
-													bind:value={configDescriptionInput}
-												></textarea>
-											</label>
-											<label class="block space-y-1">
-												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Kind</span>
-												<input
-													class="w-full rounded-2xl border border-slate-200 px-3 py-2"
-													type="text"
-													bind:value={configKindInput}
-													placeholder="tfreview"
-												/>
-											</label>
-											<label class="block space-y-1">
-												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Reference config</span>
-												<input
-													class="w-full rounded-2xl border border-slate-200 px-3 py-2"
-													type="text"
-													bind:value={configRefInput}
-													placeholder="baseline"
-												/>
-											</label>
-											<label class="block space-y-1">
-												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Inline payload</span>
-												<textarea
-													class="w-full rounded-2xl border border-slate-200 px-3 py-2 font-mono text-xs"
-													rows={6}
-													bind:value={configPayloadInput}
-													placeholder="# thresholds:\n#   high: fail"
-												></textarea>
-											</label>
-											<label class="block space-y-1">
-												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Tags</span>
-												<input
-													class="w-full rounded-2xl border border-slate-200 px-3 py-2"
-													type="text"
-													bind:value={configTagsInput}
-													placeholder="prod, baseline"
-												/>
-											</label>
-											<label class="block space-y-1">
-												<span class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Metadata (JSON)</span>
-												<textarea
-													class="w-full rounded-2xl border border-slate-200 px-3 py-2 font-mono text-xs"
-													rows={4}
-													bind:value={configMetadataInput}
-												></textarea>
-											</label>
-											<label class="flex items-center gap-2 text-xs text-slate-500">
-												<input type="checkbox" bind:checked={configIsDefault} />
-												Set as default config
-											</label>
-											{#if configFormError}
-												<p class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-600">
-													{configFormError}
-												</p>
-											{/if}
-											<div class="flex items-center gap-2">
-												<button
-													type="submit"
-													class="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-sky-200 transition hover:bg-sky-600 disabled:opacity-60"
-													disabled={configFormBusy}
-												>
-													{configFormBusy ? 'Saving…' : editingConfigId ? 'Update config' : 'Create config'}
-												</button>
-												{#if editingConfigId}
-													<button
-														type="button"
-														class="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-50"
-														onclick={resetConfigForm}
-														disabled={configFormBusy}
-													>
-														Cancel
-													</button>
-												{/if}
-											</div>
-										</form>
-									</section>
-								</div>
-							</section>
-						{:else if activeTab === 'artifacts'}
-							<section class="space-y-4">
+						{:else if activeTab === 'library'}
+							<section class="space-y-8">
 								<div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
 									<div>
 										<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Project artifacts</h3>
@@ -2332,7 +2446,6 @@ $effect(() => {
 									</div>
 								{/if}
 							</section>
-						{:else if activeTab === 'library'}
 							<section class="space-y-4">
 								<div class="flex items-center justify-between">
 					<h3 class="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Library assets</h3>
@@ -2439,9 +2552,16 @@ $effect(() => {
 													</details>
 												{/if}
 												<div class="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-													<p class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
-														Versions ({asset.versions?.length ?? 0})
-													</p>
+													<div class="flex items-center justify-between">
+														<p class="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+															Versions ({asset.versions?.length ?? 0})
+														</p>
+														{#if (asset.versions?.length ?? 0) > 1}
+															<p class="text-[0.65rem] text-slate-400">
+																Use "Diff prev" to compare versions
+															</p>
+														{/if}
+													</div>
 												{#if asset.versions && asset.versions.length}
 													<ul class="space-y-2 text-xs text-slate-600">
 														{#each asset.versions as version, versionIndex (version.id)}
@@ -3018,3 +3138,25 @@ $effect(() => {
 		</div>
 	</div>
 {/if}
+
+<ReportDetailModal
+	token={token}
+	projectId={activeProjectId}
+	projectSlug={activeProjectSlug ?? activeProjectId}
+	report={reportDetail}
+	reportId={selectedReportId}
+	error={reportDetailError}
+	isOpen={reportDetailModalOpen || Boolean(selectedReportId)}
+	on:close={() => {
+		reportDetailModalOpen = false;
+		void closeReportDetail();
+	}}
+/>
+
+<CompareReportsModal
+	token={token}
+	projectId={activeProjectId}
+	projectSlug={activeProjectSlug ?? activeProjectId}
+	isOpen={compareModalOpen}
+	on:close={() => compareModalOpen = false}
+/>

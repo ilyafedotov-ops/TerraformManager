@@ -165,6 +165,11 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     scopes: Mapped[List[str]] = mapped_column(JSON, nullable=False, default=list)
+    full_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    job_title: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    profile_preferences: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -194,6 +199,11 @@ class User(Base):
             "is_active": self.is_active,
             "is_superuser": self.is_superuser,
             "scopes": list(self.scopes or []),
+            "full_name": self.full_name,
+            "job_title": self.job_title,
+            "timezone": self.timezone,
+            "avatar_url": self.avatar_url,
+            "preferences": dict(self.profile_preferences or {}),
             "created_at": format_timestamp(self.created_at),
             "updated_at": format_timestamp(self.updated_at),
         }

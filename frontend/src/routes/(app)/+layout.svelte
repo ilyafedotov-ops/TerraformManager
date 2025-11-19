@@ -10,7 +10,8 @@ import { navigationSectionsStore, navigationState, commandResults, materialiseNa
 import { projectState, activeProject } from '$lib/stores/project';
 import type { NavigationItem } from '$lib/navigation/types';
 
-	const { children, data } = $props();
+const { children, data } = $props();
+type LayoutUser = NonNullable<(typeof data)['user']>;
 
 	const toMutableSection = (
 		value: (typeof data)['section']
@@ -26,7 +27,7 @@ import type { NavigationItem } from '$lib/navigation/types';
 	};
 
 	let currentToken = $state<string | null>(data.token ?? null);
-	let profile = $state<{ email: string; scopes: string[]; expiresIn: number } | null>(data.user ?? null);
+let profile = $state<LayoutUser | null>(data.user ?? null);
 	let section = $state<{ title: string; subtitle?: string | null; breadcrumbs?: Array<{ href: string; label: string }> } | null>(
 		toMutableSection(data.section ?? null)
 	);
@@ -147,7 +148,22 @@ const handleProjectStoreError = (error: unknown, label: string) => {
 		}
 	});
 
-	const tokenExpiryMinutes = $derived(profile ? Math.max(Math.ceil(profile.expiresIn / 60), 0) : null);
+const tokenExpiryMinutes = $derived(profile ? Math.max(Math.ceil(profile.expiresIn / 60), 0) : null);
+const resolveDisplayName = () =>
+	profile?.fullName && profile.fullName.trim() ? profile.fullName : profile?.email ?? 'Unknown user';
+const resolveJobTitle = () => profile?.jobTitle ?? null;
+const resolveTimezone = () => profile?.timezone ?? null;
+const resolveAvatarUrl = () => profile?.avatarUrl ?? null;
+const resolveAvatarInitials = () => {
+	const source = profile?.fullName?.trim() || profile?.email || 'EM';
+	const initials = source
+		.split(/\s+/)
+		.map((part) => part.charAt(0))
+		.filter(Boolean)
+		.slice(0, 2)
+		.join('');
+	return initials.toUpperCase() || 'EM';
+};
 	const breadcrumbs = $derived(section?.breadcrumbs ?? []);
 
 	$effect(() => {
@@ -531,14 +547,26 @@ const handleProjectChange = async (event: Event) => {
 				{/if}
 			</div>
 			<div class="flex items-center gap-3">
-				<div class="hidden flex-col items-end text-right text-xs text-slate-400 sm:flex">
-					<span class="uppercase tracking-[0.35em]">Signed in as</span>
-					<span class="text-sm font-semibold text-slate-700">{profile?.email ?? 'Unknown user'}</span>
-					{#if tokenExpiryMinutes !== null}
-						<span class="mt-1 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-slate-500">
-							Token renew in ~{tokenExpiryMinutes}m
-						</span>
-					{/if}
+					<div class="hidden flex-col items-end text-right text-xs text-slate-400 sm:flex">
+						<span class="uppercase tracking-[0.35em]">Signed in as</span>
+						<span class="text-sm font-semibold text-slate-700">{resolveDisplayName()}</span>
+						{#if resolveJobTitle() || resolveTimezone()}
+							<span class="mt-1 flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-slate-400">
+								{#if resolveJobTitle()}
+									<span>{resolveJobTitle()}</span>
+								{/if}
+								{#if resolveTimezone()}
+									<span class="rounded-full border border-slate-200 bg-slate-50 px-2 py-[1px] text-[0.55rem] text-slate-500">
+										{resolveTimezone()}
+									</span>
+								{/if}
+							</span>
+						{/if}
+						{#if tokenExpiryMinutes !== null}
+							<span class="mt-1 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-slate-500">
+								Token renew in ~{tokenExpiryMinutes}m
+							</span>
+						{/if}
 				</div>
 				<div class="relative">
 					<input
@@ -591,14 +619,14 @@ const handleProjectChange = async (event: Event) => {
 				>
 					Sign out
 				</button>
-				<div class="flex h-11 w-11 items-center justify-center rounded-xl bg-sky-500 text-base font-semibold text-white shadow-md shadow-sky-200">
-					{#if profile?.email}
-						{profile.email.slice(0, 2).toUpperCase()}
-					{:else}
-						EM
-					{/if}
+					<div class="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl bg-sky-500 text-base font-semibold text-white shadow-md shadow-sky-200">
+						{#if resolveAvatarUrl()}
+							<img src={resolveAvatarUrl()} alt={resolveDisplayName()} class="h-full w-full object-cover" loading="lazy" />
+						{:else}
+							{resolveAvatarInitials()}
+						{/if}
+					</div>
 				</div>
-			</div>
 		</header>
 
 		<main class="flex-1 px-4 py-10 sm:px-6">

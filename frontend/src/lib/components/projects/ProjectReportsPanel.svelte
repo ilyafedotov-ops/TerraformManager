@@ -8,22 +8,17 @@ import {
 	listReportComments,
 	createReportComment,
 	deleteReportComment,
-	updateProjectRun,
 	ApiError,
 	type ReportSummary,
 	type ReportListResponse,
 	type ReportComment,
-	type ListReportsParams,
-	type ProjectRunUpdatePayload
+	type ListReportsParams
 } from '$lib/api/client';
-import ScanForm, { type ScanFormData } from '$lib/components/review/ScanForm.svelte';
-import ScanSummary from '$lib/components/review/ScanSummary.svelte';
 import ReportTable from '$lib/components/reports/ReportTable.svelte';
 import RunArtifactsPanel from '$lib/components/projects/RunArtifactsPanel.svelte';
 import ProjectWorkspaceBanner from '$lib/components/projects/ProjectWorkspaceBanner.svelte';
-import { activeProject, projectState } from '$lib/stores/project';
-import { notifyError, notifySuccess } from '$lib/stores/notifications';
-import { onDestroy, createEventDispatcher } from 'svelte';
+import { notifyError } from '$lib/stores/notifications';
+import { createEventDispatcher } from 'svelte';
 
 interface Props {
 	token?: string | null;
@@ -87,32 +82,6 @@ let comments = $state<ReportComment[]>([]);
 let commentsLoading = $state(false);
 let commentDraft = $state('');
 let commentError = $state<string | null>(null);
-
-let uploadFiles = $state<FileList | null>(null);
-let terraformValidate = $state(false);
-let saveReport = $state(true);
-let includeCost = $state(false);
-let usageFiles = $state<FileList | null>(null);
-let planFiles = $state<FileList | null>(null);
-let isSubmittingScan = $state(false);
-let scanError = $state<string | null>(null);
-let scanResult = $state<Record<string, unknown> | null>(null);
-let activeProjectValue = $state<import('$lib/api/client').ProjectSummary | null>(null);
-let missingProjectWarningShown = $state(false);
-let unsubscribeProject: (() => void) | null = null;
-
-if (browser) {
-	unsubscribeProject = activeProject.subscribe((value) => {
-		activeProjectValue = value;
-		if (value) {
-			missingProjectWarningShown = false;
-		}
-	});
-}
-
-onDestroy(() => {
-	unsubscribeProject?.();
-});
 
 const statusOptions = ['pending', 'in_review', 'changes_requested', 'resolved', 'waived'] as const;
 let statusCounts = $state<Record<string, number>>({});
@@ -379,225 +348,6 @@ const removeComment = async (commentId: string) => {
 	}
 };
 
-const toFileList = (file: File | null) => {
-	if (!file) return null;
-	if (typeof DataTransfer === 'undefined') return null;
-	const dt = new DataTransfer();
-	dt.items.add(file);
-	return dt.files;
-};
-
-const extractSummary = (input: Record<string, unknown> | null): Record<string, unknown> | null => {
-	const summary = input?.summary ?? null;
-	if (!summary || typeof summary !== 'object') {
-		return null;
-	}
-	return summary as Record<string, unknown>;
-};
-
-const getSummaryString = (input: Record<string, unknown> | null, key: string): string | null => {
-	const summary = extractSummary(input);
-	if (!summary) return null;
-	const value = summary[key];
-	return typeof value === 'string' ? value : null;
-};
-
-const announceSavedAsset = (payload: Record<string, unknown> | null) => {
-	const assetId = getSummaryString(payload, 'asset_id');
-	if (!assetId) return;
-	const versionId = getSummaryString(payload, 'version_id');
-	const message = versionId
-		? `Report saved to library asset ${assetId} (version ${versionId}).`
-		: `Report saved to library asset ${assetId}.`;
-	notifySuccess(message, { duration: 6000 });
-};
-
-const buildRunSummary = (result: Record<string, unknown> | null) => {
-	if (!result) return null;
-	const summary = (result.summary ?? null) as Record<string, unknown> | null;
-	if (!summary) return null;
-	const severity = summary?.severity_counts ?? null;
-	const issues = summary?.issues_found ?? null;
-	return {
-		issues_found: issues,
-		severity_counts: severity,
-		saved_report_id: result.id ?? null
-	};
-};
-
-const recordReviewRun = async (
-	parameters: Record<string, unknown>,
-	result: Record<string, unknown> | null
-) => {
-	if (!browser) {
-		return;
-	}
-	if (!activeProjectValue) {
-		if (!missingProjectWarningShown) {
-			notifyError('Select a project in the workspace sidebar to log review runs.');
-			missingProjectWarningShown = true;
-		}
-		return;
-	}
-	if (!token) {
-		console.warn('Skipping project run logging because token is unavailable.');
-		return;
-	}
-	try {
-		const label = `Review • ${new Date().toLocaleString()}`;
-		const savedReportId = (result as { id?: string | null } | null)?.id ?? null;
-		const run = await projectState.createRun(fetch, token, activeProjectValue.id, {
-			label,
-			kind: 'review',
-			parameters,
-			report_id: savedReportId ?? undefined
-		});
-		if (!run?.id) {
-			return;
-		}
-		const summary = buildRunSummary(result);
-		const updatePayload: ProjectRunUpdatePayload = {
-			status: 'completed',
-			finished_at: new Date().toISOString(),
-			summary: summary ?? undefined,
-			report_id: savedReportId ?? undefined
-		};
-		try {
-			const updated = await updateProjectRun(fetch, token, activeProjectValue.id, run.id, updatePayload);
-			projectState.upsertRun(activeProjectValue.id, updated);
-			notifySuccess('Review run recorded.');
-		} catch (updateError) {
-			console.warn('Failed to update review run status', updateError);
-		}
-	} catch (err) {
-		console.warn('Unable to record review run', err);
-	}
-};
-
-const submitScan = async (event?: Event, payload?: ScanFormData) => {
-	event?.preventDefault();
-	scanError = null;
-	scanResult = null;
-
-	if (!token) {
-		scanError = 'API token missing. Sign in to generate one or configure TFM_API_TOKEN on the server.';
-		return;
-	}
-
-	const selectedFiles = payload?.files ?? uploadFiles;
-	const shouldValidate = payload?.terraformValidate ?? terraformValidate;
-	const shouldSave = payload?.saveReport ?? saveReport;
-	const includeCostFlag = payload?.includeCost ?? includeCost;
-	const usageFile = payload?.usageFile ?? usageFiles?.item(0) ?? null;
-	const planFile = payload?.planFile ?? planFiles?.item(0) ?? null;
-
-	if (!selectedFiles || selectedFiles.length === 0) {
-		scanError = 'Attach at least one .tf or .zip file to scan.';
-		return;
-	}
-	if (!projectId && !projectSlug) {
-		scanError = 'Project context missing. Select a workspace before running a scan.';
-		return;
-	}
-
-	const formData = new FormData();
-	if (projectId) {
-		formData.append('project_id', projectId);
-	}
-	if (projectSlug) {
-		formData.append('project_slug', projectSlug);
-	}
-	Array.from(selectedFiles).forEach((file) => formData.append('files', file));
-	formData.append('terraform_validate', shouldValidate ? 'true' : 'false');
-	formData.append('save', shouldSave ? 'true' : 'false');
-	if (includeCostFlag) {
-		formData.append('include_cost', 'true');
-		if (usageFile) {
-			formData.append('cost_usage_file', usageFile);
-		}
-	}
-	if (planFile) {
-		formData.append('plan_file', planFile);
-	}
-
-	uploadFiles = selectedFiles;
-	terraformValidate = shouldValidate;
-	saveReport = shouldSave;
-	includeCost = includeCostFlag;
-	usageFiles = toFileList(usageFile);
-	planFiles = toFileList(planFile);
-
-	isSubmittingScan = true;
-	try {
-		const response = await fetch(`${API_BASE}/scan/upload`, {
-			method: 'POST',
-			headers: {
-				Authorization: `Bearer ${token}`
-			},
-			body: formData
-		});
-		if (!response.ok) {
-			const detail = await response.text();
-			throw new Error(detail || `Scan failed with status ${response.status}`);
-		}
-		const payloadResponse = (await response.json()) as Record<string, unknown>;
-		scanResult = payloadResponse;
-		announceSavedAsset(payloadResponse);
-		await recordReviewRun(
-			{
-				terraform_validate: shouldValidate,
-				saved_report: shouldSave,
-				include_cost: includeCostFlag,
-				files: Array.from(selectedFiles).map((file) => file.name),
-				cost_usage_file: usageFile?.name ?? null,
-				plan_file: planFile?.name ?? null
-			},
-			payloadResponse
-		);
-		await refreshReports({ offset: 0 });
-	} catch (err) {
-		scanError = err instanceof Error ? err.message : 'Unexpected error while running scan';
-	} finally {
-		isSubmittingScan = false;
-	}
-};
-
-const severityEntries = () => {
-	const summary = scanResult?.summary as { severity_counts?: Record<string, number> } | undefined;
-	const counts = summary?.severity_counts;
-	if (!counts) return [] as Array<[string, number]>;
-	return Object.entries(counts).map(([sev, count]) => [sev, Number(count ?? 0)] as [string, number]);
-};
-
-type StepStatus = 'completed' | 'current' | 'upcoming';
-type StepDefinition = {
-	title: string;
-	description: string;
-	status: StepStatus;
-};
-
-const getScanSteps = () => {
-	const hasResult = Boolean(scanResult);
-	const hasReportId = Boolean(scanResult?.id);
-	return [
-		{
-			title: 'Upload',
-			description: 'Attach Terraform modules for scanning.',
-			status: (hasResult ? 'completed' : 'current') as StepStatus
-		},
-		{
-			title: 'Review',
-			description: 'Inspect findings and severity mix.',
-			status: (hasResult ? 'current' : 'upcoming') as StepStatus
-		},
-		{
-			title: 'Export',
-			description: 'Share JSON, CSV, or HTML artifacts.',
-			status: (hasReportId ? 'current' : 'upcoming') as StepStatus
-		}
-	] satisfies StepDefinition[];
-};
-
 let lastPayloadKey: string | null = null;
 $effect(() => {
 	const aggregates = reportsPayload?.aggregates;
@@ -725,55 +475,6 @@ $effect(() => {
 		<ProjectWorkspaceBanner context="Reports, comments, and review notes stay scoped to this project workspace." />
 	{/if}
 
-	<section class="space-y-4">
-		<div class="space-y-2">
-			<h3 class="text-xl font-semibold text-slate-700">Upload Terraform for analysis</h3>
-			<p class="text-sm text-slate-500">
-				Upload Terraform modules for policy review. Results will be saved to this workspace and listed below.
-			</p>
-		</div>
-
-		<ScanForm
-			steps={getScanSteps()}
-			bind:files={uploadFiles}
-			bind:terraformValidate
-			bind:saveReport
-			bind:includeCost
-			bind:usageFiles
-			bind:planFiles
-			isSubmitting={isSubmittingScan}
-			error={scanError}
-			on:submit={(event) => submitScan(undefined, event.detail)}
-		/>
-
-		{#if isSubmittingScan}
-			<section class="space-y-4 rounded-3xl border border-slate-100 bg-white p-6 shadow-xl shadow-slate-300/30">
-				<div class="h-4 w-32 animate-pulse rounded-full bg-slate-200"></div>
-				<div class="grid gap-3 md:grid-cols-3">
-					<div class="h-24 animate-pulse rounded-2xl bg-slate-100"></div>
-					<div class="h-24 animate-pulse rounded-2xl bg-slate-100"></div>
-					<div class="h-24 animate-pulse rounded-2xl bg-slate-100"></div>
-				</div>
-				<div class="space-y-2">
-					<div class="h-3 w-full animate-pulse rounded-full bg-slate-100"></div>
-					<div class="h-3 w-5/6 animate-pulse rounded-full bg-slate-100"></div>
-					<div class="h-3 w-2/3 animate-pulse rounded-full bg-slate-100"></div>
-				</div>
-			</section>
-		{/if}
-
-		{#if scanResult}
-			<ScanSummary
-				reportId={(scanResult.id ?? null) as string | null}
-				summary={(scanResult.summary ?? null) as Record<string, unknown> | null}
-				report={(scanResult.report ?? null) as Record<string, unknown> | null}
-				severityEntries={severityEntries()}
-				apiBase={API_BASE}
-				projectId={projectSlug}
-			/>
-		{/if}
-	</section>
-
 	{#if error}
 		<div class="rounded-3xl border border-rose-300 bg-rose-50 px-6 py-4 text-sm text-rose-700">
 			<strong class="font-semibold">Failed to load reports.</strong>
@@ -785,7 +486,7 @@ $effect(() => {
 		<div class="rounded-3xl border border-slate-200 bg-slate-50 px-6 py-3 text-xs text-slate-600">{deleteStatus}</div>
 	{/if}
 
-	<div class="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+	<div class="grid gap-6 {selectedReport ? 'xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]' : 'xl:grid-cols-1'}">
 		<div class="min-w-0 space-y-6">
 			<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
 				<div class="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -891,20 +592,15 @@ $effect(() => {
 				/>
 			</div>
 		</div>
+		{#if selectedReport}
 		<div class="min-w-0 space-y-6">
 			<section class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/30">
 				<header class="space-y-1 border-b border-slate-100 pb-3">
 					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Review metadata</p>
-					{#if selectedReport}
-						<h3 class="text-xl font-semibold text-slate-700">Report {selectedReport.id}</h3>
-						<p class="text-xs text-slate-500">Created {formatDateTime(selectedReport.created_at)}</p>
-					{:else}
-						<h3 class="text-xl font-semibold text-slate-700">Select a report</h3>
-						<p class="text-xs text-slate-500">Choose a report to edit review metadata.</p>
-					{/if}
+					<h3 class="text-xl font-semibold text-slate-700">Report {selectedReport.id}</h3>
+					<p class="text-xs text-slate-500">Created {formatDateTime(selectedReport.created_at)}</p>
 				</header>
-				{#if selectedReport}
-					<form class="space-y-4 text-sm text-slate-600" onsubmit={(event) => event.preventDefault()}>
+				<form class="space-y-4 text-sm text-slate-600" onsubmit={(event) => event.preventDefault()}>
 						<label class="block text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
 							Status
 							<select
@@ -960,15 +656,12 @@ $effect(() => {
 							{/if}
 						</div>
 					</form>
-				{:else}
-					<p class="text-sm text-slate-500">Select a report to edit metadata.</p>
-				{/if}
 			</section>
 
 			<section class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/30">
 				<header class="space-y-1">
 					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Severity distribution</p>
-					<p class="text-sm text-slate-500">Top severity: {topSeverityLabel(selectedReport?.summary)}</p>
+					<p class="text-sm text-slate-500">Top severity: {topSeverityLabel(selectedReport.summary)}</p>
 				</header>
 				{#if sortedSeverityCounts.length}
 					<ul class="mt-4 space-y-2 text-sm text-slate-600">
@@ -987,16 +680,9 @@ $effect(() => {
 			<section class="rounded-3xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-300/30">
 				<header class="space-y-1">
 					<p class="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Comments</p>
-					<p class="text-sm text-slate-500">
-						{#if selectedReport}
-							Reviewers can coordinate remediation steps inline.
-						{:else}
-							Select a report to view discussion.
-						{/if}
-					</p>
+					<p class="text-sm text-slate-500">Reviewers can coordinate remediation steps inline.</p>
 				</header>
-				{#if selectedReport}
-					<form class="mt-3 space-y-3" onsubmit={(event) => void submitComment(event)}>
+				<form class="mt-3 space-y-3" onsubmit={(event) => void submitComment(event)}>
 						<textarea
 							class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-400"
 							placeholder="Share remediation updates..."
@@ -1040,11 +726,9 @@ $effect(() => {
 							</ul>
 						{/if}
 					</div>
-				{:else}
-					<p class="mt-3 text-sm text-slate-500">Select a report to view and add comments.</p>
-				{/if}
 			</section>
 		</div>
+		{/if}
 	</div>
 
 	<section>

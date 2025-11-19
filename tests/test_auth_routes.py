@@ -240,6 +240,127 @@ def test_session_revocation_requires_write_scope(client: tuple[TestClient, Path]
     assert "detail" in body
 
 
+def test_profile_update_and_password_change(client: tuple[TestClient, Path]) -> None:
+    test_client, db_path = client
+    email = "profile-user@example.com"
+    password = "OldPassword1!"
+    token_service = TokenService()
+
+    with session_scope(db_path) as session:
+        auth_repo.create_user(
+            session,
+            email=email,
+            password_hash=token_service.hash_password(password),
+            scopes=["console:read", "console:write"],
+        )
+
+    login = test_client.post(
+        "/auth/token",
+        data={"username": email, "password": password, "scope": "console:read console:write"},
+        headers={"Accept": "application/json"},
+    )
+    assert login.status_code == 200
+    payload = login.json()
+    token = payload["access_token"]
+
+    update_response = test_client.put(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        json={
+            "full_name": "Terraform User",
+            "job_title": "Platform Engineer",
+            "timezone": "UTC",
+            "avatar_url": "https://example.com/avatar.png",
+            "preferences": {"notifications": {"email": True}},
+        },
+    )
+    assert update_response.status_code == 200
+    updated = update_response.json()
+    assert updated["full_name"] == "Terraform User"
+    assert updated["preferences"]["notifications"]["email"] is True
+
+    password_change = test_client.post(
+        "/auth/me/password",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        json={
+            "current_password": password,
+            "new_password": "NewPassword2!",
+            "confirm_new_password": "NewPassword2!",
+        },
+    )
+    assert password_change.status_code == 200
+    assert password_change.json()["status"] == "password_changed"
+
+    # Old password no longer works.
+    bad_login = test_client.post(
+        "/auth/token",
+        data={"username": email, "password": password, "scope": "console:read"},
+        headers={"Accept": "application/json"},
+    )
+    assert bad_login.status_code == 401
+
+    new_login = test_client.post(
+        "/auth/token",
+        data={"username": email, "password": "NewPassword2!", "scope": "console:read console:write"},
+        headers={"Accept": "application/json"},
+    )
+    assert new_login.status_code == 200
+
+
+def test_password_change_revokes_other_sessions(client: tuple[TestClient, Path]) -> None:
+    primary_client, db_path = client
+    email = "revoker@example.com"
+    password = "S0lidPass!"
+    token_service = TokenService()
+
+    with session_scope(db_path) as session:
+        auth_repo.create_user(
+            session,
+            email=email,
+            password_hash=token_service.hash_password(password),
+            scopes=["console:read", "console:write"],
+        )
+
+    # Login for the first session.
+    primary_login = primary_client.post(
+        "/auth/token",
+        data={"username": email, "password": password, "scope": "console:read console:write"},
+        headers={"Accept": "application/json"},
+    )
+    assert primary_login.status_code == 200
+    primary_token = primary_login.json()["access_token"]
+
+    # Create a secondary session using another client.
+    with TestClient(app) as secondary_client:
+        secondary_login = secondary_client.post(
+            "/auth/token",
+            data={"username": email, "password": password, "scope": "console:read console:write"},
+            headers={"Accept": "application/json"},
+        )
+        assert secondary_login.status_code == 200
+        csrf = secondary_login.headers.get("X-Refresh-Token-CSRF") or secondary_login.json().get("anti_csrf_token")
+        assert csrf
+
+        change_response = primary_client.post(
+            "/auth/me/password",
+            headers={"Authorization": f"Bearer {primary_token}", "Accept": "application/json"},
+            json={
+                "current_password": password,
+                "new_password": "AnotherPass3!",
+                "confirm_new_password": "AnotherPass3!",
+            },
+        )
+        assert change_response.status_code == 200
+        assert change_response.json()["revoked_sessions"] >= 1
+
+        # Secondary client refresh should now fail because the session was revoked.
+        refresh_attempt = secondary_client.post(
+            "/auth/refresh",
+            headers={"X-Refresh-Token-CSRF": csrf},
+        )
+        assert refresh_attempt.status_code == 401
+
+
 def test_auth_events_listing(client: tuple[TestClient, Path]) -> None:
     test_client, db_path = client
     email = "events@example.com"

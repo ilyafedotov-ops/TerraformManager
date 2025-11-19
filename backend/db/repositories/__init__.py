@@ -11,6 +11,9 @@ from .auth import (
     touch_refresh_session,
     record_auth_event,
     list_recent_auth_events,
+    update_user_profile,
+    change_user_password,
+    get_last_login_at,
 )
 
 __all__ = [
@@ -26,4 +29,7 @@ __all__ = [
     "touch_refresh_session",
     "record_auth_event",
     "list_recent_auth_events",
+    "update_user_profile",
+    "change_user_password",
+    "get_last_login_at",
 ]
