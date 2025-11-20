@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    Float,
     JSON,
     String,
     Text,
@@ -648,6 +649,426 @@ class GeneratedAssetVersionFile(Base):
             "checksum": self.checksum,
             "size_bytes": self.size_bytes,
             "media_type": self.media_type,
+            "created_at": format_timestamp(self.created_at),
+        }
+
+
+class TerraformState(Base):
+    __tablename__ = "terraform_states"
+    __table_args__ = (
+        Index("idx_terraform_states_project", "project_id"),
+        Index("idx_terraform_states_workspace", "project_id", "workspace"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    workspace: Mapped[str] = mapped_column(String, nullable=False, default="default")
+    backend_type: Mapped[str] = mapped_column(String, nullable=False)
+    backend_config: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    serial: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    terraform_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    lineage: Mapped[str | None] = mapped_column(String, nullable=True)
+    resource_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    state_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.current_timestamp())
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.current_timestamp())
+
+    resources: Mapped[List["TerraformStateResource"]] = relationship(
+        back_populates="state",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    outputs: Mapped[List["TerraformStateOutput"]] = relationship(
+        back_populates="state",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    def to_dict(self, include_snapshot: bool = False) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "id": self.id,
+            "project_id": self.project_id,
+            "workspace": self.workspace,
+            "backend_type": self.backend_type,
+            "backend_config": dict(self.backend_config or {}),
+            "serial": self.serial,
+            "terraform_version": self.terraform_version,
+            "lineage": self.lineage,
+            "resource_count": self.resource_count,
+            "output_count": self.output_count,
+            "checksum": self.checksum,
+            "imported_at": format_timestamp(self.imported_at),
+            "created_at": format_timestamp(self.created_at),
+        }
+        if include_snapshot:
+            payload["state_snapshot"] = self.state_snapshot
+        return payload
+
+
+class TerraformStateResource(Base):
+    __tablename__ = "terraform_state_resources"
+    __table_args__ = (
+        Index("idx_state_resources_state", "state_id"),
+        Index("idx_state_resources_type", "type"),
+        Index("idx_state_resources_address", "state_id", "address"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    state_id: Mapped[str] = mapped_column(String, ForeignKey("terraform_states.id", ondelete="CASCADE"), nullable=False)
+    address: Mapped[str] = mapped_column(String, nullable=False)
+    module_address: Mapped[str | None] = mapped_column(String, nullable=True)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    type: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    provider: Mapped[str | None] = mapped_column(String, nullable=True)
+    schema_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    attributes: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    sensitive_attributes: Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
+    dependencies: Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.current_timestamp())
+
+    state: Mapped["TerraformState"] = relationship(back_populates="resources")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "state_id": self.state_id,
+            "address": self.address,
+            "module_address": self.module_address,
+            "mode": self.mode,
+            "type": self.type,
+            "name": self.name,
+            "provider": self.provider,
+            "schema_version": self.schema_version,
+            "attributes": dict(self.attributes or {}),
+            "sensitive_attributes": list(self.sensitive_attributes or []),
+            "dependencies": list(self.dependencies or []),
+            "created_at": format_timestamp(self.created_at),
+        }
+
+
+class TerraformStateOutput(Base):
+    __tablename__ = "terraform_state_outputs"
+    __table_args__ = (Index("idx_state_outputs_state", "state_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    state_id: Mapped[str] = mapped_column(String, ForeignKey("terraform_states.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    value: Mapped[Any | None] = mapped_column(JSON, nullable=True)
+    sensitive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    type: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.current_timestamp())
+
+    state: Mapped["TerraformState"] = relationship(back_populates="outputs")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "state_id": self.state_id,
+            "name": self.name,
+            "value": self.value,
+            "sensitive": self.sensitive,
+            "type": self.type,
+            "created_at": format_timestamp(self.created_at),
+        }
+
+
+class DriftDetection(Base):
+    __tablename__ = "drift_detections"
+    __table_args__ = (
+        Index("idx_drift_project", "project_id"),
+        Index("idx_drift_detected_at", "detected_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    state_id: Mapped[str | None] = mapped_column(String, ForeignKey("terraform_states.id", ondelete="SET NULL"), nullable=True)
+    workspace: Mapped[str] = mapped_column(String, nullable=False, default="default")
+    detection_method: Mapped[str] = mapped_column(String, nullable=False)
+    total_drifted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    resources_added: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    resources_modified: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    resources_deleted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    drift_details: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    detected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.current_timestamp())
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "project_id": self.project_id,
+            "state_id": self.state_id,
+            "workspace": self.workspace,
+            "detection_method": self.detection_method,
+            "total_drifted": self.total_drifted,
+            "resources_added": self.resources_added,
+            "resources_modified": self.resources_modified,
+            "resources_deleted": self.resources_deleted,
+            "drift_details": dict(self.drift_details or {}),
+            "detected_at": format_timestamp(self.detected_at),
+        }
+
+
+class TerraformWorkspace(Base):
+    __tablename__ = "terraform_workspaces"
+    __table_args__ = (
+        Index("idx_workspaces_project", "project_id"),
+        Index("idx_workspaces_active", "project_id", "is_active"),
+        UniqueConstraint("project_id", "working_directory", "name", name="uq_workspace_project_dir_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    working_directory: Mapped[str] = mapped_column(String, nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        server_default=func.current_timestamp(),
+    )
+    selected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    variables: Mapped[List["WorkspaceVariable"]] = relationship(
+        "WorkspaceVariable",
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "project_id": self.project_id,
+            "name": self.name,
+            "working_directory": self.working_directory,
+            "is_default": self.is_default,
+            "is_active": self.is_active,
+            "created_at": format_timestamp(self.created_at),
+            "selected_at": format_timestamp(self.selected_at),
+            "last_scanned_at": format_timestamp(self.last_scanned_at),
+        }
+
+
+class WorkspaceVariable(Base):
+    __tablename__ = "workspace_variables"
+    __table_args__ = (
+        Index("idx_workspace_vars_workspace", "workspace_id"),
+        UniqueConstraint("workspace_id", "key", name="uq_workspace_variable_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("terraform_workspaces.id", ondelete="CASCADE"), nullable=False)
+    key: Mapped[str] = mapped_column(String, nullable=False)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sensitive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.current_timestamp())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.current_timestamp(), server_onupdate=func.current_timestamp())
+
+    workspace: Mapped["TerraformWorkspace"] = relationship(back_populates="variables")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "workspace_id": self.workspace_id,
+            "key": self.key,
+            "value": self.value if not self.sensitive else None,
+            "sensitive": self.sensitive,
+            "source": self.source,
+            "description": self.description,
+            "created_at": format_timestamp(self.created_at),
+            "updated_at": format_timestamp(self.updated_at),
+        }
+
+
+class WorkspaceComparison(Base):
+    __tablename__ = "workspace_comparisons"
+    __table_args__ = (Index("idx_workspace_comparisons_project", "project_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    workspace_a_id: Mapped[str] = mapped_column(String, ForeignKey("terraform_workspaces.id", ondelete="CASCADE"), nullable=False)
+    workspace_b_id: Mapped[str] = mapped_column(String, ForeignKey("terraform_workspaces.id", ondelete="CASCADE"), nullable=False)
+    comparison_type: Mapped[str] = mapped_column(String, nullable=False)
+    differences_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    differences: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    compared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.current_timestamp())
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "project_id": self.project_id,
+            "workspace_a_id": self.workspace_a_id,
+            "workspace_b_id": self.workspace_b_id,
+            "comparison_type": self.comparison_type,
+            "differences_count": self.differences_count,
+            "differences": dict(self.differences or {}),
+            "compared_at": format_timestamp(self.compared_at),
+        }
+
+
+class TerraformPlan(Base):
+    __tablename__ = "terraform_plans"
+    __table_args__ = (
+        Index("idx_plans_project", "project_id"),
+        Index("idx_plans_workspace", "workspace"),
+        Index("idx_plans_approval", "approval_status"),
+        Index("idx_plans_created", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    run_id: Mapped[str | None] = mapped_column(String, ForeignKey("project_runs.id", ondelete="SET NULL"), nullable=True)
+    workspace: Mapped[str] = mapped_column(String, nullable=False, default="default")
+    working_directory: Mapped[str] = mapped_column(String, nullable=False)
+    plan_type: Mapped[str] = mapped_column(String, nullable=False)
+    target_resources: Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
+    has_changes: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    resource_changes: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    output_changes: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    total_resources: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    resources_to_add: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    resources_to_change: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    resources_to_destroy: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    resources_to_replace: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    plan_file_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    plan_json_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    plan_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cost_estimate: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    security_impact: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    approval_status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    approved_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.current_timestamp())
+
+    resource_changes_detail: Mapped[List["PlanResourceChange"]] = relationship(
+        "PlanResourceChange",
+        back_populates="plan",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    approvals: Mapped[List["PlanApproval"]] = relationship(
+        "PlanApproval",
+        back_populates="plan",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "project_id": self.project_id,
+            "run_id": self.run_id,
+            "workspace": self.workspace,
+            "working_directory": self.working_directory,
+            "plan_type": self.plan_type,
+            "target_resources": list(self.target_resources or []),
+            "has_changes": self.has_changes,
+            "resource_changes": dict(self.resource_changes or {}),
+            "output_changes": dict(self.output_changes or {}),
+            "total_resources": self.total_resources,
+            "resources_to_add": self.resources_to_add,
+            "resources_to_change": self.resources_to_change,
+            "resources_to_destroy": self.resources_to_destroy,
+            "resources_to_replace": self.resources_to_replace,
+            "plan_file_path": self.plan_file_path,
+            "plan_json_path": self.plan_json_path,
+            "plan_output": self.plan_output,
+            "cost_estimate": dict(self.cost_estimate or {}),
+            "security_impact": dict(self.security_impact or {}),
+            "approval_status": self.approval_status,
+            "approved_by": self.approved_by,
+            "approved_at": format_timestamp(self.approved_at),
+            "expires_at": format_timestamp(self.expires_at),
+            "created_at": format_timestamp(self.created_at),
+        }
+
+
+class PlanResourceChange(Base):
+    __tablename__ = "plan_resource_changes"
+    __table_args__ = (
+        Index("idx_plan_changes_plan", "plan_id"),
+        Index("idx_plan_changes_action", "action"),
+        Index("idx_plan_changes_type", "type"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    plan_id: Mapped[str] = mapped_column(String, ForeignKey("terraform_plans.id", ondelete="CASCADE"), nullable=False)
+    resource_address: Mapped[str] = mapped_column(String, nullable=False)
+    module_address: Mapped[str | None] = mapped_column(String, nullable=True)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    type: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    provider: Mapped[str | None] = mapped_column(String, nullable=True)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    action_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    before_attributes: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    after_attributes: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    before_sensitive: Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
+    after_sensitive: Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
+    attribute_changes: Mapped[Dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    security_impact_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost_impact: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.current_timestamp())
+
+    plan: Mapped["TerraformPlan"] = relationship(back_populates="resource_changes_detail")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "plan_id": self.plan_id,
+            "resource_address": self.resource_address,
+            "module_address": self.module_address,
+            "mode": self.mode,
+            "type": self.type,
+            "name": self.name,
+            "provider": self.provider,
+            "action": self.action,
+            "action_reason": self.action_reason,
+            "before_attributes": dict(self.before_attributes or {}),
+            "after_attributes": dict(self.after_attributes or {}),
+            "before_sensitive": list(self.before_sensitive or []),
+            "after_sensitive": list(self.after_sensitive or []),
+            "attribute_changes": dict(self.attribute_changes or {}),
+            "security_impact_score": self.security_impact_score,
+            "cost_impact": self.cost_impact,
+            "created_at": format_timestamp(self.created_at),
+        }
+
+
+class PlanApproval(Base):
+    __tablename__ = "plan_approvals"
+    __table_args__ = (
+        Index("idx_plan_approvals_plan", "plan_id"),
+        Index("idx_plan_approvals_status", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid4()))
+    plan_id: Mapped[str] = mapped_column(String, ForeignKey("terraform_plans.id", ondelete="CASCADE"), nullable=False)
+    approver_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    comments: Mapped[str | None] = mapped_column(Text, nullable=True)
+    required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.current_timestamp())
+
+    plan: Mapped["TerraformPlan"] = relationship(back_populates="approvals")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "plan_id": self.plan_id,
+            "approver_id": self.approver_id,
+            "status": self.status,
+            "comments": self.comments,
+            "required": self.required,
+            "approved_at": format_timestamp(self.approved_at),
             "created_at": format_timestamp(self.created_at),
         }
 

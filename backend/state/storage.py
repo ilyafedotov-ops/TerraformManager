@@ -74,7 +74,6 @@ def persist_state_document(
                 type=resource.type,
                 name=resource.name,
                 provider=resource.provider,
-                index_label=resource.index,
                 schema_version=resource.schema_version,
                 attributes=resource.attributes,
                 sensitive_attributes=resource.sensitive_attributes,
@@ -89,7 +88,7 @@ def persist_state_document(
                 name=output.name,
                 value=output.value,
                 sensitive=output.sensitive,
-                type_hint=_serialize_type_hint(output.type),
+                type=_serialize_type_hint(output.type),
             )
         )
 
@@ -356,7 +355,6 @@ def _persist_state_snapshot(session: Session, state: TerraformState, snapshot: D
                 type=resource.type,
                 name=resource.name,
                 provider=resource.provider,
-                index_label=resource.index,
                 schema_version=resource.schema_version,
                 attributes=resource.attributes,
                 sensitive_attributes=resource.sensitive_attributes,
@@ -370,7 +368,7 @@ def _persist_state_snapshot(session: Session, state: TerraformState, snapshot: D
                 name=output.name,
                 value=output.value,
                 sensitive=output.sensitive,
-                type_hint=_serialize_type_hint(output.type),
+                type=_serialize_type_hint(output.type),
             )
         )
     session.flush()

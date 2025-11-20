@@ -12,9 +12,11 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import httpx
 import yaml
+from pydantic import TypeAdapter
+from sqlalchemy.orm import Session
 
 from backend.llm_service import DEFAULT_OPENAI_MODEL
-from backend.db.session import DEFAULT_DB_PATH
+from backend.db.session import DEFAULT_DB_PATH, session_scope
 from backend.db.migrations import ensure_user_profile_columns
 from backend.scanner import scan_paths
 from backend.report_html import render_html_report
@@ -24,6 +26,20 @@ from backend.utils.patch import collect_patches, format_patch_bundle
 from backend.utils.settings import get_llm_settings, update_llm_settings
 from backend.auth import auth_settings
 from backend.generators.docs import generate_docs
+from backend.state import (
+    StateBackendConfig,
+    detect_drift_from_plan,
+    export_state_snapshot,
+    get_state_detail,
+    import_state,
+    list_outputs_for_state,
+    list_project_states,
+    list_resources_for_state,
+    move_state_resource,
+    remove_state_resources,
+)
+from backend.state.backends import StateBackendError
+from backend.state.storage import StateMutationError, StateNotFoundError
 from backend.storage import (
     create_project,
     create_project_run,
@@ -40,6 +56,24 @@ from backend.storage import (
     resolve_workspace_file,
     ArtifactPathError,
     WorkspacePathError,
+)
+from backend.workspaces.errors import TerraformWorkspaceError, WorkspaceConflictError, WorkspaceNotFoundError
+from backend.workspaces.manager import WorkspaceManager
+from backend.workspaces.scanner import MultiWorkspaceScanner
+from backend.workspaces.services import (
+    create_workspace_with_cli,
+    delete_workspace_with_cli,
+    discover_and_sync_workspaces,
+    resolve_working_directory as resolve_tf_working_directory,
+    select_workspace_with_cli,
+)
+from backend.workspaces.storage import (
+    delete_workspace_variable,
+    get_workspace_by_id,
+    get_workspace_by_name,
+    list_workspace_records,
+    list_workspace_variables,
+    upsert_workspace_variable,
 )
 
 
@@ -111,6 +145,69 @@ def _resolve_project_reference(project_id: str | None, project_slug: str | None)
     return project
 
 
+def _build_backend_config_from_args(args: argparse.Namespace) -> StateBackendConfig:
+    """Construct a backend config payload from parsed CLI arguments."""
+
+    backend = (args.backend or "").strip()
+    payload: Dict[str, Any] = {"type": backend}
+
+    if backend == "local":
+        if not args.path:
+            raise ValueError("--path is required for local backend imports")
+        payload["path"] = args.path
+    elif backend == "s3":
+        if not args.bucket or not args.key:
+            raise ValueError("--bucket and --key are required for s3 backend imports")
+        payload.update({"bucket": args.bucket, "key": args.key})
+        if args.region:
+            payload["region"] = args.region
+        if args.profile:
+            payload["profile"] = args.profile
+        if args.endpoint_url:
+            payload["endpoint_url"] = args.endpoint_url
+        if args.session_token:
+            payload["session_token"] = args.session_token
+    elif backend == "azurerm":
+        if not args.storage_account or not args.container or not args.key:
+            raise ValueError("--storage-account, --container, and --key are required for azurerm backend imports")
+        payload.update(
+            {
+                "storage_account": args.storage_account,
+                "container": args.container,
+                "key": args.key,
+            }
+        )
+        if args.sas_token:
+            payload["sas_token"] = args.sas_token
+        if args.connection_string:
+            payload["connection_string"] = args.connection_string
+    elif backend == "gcs":
+        if not args.bucket or not args.prefix:
+            raise ValueError("--bucket and --prefix are required for gcs backend imports")
+        payload.update({"bucket": args.bucket, "prefix": args.prefix})
+        if args.credentials_file:
+            payload["credentials_file"] = args.credentials_file
+        if args.project:
+            payload["project"] = args.project
+    elif backend == "remote":
+        if not args.organization or not args.remote_workspace:
+            raise ValueError("--organization and --remote-workspace are required for remote backend imports")
+        payload.update(
+            {
+                "organization": args.organization,
+                "workspace": args.remote_workspace,
+            }
+        )
+        if args.hostname:
+            payload["hostname"] = args.hostname
+        if args.token:
+            payload["token"] = args.token
+    else:
+        raise ValueError(f"Unsupported backend type '{backend}'")
+
+    return TypeAdapter(StateBackendConfig).validate_python(payload)
+
+
 def _save_run_artifact_from_path(
     project_id: str,
     run_id: str,
@@ -147,6 +244,29 @@ def _resolve_workspace_destination(
     else:
         resolved.parent.mkdir(parents=True, exist_ok=True)
     return resolved
+
+
+def _resolve_tf_workspace(
+    session: Session,
+    *,
+    project_id: str,
+    working_directory: str | None,
+    workspace_id: str | None,
+    workspace_name: str | None,
+) -> Any:
+    """Look up a Terraform workspace record by id or by name within a working directory."""
+    if workspace_id:
+        return get_workspace_by_id(session, workspace_id)
+    if not workspace_name:
+        raise ValueError("workspace name or id is required")
+    if not working_directory:
+        raise ValueError("--working-dir is required when selecting by name")
+    return get_workspace_by_name(
+        session,
+        project_id=project_id,
+        working_directory=working_directory,
+        name=workspace_name,
+    )
 
 
 def _print_json(data: Any) -> None:
@@ -456,6 +576,186 @@ def main() -> None:
     baseline_project_ref = baseline_project.add_mutually_exclusive_group()
     baseline_project_ref.add_argument("--project-id", help="Resolve paths inside the specified project workspace")
     baseline_project_ref.add_argument("--project-slug", help="Resolve paths inside the specified project workspace")
+
+    workspace = sub.add_parser("workspace", help="Manage Terraform workspaces")
+    workspace_sub = workspace.add_subparsers(dest="workspace_cmd", required=True)
+
+    ws_discover = workspace_sub.add_parser("discover", help="Discover Terraform workspaces in a project")
+    ws_discover_ref = ws_discover.add_mutually_exclusive_group(required=True)
+    ws_discover_ref.add_argument("--project-id", help="Project ID")
+    ws_discover_ref.add_argument("--project-slug", help="Project slug")
+    ws_discover.add_argument("--working-dir", default=".", help="Relative working directory to search (default: .)")
+    ws_discover.add_argument("--json", action="store_true", help="Output JSON (default: human-readable)")
+
+    ws_list = workspace_sub.add_parser("list", help="List Terraform workspaces stored for a project")
+    ws_list_ref = ws_list.add_mutually_exclusive_group(required=True)
+    ws_list_ref.add_argument("--project-id", help="Project ID")
+    ws_list_ref.add_argument("--project-slug", help="Project slug")
+    ws_list.add_argument("--working-dir", default=None, help="Relative working directory filter")
+    ws_list.add_argument("--json", action="store_true", help="Output JSON (default: human-readable)")
+
+    ws_create = workspace_sub.add_parser("create", help="Create a Terraform workspace via CLI and persist it")
+    ws_create_ref = ws_create.add_mutually_exclusive_group(required=True)
+    ws_create_ref.add_argument("--project-id", help="Project ID")
+    ws_create_ref.add_argument("--project-slug", help="Project slug")
+    ws_create.add_argument("--name", required=True, help="Workspace name")
+    ws_create.add_argument("--working-dir", required=True, help="Relative working directory containing Terraform code")
+    ws_create.add_argument("--activate", action="store_true", help="Mark the workspace active after creation")
+    ws_create.add_argument(
+        "--skip-terraform",
+        action="store_true",
+        help="Skip running terraform workspace new (DB only)",
+    )
+
+    ws_select = workspace_sub.add_parser("select", help="Select/activate a workspace via Terraform CLI")
+    ws_select_ref = ws_select.add_mutually_exclusive_group(required=True)
+    ws_select_ref.add_argument("--project-id", help="Project ID")
+    ws_select_ref.add_argument("--project-slug", help="Project slug")
+    ws_select.add_argument("--workspace-id", help="Workspace record ID")
+    ws_select.add_argument("--name", help="Workspace name (requires --working-dir)")
+    ws_select.add_argument("--working-dir", help="Relative working directory when using --name")
+
+    ws_delete = workspace_sub.add_parser("delete", help="Delete a workspace from Terraform and the DB")
+    ws_delete_ref = ws_delete.add_mutually_exclusive_group(required=True)
+    ws_delete_ref.add_argument("--project-id", help="Project ID")
+    ws_delete_ref.add_argument("--project-slug", help="Project slug")
+    ws_delete.add_argument("--workspace-id", help="Workspace record ID")
+    ws_delete.add_argument("--name", help="Workspace name (requires --working-dir)")
+    ws_delete.add_argument("--working-dir", help="Relative working directory when using --name")
+    ws_delete.add_argument(
+        "--skip-terraform",
+        action="store_true",
+        help="Skip terraform workspace delete (DB only)",
+    )
+
+    ws_scan = workspace_sub.add_parser("scan", help="Scan Terraform code across one or more workspaces")
+    ws_scan_ref = ws_scan.add_mutually_exclusive_group(required=True)
+    ws_scan_ref.add_argument("--project-id", help="Project ID")
+    ws_scan_ref.add_argument("--project-slug", help="Project slug")
+    ws_scan.add_argument("--working-dir", required=True, help="Relative working directory to scan")
+    ws_scan.add_argument(
+        "--workspaces",
+        help="Comma-separated list of workspace names to scan (default: all stored)",
+    )
+    ws_scan.add_argument(
+        "--terraform-validate",
+        action="store_true",
+        help="Run terraform validate during scan",
+    )
+    ws_scan.add_argument("--json", action="store_true", help="Output JSON (default: human-readable summary)")
+
+    ws_vars = workspace_sub.add_parser("vars", help="Manage workspace variables")
+    ws_vars_ref = ws_vars.add_mutually_exclusive_group(required=True)
+    ws_vars_ref.add_argument("--project-id", help="Project ID")
+    ws_vars_ref.add_argument("--project-slug", help="Project slug")
+    ws_vars_sub = ws_vars.add_subparsers(dest="workspace_vars_cmd", required=True)
+
+    ws_vars_list = ws_vars_sub.add_parser("list", help="List variables for a workspace")
+    ws_vars_list.add_argument("--workspace-id", help="Workspace record ID")
+    ws_vars_list.add_argument("--name", help="Workspace name (requires --working-dir)")
+    ws_vars_list.add_argument("--working-dir", help="Relative working directory when using --name")
+
+    ws_vars_set = ws_vars_sub.add_parser("set", help="Set or update a workspace variable")
+    ws_vars_set.add_argument("--workspace-id", help="Workspace record ID")
+    ws_vars_set.add_argument("--name", help="Workspace name (requires --working-dir)")
+    ws_vars_set.add_argument("--working-dir", help="Relative working directory when using --name")
+    ws_vars_set.add_argument("--key", required=True, help="Variable key")
+    ws_vars_set.add_argument("--value", required=True, help="Variable value")
+    ws_vars_set.add_argument("--sensitive", action="store_true", help="Mark the variable as sensitive")
+    ws_vars_set.add_argument("--source", help="Variable source label (tfvars/env/manual)")
+    ws_vars_set.add_argument("--description", help="Variable description")
+
+    ws_vars_unset = ws_vars_sub.add_parser("unset", help="Delete a workspace variable")
+    ws_vars_unset.add_argument("--workspace-id", help="Workspace record ID")
+    ws_vars_unset.add_argument("--name", help="Workspace name (requires --working-dir)")
+    ws_vars_unset.add_argument("--working-dir", help="Relative working directory when using --name")
+    ws_vars_unset.add_argument("--key", required=True, help="Variable key to delete")
+
+    state_parser = sub.add_parser("state", help="Manage stored Terraform state snapshots")
+    state_sub = state_parser.add_subparsers(dest="state_cmd", required=True)
+
+    state_import = state_sub.add_parser("import", help="Import a Terraform state file into the local database")
+    state_project_ref = state_import.add_mutually_exclusive_group(required=True)
+    state_project_ref.add_argument("--project-id", help="Target project ID")
+    state_project_ref.add_argument("--project-slug", help="Target project slug")
+    state_import.add_argument("--workspace", default="default", help="Workspace name (default: default)")
+    state_import.add_argument(
+        "--backend",
+        required=True,
+        choices=("local", "s3", "azurerm", "gcs", "remote"),
+        help="State backend type to import from",
+    )
+    # Local backend
+    state_import.add_argument("--path", help="Path to terraform.tfstate for local backend")
+    # S3 backend options
+    state_import.add_argument("--bucket", help="S3 bucket containing the state file")
+    state_import.add_argument("--key", help="Object key inside the S3 bucket")
+    state_import.add_argument("--region", help="AWS region for the state bucket")
+    state_import.add_argument("--profile", help="AWS named profile")
+    state_import.add_argument("--endpoint-url", dest="endpoint_url", help="Custom S3-compatible endpoint")
+    state_import.add_argument("--session-token", dest="session_token", help="AWS session token")
+    # Azure backend options
+    state_import.add_argument("--storage-account", help="Azure Storage account name")
+    state_import.add_argument("--container", help="Azure Blob container name")
+    state_import.add_argument("--sas-token", dest="sas_token", help="SAS token for the blob")
+    state_import.add_argument("--connection-string", dest="connection_string", help="Azure Storage connection string")
+    # GCS backend options
+    state_import.add_argument("--prefix", help="GCS object prefix/key")
+    state_import.add_argument("--credentials-file", help="Service account JSON for GCS")
+    state_import.add_argument("--project", help="GCP project for GCS access")
+    # Terraform Cloud backend
+    state_import.add_argument("--organization", help="Terraform Cloud organization")
+    state_import.add_argument("--remote-workspace", help="Terraform Cloud workspace name")
+    state_import.add_argument("--hostname", help="Terraform Cloud hostname (default: app.terraform.io)")
+    state_import.add_argument("--token", help="Terraform Cloud user or team token")
+
+    state_list = state_sub.add_parser("list", help="List imported states for a project")
+    state_list_ref = state_list.add_mutually_exclusive_group(required=True)
+    state_list_ref.add_argument("--project-id", help="Project ID")
+    state_list_ref.add_argument("--project-slug", help="Project slug")
+    state_list.add_argument("--workspace", help="Optional workspace filter")
+    state_list.add_argument("--json", action="store_true", help="Output JSON (default) explicitly")
+
+    state_show = state_sub.add_parser("show", help="Show state metadata")
+    state_show.add_argument("--state-id", required=True, help="State identifier")
+    state_show.add_argument("--include-snapshot", action="store_true", help="Include the raw state snapshot")
+
+    state_export = state_sub.add_parser("export", help="Export the raw state snapshot to a file")
+    state_export.add_argument("--state-id", required=True, help="State identifier")
+    state_export.add_argument("--out", required=True, help="Destination file path for the JSON snapshot")
+
+    state_resources = state_sub.add_parser("resources", help="List resources stored in a state")
+    state_resources.add_argument("--state-id", required=True, help="State identifier")
+    state_resources.add_argument("--limit", type=int, default=200, help="Maximum number of resources to return")
+    state_resources.add_argument("--offset", type=int, default=0, help="Offset for resource pagination")
+
+    state_outputs = state_sub.add_parser("outputs", help="List outputs stored in a state")
+    state_outputs.add_argument("--state-id", required=True, help="State identifier")
+
+    state_drift = state_sub.add_parser("drift", help="Detect drift by comparing a stored state against a plan JSON")
+    state_drift.add_argument("--state-id", required=True, help="State identifier")
+    state_drift.add_argument("--plan", required=True, help="Path to Terraform plan JSON or inline JSON payload")
+    state_drift.add_argument(
+        "--record-result",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Persist the drift summary in the database (default: True)",
+    )
+
+    state_rm = state_sub.add_parser("rm", help="Remove resource addresses from a stored state snapshot")
+    state_rm.add_argument("--state-id", required=True, help="State identifier")
+    state_rm.add_argument(
+        "--address",
+        dest="addresses",
+        action="append",
+        required=True,
+        help="Resource address to remove (repeatable)",
+    )
+
+    state_mv = state_sub.add_parser("mv", help="Move/rename a resource address inside a stored state snapshot")
+    state_mv.add_argument("--state-id", required=True, help="State identifier")
+    state_mv.add_argument("--from", dest="source", required=True, help="Existing resource address")
+    state_mv.add_argument("--to", dest="destination", required=True, help="New resource address")
 
     precommit = sub.add_parser("precommit", help="Generate a sample pre-commit configuration for Terraform policies")
     precommit.add_argument(
@@ -925,6 +1225,245 @@ def main() -> None:
             payload = yaml.safe_dump(baseline_data, sort_keys=False)
         out_path.write_text(payload, encoding="utf-8")
         print(f"Wrote baseline to {out_path}")
+    elif args.cmd == "workspace":
+        manager = WorkspaceManager()
+        try:
+            project = _resolve_project_reference(args.project_id, args.project_slug)
+            if args.workspace_cmd == "discover":
+                with session_scope() as session:
+                    result = discover_and_sync_workspaces(
+                        session,
+                        project=project,
+                        manager=manager,
+                        working_directory=args.working_dir,
+                    )
+                payload = {"discovered": result.discovered, "created": result.created}
+                if args.json:
+                    _print_json(payload)
+                else:
+                    print(f"Discovered {sum(len(v) for v in result.discovered.values())} workspaces")
+                    print(f"Persisted {result.created} new records")
+                    for rel_dir, names in payload["discovered"].items():
+                        joined = ", ".join(names) if names else "<none>"
+                        print(f"- {rel_dir}: {joined}")
+            elif args.workspace_cmd == "list":
+                with session_scope() as session:
+                    items = list_workspace_records(
+                        session,
+                        project_id=project["id"],
+                        working_directory=args.working_dir,
+                    )
+                if args.json:
+                    _print_json({"items": items})
+                else:
+                    if not items:
+                        print("No workspaces found.")
+                    for ws in items:
+                        flags = []
+                        if ws.get("is_default"):
+                            flags.append("default")
+                        if ws.get("is_active"):
+                            flags.append("active")
+                        meta = f" ({', '.join(flags)})" if flags else ""
+                        print(f"{ws['id']}  {ws['name']}  dir={ws['working_directory']}{meta}")
+            elif args.workspace_cmd == "create":
+                with session_scope() as session:
+                    record = create_workspace_with_cli(
+                        session,
+                        project=project,
+                        name=args.name,
+                        working_directory=args.working_dir,
+                        manager=manager,
+                        activate=args.activate,
+                        create_in_terraform=not args.skip_terraform,
+                    )
+                print(f"Created workspace {record['name']} (id={record['id']}) in {record['working_directory']}")
+            elif args.workspace_cmd == "select":
+                with session_scope() as session:
+                    workspace = _resolve_tf_workspace(
+                        session,
+                        project_id=project["id"],
+                        working_directory=args.working_dir,
+                        workspace_id=args.workspace_id,
+                        workspace_name=args.name,
+                    )
+                    record = select_workspace_with_cli(
+                        session,
+                        project=project,
+                        workspace_id=workspace.id,
+                        manager=manager,
+                    )
+                print(f"Selected workspace {record['name']} (dir={record['working_directory']})")
+            elif args.workspace_cmd == "delete":
+                with session_scope() as session:
+                    workspace = _resolve_tf_workspace(
+                        session,
+                        project_id=project["id"],
+                        working_directory=args.working_dir,
+                        workspace_id=args.workspace_id,
+                        workspace_name=args.name,
+                    )
+                    delete_workspace_with_cli(
+                        session,
+                        project=project,
+                        workspace_id=workspace.id,
+                        manager=manager,
+                        skip_cli=args.skip_terraform,
+                    )
+                print("Workspace deleted")
+            elif args.workspace_cmd == "scan":
+                resolved = resolve_tf_working_directory(project, args.working_dir)
+                with session_scope() as session:
+                    workspace_records = list_workspace_records(
+                        session,
+                        project_id=project["id"],
+                        working_directory=resolved.working_directory_token,
+                    )
+                    name_list = (
+                        [name.strip() for name in args.workspaces.split(",") if name.strip()]
+                        if args.workspaces
+                        else [ws["name"] for ws in workspace_records]
+                    )
+                    if not name_list:
+                        raise ValueError("No workspaces available to scan")
+                    id_lookup = {ws["name"]: ws["id"] for ws in workspace_records}
+                    scanner = MultiWorkspaceScanner(manager=manager)
+                    results = scanner.scan(
+                        resolved.working_dir,
+                        name_list,
+                        use_terraform_validate=args.terraform_validate,
+                        context={
+                            "project_id": project["id"],
+                            "working_directory": resolved.working_directory_token,
+                        },
+                        update_ids=[id_lookup[name] for name in name_list if name in id_lookup],
+                        session=session,
+                    )
+                payload = {
+                    name: {
+                        "status": result.status,
+                        "workspace": result.workspace,
+                        "error": result.error,
+                        "summary": (result.result or {}).get("summary") if result.result else None,
+                    }
+                    for name, result in results.items()
+                }
+                if args.json:
+                    _print_json({"results": payload})
+                else:
+                    for name, entry in payload.items():
+                        if entry["status"] == "ok":
+                            summary = entry.get("summary") or {}
+                            issues = summary.get("issues_found")
+                            print(f"{name}: ok (issues: {issues})")
+                        else:
+                            print(f"{name}: error - {entry['error']}")
+            elif args.workspace_cmd == "vars":
+                with session_scope() as session:
+                    workspace = _resolve_tf_workspace(
+                        session,
+                        project_id=project["id"],
+                        working_directory=args.working_dir,
+                        workspace_id=getattr(args, "workspace_id", None),
+                        workspace_name=getattr(args, "name", None),
+                    )
+                    if args.workspace_vars_cmd == "list":
+                        items = list_workspace_variables(session, workspace_id=workspace.id)
+                        _print_json({"items": items})
+                    elif args.workspace_vars_cmd == "set":
+                        record = upsert_workspace_variable(
+                            session,
+                            workspace_id=workspace.id,
+                            key=args.key,
+                            value=args.value,
+                            sensitive=args.sensitive,
+                            source=args.source,
+                            description=args.description,
+                        )
+                        session.commit()
+                        rendered_value = "<redacted>" if record.sensitive else record.value
+                        print(f"Set {record.key}={rendered_value} on workspace {workspace.name}")
+                    elif args.workspace_vars_cmd == "unset":
+                        delete_workspace_variable(session, workspace_id=workspace.id, key=args.key)
+                        session.commit()
+                        print(f"Deleted variable '{args.key}' from workspace {workspace.name}")
+        except (
+            TerraformWorkspaceError,
+            WorkspaceConflictError,
+            WorkspaceNotFoundError,
+            WorkspacePathError,
+            ValueError,
+        ) as exc:
+            logger.error(str(exc))
+            sys.exit(1)
+    elif args.cmd == "state":
+        try:
+            if args.state_cmd == "import":
+                project = _resolve_project_reference(args.project_id, args.project_slug)
+                backend_config = _build_backend_config_from_args(args)
+                with session_scope() as session:
+                    record = import_state(
+                        session,
+                        project_id=project["id"],
+                        workspace=args.workspace,
+                        backend=backend_config,
+                    )
+                    _print_json(record)
+            elif args.state_cmd == "list":
+                project = _resolve_project_reference(args.project_id, args.project_slug)
+                with session_scope() as session:
+                    items = list_project_states(session, project_id=project["id"], workspace=args.workspace)
+                _print_json({"items": items})
+            elif args.state_cmd == "show":
+                with session_scope() as session:
+                    record = get_state_detail(session, state_id=args.state_id, include_snapshot=args.include_snapshot)
+                _print_json(record)
+            elif args.state_cmd == "export":
+                out_path = Path(args.out).expanduser()
+                _ensure_parent(out_path)
+                with session_scope() as session:
+                    snapshot = export_state_snapshot(session, state_id=args.state_id)
+                out_path.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+                print(f"Wrote state snapshot to {out_path}")
+            elif args.state_cmd == "resources":
+                with session_scope() as session:
+                    resources = list_resources_for_state(
+                        session,
+                        state_id=args.state_id,
+                        limit=args.limit,
+                        offset=args.offset,
+                    )
+                _print_json({"items": resources, "limit": args.limit, "offset": args.offset})
+            elif args.state_cmd == "outputs":
+                with session_scope() as session:
+                    outputs = list_outputs_for_state(session, state_id=args.state_id)
+                _print_json({"items": outputs})
+            elif args.state_cmd == "drift":
+                plan_payload = _load_json_payload(args.plan)
+                with session_scope() as session:
+                    summary = detect_drift_from_plan(
+                        session,
+                        state_id=args.state_id,
+                        plan_json=plan_payload,
+                        record_result=args.record_result,
+                    )
+                _print_json(summary.model_dump())
+            elif args.state_cmd == "rm":
+                with session_scope() as session:
+                    record = remove_state_resources(session, state_id=args.state_id, addresses=args.addresses)
+                _print_json(record)
+            elif args.state_cmd == "mv":
+                with session_scope() as session:
+                    record = move_state_resource(
+                        session,
+                        state_id=args.state_id,
+                        source=args.source,
+                        destination=args.destination,
+                    )
+                _print_json(record)
+        except (StateNotFoundError, StateMutationError, StateBackendError, ValueError) as exc:
+            logger.error(str(exc))
+            sys.exit(1)
     elif args.cmd == "precommit":
         out_path = Path(args.out)
         if out_path.exists() and not args.force:
