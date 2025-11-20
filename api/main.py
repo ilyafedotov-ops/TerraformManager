@@ -71,6 +71,8 @@ from api.dependencies import require_current_user
 from api.middleware.logging import RequestLoggingMiddleware
 from api.routes import auth as auth_routes
 from api.routes import projects as project_routes
+from api.routes import state as state_routes
+from api.routes import workspaces as workspace_routes
 
 KNOWLEDGE_ROOT = Path("knowledge").resolve()
 
@@ -129,6 +131,8 @@ def create_app() -> FastAPI:
     application = FastAPI(title="Terraform Manager API", version=__version__)
     application.include_router(auth_routes.router)
     application.include_router(project_routes.router)
+    application.include_router(state_routes.router)
+    application.include_router(workspace_routes.router)
     application.include_router(api_router)
     application.mount("/docs", StaticFiles(directory="docs"), name="docs")
     allowed_origins = _allowed_origins()

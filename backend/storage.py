@@ -31,6 +31,11 @@ from backend.db.models import (
 )
 from backend.db.session import DEFAULT_DB_PATH as _DEFAULT_DB_PATH, init_models, session_scope
 
+try:  # Optional import; migrations module is a stand-alone script
+    from backend.db.migrations import run_terraform_management_migration as run_state_migration
+except Exception:  # noqa: BLE001
+    run_state_migration = None
+
 DEFAULT_DB_PATH = _DEFAULT_DB_PATH
 DEFAULT_PROJECTS_ROOT = Path("data/projects")
 MAX_VERSION_TEXT_BYTES = 512 * 1024
@@ -2355,6 +2360,12 @@ def list_generated_asset_version_files(
 def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
     """Initialise database tables using SQLAlchemy metadata."""
     init_models(db_path)
+    if run_state_migration:
+        try:
+            run_state_migration(Path(db_path))
+        except Exception:  # noqa: BLE001
+            # Best-effort; creation via SQLAlchemy metadata should already cover new tables
+            pass
     with session_scope(db_path) as db:
         _ensure_report_review_columns(db)
         _ensure_generated_asset_version_columns(db)

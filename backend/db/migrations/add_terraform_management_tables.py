@@ -130,7 +130,7 @@ def migrate_workspace_tables(conn: sqlite3.Connection) -> None:
             working_directory TEXT NOT NULL,
             is_default BOOLEAN DEFAULT FALSE,
             is_active BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             selected_at TIMESTAMP,
             last_scanned_at TIMESTAMP,
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,

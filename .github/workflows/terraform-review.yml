@@ -59,12 +59,16 @@ jobs:
           python -m pip install -r requirements-dev.txt
 
       - name: Run integration scanner tests
+        env:
+          PYTHONPATH: .
         run: |
           python -m pytest tests/test_integration_scanner.py
 
-      - name: Run CLI integration tests
+      - name: Run CLI and state integration tests
+        env:
+          PYTHONPATH: .
         run: |
-          python -m pytest tests/test_cli_integration.py
+          python -m pytest tests/test_cli_integration.py tests/test_state_cli_integration.py tests/test_state_routes_integration.py
 
   terraform-review:
     name: Terraform reviewer scan

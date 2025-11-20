@@ -6,8 +6,16 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from azure.storage.blob import BlobClient  # type: ignore[import-untyped]
-from google.cloud import storage as gcs_storage  # type: ignore[import-untyped]
+
+try:  # Optional dependency; raised when azurerm backend is used
+    from azure.storage.blob import BlobClient  # type: ignore[import-untyped]
+except Exception:  # noqa: BLE001
+    BlobClient = None  # type: ignore[assignment]
+
+try:  # Optional dependency; raised when gcs backend is used
+    from google.cloud import storage as gcs_storage  # type: ignore[import-untyped]
+except Exception:  # noqa: BLE001
+    gcs_storage = None  # type: ignore[assignment]
 
 from .models import (
     AzureBackendConfig,
@@ -93,6 +101,8 @@ def _read_s3_state(config: S3BackendConfig) -> bytes:
 
 
 def _read_azure_state(config: AzureBackendConfig) -> bytes:
+    if BlobClient is None:
+        raise StateBackendError("azure-storage-blob is required for azurerm state backends.")
     if not (config.connection_string or config.sas_token):
         raise StateBackendError("Azure backend requires a connection_string or sas_token.")
 
@@ -114,6 +124,8 @@ def _read_azure_state(config: AzureBackendConfig) -> bytes:
 
 
 def _read_gcs_state(config: GCSBackendConfig) -> bytes:
+    if gcs_storage is None:
+        raise StateBackendError("google-cloud-storage is required for gcs state backends.")
     try:
         if config.credentials_file:
             client = gcs_storage.Client.from_service_account_json(config.credentials_file, project=config.project)
