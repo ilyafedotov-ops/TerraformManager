@@ -60,6 +60,7 @@ from backend.storage import (
 from backend.workspaces.errors import TerraformWorkspaceError, WorkspaceConflictError, WorkspaceNotFoundError
 from backend.workspaces.manager import WorkspaceManager
 from backend.workspaces.scanner import MultiWorkspaceScanner
+from backend.workspaces.comparator import compare_variables_map, load_workspace_variables, record_workspace_comparison
 from backend.workspaces.services import (
     create_workspace_with_cli,
     delete_workspace_with_cli,
@@ -75,6 +76,7 @@ from backend.workspaces.storage import (
     list_workspace_variables,
     upsert_workspace_variable,
 )
+from backend.workspaces.variables import import_tfvars_file
 
 
 BASELINE_DEFAULT_OUT = "tfreview.baseline.yaml"
@@ -644,6 +646,16 @@ def main() -> None:
     )
     ws_scan.add_argument("--json", action="store_true", help="Output JSON (default: human-readable summary)")
 
+    ws_compare = workspace_sub.add_parser("compare", help="Compare workspace variables and record a comparison")
+    ws_compare_ref = ws_compare.add_mutually_exclusive_group(required=True)
+    ws_compare_ref.add_argument("--project-id", help="Project ID")
+    ws_compare_ref.add_argument("--project-slug", help="Project slug")
+    ws_compare.add_argument("--workspace-a-id", help="Workspace A record ID")
+    ws_compare.add_argument("--workspace-b-id", help="Workspace B record ID")
+    ws_compare.add_argument("--workspace-a-name", help="Workspace A name (requires --working-dir)")
+    ws_compare.add_argument("--workspace-b-name", help="Workspace B name (requires --working-dir)")
+    ws_compare.add_argument("--working-dir", help="Relative working directory when using names")
+
     ws_vars = workspace_sub.add_parser("vars", help="Manage workspace variables")
     ws_vars_ref = ws_vars.add_mutually_exclusive_group(required=True)
     ws_vars_ref.add_argument("--project-id", help="Project ID")
@@ -670,6 +682,18 @@ def main() -> None:
     ws_vars_unset.add_argument("--name", help="Workspace name (requires --working-dir)")
     ws_vars_unset.add_argument("--working-dir", help="Relative working directory when using --name")
     ws_vars_unset.add_argument("--key", required=True, help="Variable key to delete")
+
+    ws_vars_import = ws_vars_sub.add_parser("import", help="Import variables from a tfvars file into a workspace")
+    ws_vars_import.add_argument("--workspace-id", help="Workspace record ID")
+    ws_vars_import.add_argument("--name", help="Workspace name (requires --working-dir)")
+    ws_vars_import.add_argument("--working-dir", help="Relative working directory when using --name")
+    ws_vars_import.add_argument("--file", required=True, help="Path to tfvars file (project-relative)")
+    ws_vars_import.add_argument(
+        "--sensitive-key",
+        action="append",
+        dest="sensitive_keys",
+        help="Treat specific keys as sensitive in addition to automatic detection (repeatable)",
+    )
 
     state_parser = sub.add_parser("state", help="Manage stored Terraform state snapshots")
     state_sub = state_parser.add_subparsers(dest="state_cmd", required=True)
@@ -1229,6 +1253,11 @@ def main() -> None:
         manager = WorkspaceManager()
         try:
             project = _resolve_project_reference(args.project_id, args.project_slug)
+            try:
+                project_root = get_project_workspace(project)
+            except WorkspacePathError as exc:
+                logger.error("Failed to resolve project workspace: %s", exc)
+                sys.exit(1)
             if args.workspace_cmd == "discover":
                 with session_scope() as session:
                     result = discover_and_sync_workspaces(
@@ -1358,6 +1387,35 @@ def main() -> None:
                             print(f"{name}: ok (issues: {issues})")
                         else:
                             print(f"{name}: error - {entry['error']}")
+            elif args.workspace_cmd == "compare":
+                with session_scope() as session:
+                    workspace_a = _resolve_tf_workspace(
+                        session,
+                        project_id=project["id"],
+                        working_directory=args.working_dir,
+                        workspace_id=getattr(args, "workspace_a_id", None),
+                        workspace_name=getattr(args, "workspace_a_name", None),
+                    )
+                    workspace_b = _resolve_tf_workspace(
+                        session,
+                        project_id=project["id"],
+                        working_directory=args.working_dir,
+                        workspace_id=getattr(args, "workspace_b_id", None),
+                        workspace_name=getattr(args, "workspace_b_name", None),
+                    )
+                    vars_a = load_workspace_variables(session, workspace_a.id)
+                    vars_b = load_workspace_variables(session, workspace_b.id)
+                    differences = compare_variables_map(vars_a, vars_b, info_keys=["region", "environment", "account_id"])
+                    record = record_workspace_comparison(
+                        session,
+                        project_id=project["id"],
+                        workspace_a_id=workspace_a.id,
+                        workspace_b_id=workspace_b.id,
+                        comparison_type="variables",
+                        differences=differences,
+                    )
+                    session.commit()
+                print(f"Recorded comparison {record.id} ({len(differences)} differences)")
             elif args.workspace_cmd == "vars":
                 with session_scope() as session:
                     workspace = _resolve_tf_workspace(
@@ -1387,6 +1445,19 @@ def main() -> None:
                         delete_workspace_variable(session, workspace_id=workspace.id, key=args.key)
                         session.commit()
                         print(f"Deleted variable '{args.key}' from workspace {workspace.name}")
+                    elif args.workspace_vars_cmd == "import":
+                        tfvars_path = resolve_workspace_file(project_root, args.file, label="tfvars file")
+                        summary = import_tfvars_file(
+                            session,
+                            workspace_id=workspace.id,
+                            tfvars_path=tfvars_path,
+                            extra_sensitive=args.sensitive_keys or [],
+                        )
+                        session.commit()
+                        print(
+                            f"Imported {summary['imported']} variables from {tfvars_path} "
+                            f"(sensitive keys: {', '.join(summary['sensitive_keys']) if summary['sensitive_keys'] else 'none'})"
+                        )
         except (
             TerraformWorkspaceError,
             WorkspaceConflictError,

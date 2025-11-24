@@ -14,6 +14,7 @@ class WorkspaceCreatePayload(BaseModel):
     working_directory: str
     is_default: bool = False
     is_active: bool = False
+    skip_terraform: bool = False
 
 
 class WorkspaceSelectPayload(BaseModel):
@@ -43,18 +44,20 @@ class WorkspaceVariablePayload(BaseModel):
     description: Optional[str] = None
 
 
-class WorkspaceVariableImportPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    variables: Dict[str, Any]
-    sensitive_keys: Sequence[str] | None = None
-
-
 class WorkspaceComparePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     project_id: Optional[str] = None
     project_slug: Optional[str] = None
-    workspace_a: str
-    workspace_b: str
-    comparison_types: Sequence[str] = Field(default_factory=lambda: ["config", "variables", "state"])
+    workspace_a_id: str
+    workspace_b_id: str
+    comparison_types: Sequence[str] = Field(default_factory=lambda: ["variables", "state", "config"])
+
+
+class WorkspaceVariableImportPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: Optional[str] = None
+    project_slug: Optional[str] = None
+    file: str
+    extra_sensitive_keys: Sequence[str] | None = None
