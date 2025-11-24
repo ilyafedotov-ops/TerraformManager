@@ -11,6 +11,10 @@ __pycache__/
 # Local environment / secrets
 .env
 
+# Editor settings
+.vscode/
+.kiro/
+
 # Application runtime dirs
 .uploads/
 generated/
