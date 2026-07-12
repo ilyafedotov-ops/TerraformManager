@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable, Sequence
 from uuid import uuid4
 
-from jose import JWTError, jwt
+import jwt
 from pydantic import BaseModel, ValidationError, field_validator
 from sqlalchemy.orm import Session
 
@@ -205,7 +205,7 @@ def decode_token(token: str, expected_type: str = TokenType.ACCESS) -> TokenPayl
     try:
         payload = jwt.decode(token, secret, algorithms=[JWT_ALGORITHM], **decode_kwargs)
         data = TokenPayload.model_validate(payload)
-    except (JWTError, ValidationError) as exc:
+    except (jwt.InvalidTokenError, ValidationError) as exc:
         raise TokenError("Could not validate credentials") from exc
 
     if data.token_type != expected_type:
