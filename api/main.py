@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
 import zipfile
 import uuid
+from contextlib import asynccontextmanager
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -127,8 +129,14 @@ def _startup() -> None:
     init_db(DEFAULT_DB_PATH)
 
 
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    await asyncio.to_thread(_startup)
+    yield
+
+
 def create_app() -> FastAPI:
-    application = FastAPI(title="Terraform Manager API", version=__version__)
+    application = FastAPI(title="Terraform Manager API", version=__version__, lifespan=_lifespan)
     application.include_router(auth_routes.router)
     application.include_router(project_routes.router)
     application.include_router(state_routes.router)
@@ -149,7 +157,6 @@ def create_app() -> FastAPI:
     if trusted_hosts:
         application.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
     application.add_middleware(RequestLoggingMiddleware)
-    application.add_event_handler("startup", _startup)
     return application
 
 
