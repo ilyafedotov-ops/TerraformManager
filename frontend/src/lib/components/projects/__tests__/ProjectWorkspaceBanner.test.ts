@@ -1,33 +1,38 @@
 import { fireEvent, render } from '@testing-library/svelte';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { writable } from 'svelte/store';
+import type { Writable } from 'svelte/store';
 import type { ProjectSummary } from '$lib/api/client';
 
-const stores = vi.hoisted(() => {
-	const projectStore = writable({ projects: [] as ProjectSummary[], activeProjectId: null as string | null });
-	const activeStore = writable<ProjectSummary | null>(null);
-	const setActiveProjectMock = vi.fn();
-	const gotoMock = vi.fn();
-	return { projectStore, activeStore, setActiveProjectMock, gotoMock };
-});
-
-vi.mock('$lib/stores/project', () => ({
-	projectState: {
-		subscribe: stores.projectStore.subscribe,
-		set: stores.projectStore.set,
-		update: stores.projectStore.update,
-		setActiveProject: stores.setActiveProjectMock
-	},
-	activeProject: stores.activeStore
+const { setActiveProjectMock, gotoMock } = vi.hoisted(() => ({
+	setActiveProjectMock: vi.fn(),
+	gotoMock: vi.fn()
 }));
 
+vi.mock('$lib/stores/project', async () => {
+	const { writable } = await import('svelte/store');
+	const projectStore = writable({ projects: [] as ProjectSummary[], activeProjectId: null as string | null });
+	return {
+		projectState: {
+			subscribe: projectStore.subscribe,
+			set: projectStore.set,
+			update: projectStore.update,
+			setActiveProject: setActiveProjectMock
+		},
+		activeProject: writable<ProjectSummary | null>(null)
+	};
+});
+
 vi.mock('$app/navigation', () => ({
-	goto: stores.gotoMock
+	goto: gotoMock
 }));
 
 import ProjectWorkspaceBanner from '../ProjectWorkspaceBanner.svelte';
+import { activeProject, projectState } from '$lib/stores/project';
 
-const { projectStore, activeStore, setActiveProjectMock, gotoMock } = stores;
+type ProjectStoreState = { projects: ProjectSummary[]; activeProjectId: string | null };
+
+const projectStore = projectState as unknown as Writable<ProjectStoreState>;
+const activeStore = activeProject as Writable<ProjectSummary | null>;
 
 const setProjects = (projects: ProjectSummary[], activeProjectId: string | null) => {
 	projectStore.set({ projects, activeProjectId });
