@@ -67,10 +67,10 @@ username=user@example.com&password=secret
 **Response**:
 ```json
 {
-  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "access_token": "<access-token>",
   "token_type": "bearer",
   "expires_in": 1800,
-  "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
+  "refresh_token": "<refresh-token>",
   "refresh_expires_in": 604800,
   "refresh_token_csrf": "abc123..."
 }
@@ -94,7 +94,7 @@ X-Refresh-Token-CSRF: <csrf_token>
 **Response**:
 ```json
 {
-  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "access_token": "<access-token>",
   "token_type": "bearer",
   "expires_in": 1800,
   "refresh_token_csrf": "def456..."

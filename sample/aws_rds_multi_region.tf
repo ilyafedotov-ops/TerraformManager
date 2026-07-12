@@ -54,7 +54,7 @@ resource "aws_db_instance" "primary" {
   performance_insights_kms_key_id = "arn:aws:kms:us-east-1:123456789012:key/pi"
   enabled_cloudwatch_logs_exports = ["postgresql"]
   username = "masteruser"
-  password = "change-me-strong"
+  password = "change-me-strong" # gitleaks:allow -- intentionally insecure scanner fixture
   tags     = local.common_tags
 }
 
